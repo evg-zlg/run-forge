@@ -21,14 +21,17 @@ export interface TaskResult {
 interface CommandResult {
   command: string;
   blocked: boolean;
-  blockReason?: string;
+  blockReason: string | null;
   stdout: string;
   stderr: string;
-  exitCode?: number | string;
-  signal?: string;
-  errorSummary?: string;
+  exitCode: number | null;
+  signal: string | null;
+  errorSummary: string | null;
   executed: boolean;
 }
+
+type CommandResultInput = Omit<CommandResult, "blockReason" | "exitCode" | "signal" | "errorSummary"> &
+  Partial<Pick<CommandResult, "blockReason" | "exitCode" | "signal" | "errorSummary">>;
 
 export async function executeTask(input: {
   spec: RunSpec;
@@ -72,6 +75,9 @@ async function commandCheck(spec: RunSpec, runDir: string, safety: RunSafetyPoli
     blockReason: safety.blockedReasons.join(" "),
     stdout: "",
     stderr: "",
+    exitCode: null,
+    signal: null,
+    errorSummary: null,
     executed: false
   });
   const commandBlock = validateCommandSafety(spec.command);
@@ -81,6 +87,9 @@ async function commandCheck(spec: RunSpec, runDir: string, safety: RunSafetyPoli
     blockReason: commandBlock.reason,
     stdout: "",
     stderr: "",
+    exitCode: null,
+    signal: null,
+    errorSummary: null,
     executed: false
   });
   if (!safety.commandExecutionAllowed) return writeCommandResult(runDir, {
@@ -89,6 +98,9 @@ async function commandCheck(spec: RunSpec, runDir: string, safety: RunSafetyPoli
     blockReason: "Command execution is not allowed by safety policy.",
     stdout: "",
     stderr: "",
+    exitCode: null,
+    signal: null,
+    errorSummary: null,
     executed: false
   });
   try {
@@ -101,14 +113,20 @@ async function commandCheck(spec: RunSpec, runDir: string, safety: RunSafetyPoli
       blockReason: "Secret-like values were detected in command output.",
       stdout: "",
       stderr: "",
-      executed: true
+      exitCode: null,
+      signal: null,
+      errorSummary: null,
+      executed: false
     });
     return writeCommandResult(runDir, {
       command: spec.command,
       blocked: false,
+      blockReason: null,
       stdout: result.stdout,
       stderr: result.stderr,
       exitCode: 0,
+      signal: null,
+      errorSummary: null,
       executed: true
     });
   } catch (error) {
@@ -121,16 +139,21 @@ async function commandCheck(spec: RunSpec, runDir: string, safety: RunSafetyPoli
       blockReason: "Secret-like values were detected in command output.",
       stdout: "",
       stderr: "",
-      executed: true
+      exitCode: null,
+      signal: null,
+      errorSummary: null,
+      executed: false
     });
+    const exitCode = typeof failure.code === "number" ? failure.code : null;
     return writeCommandResult(runDir, {
       command: spec.command,
       blocked: false,
+      blockReason: null,
       stdout: failure.stdout ?? "",
       stderr: failure.stderr ?? "",
-      exitCode: failure.code,
-      signal: failure.signal,
-      errorSummary: failure.message,
+      exitCode,
+      signal: failure.signal ?? null,
+      errorSummary: failure.message ?? "Command execution failed.",
       executed: true
     });
   }
@@ -164,7 +187,8 @@ async function codeProposal(spec: RunSpec, runDir: string): Promise<TaskResult> 
   };
 }
 
-async function writeCommandResult(runDir: string, result: CommandResult): Promise<TaskResult> {
+async function writeCommandResult(runDir: string, input: CommandResultInput): Promise<TaskResult> {
+  const result = normalizeCommandResult(input);
   const resultPath = join(runDir, "command-result.json");
   const outputPath = join(runDir, "command-output.txt");
   await writeJson(resultPath, result);
@@ -180,6 +204,20 @@ async function writeCommandResult(runDir: string, result: CommandResult): Promis
     status: result.exitCode === 0 ? "passed" : "failed",
     artifacts: { commandResult: resultPath, commandOutput: outputPath },
     summary: result.exitCode === 0 ? "Command completed successfully." : "Command exited with a failure."
+  };
+}
+
+function normalizeCommandResult(result: CommandResultInput): CommandResult {
+  return {
+    command: result.command,
+    blocked: result.blocked,
+    blockReason: result.blockReason ?? null,
+    stdout: result.stdout,
+    stderr: result.stderr,
+    exitCode: result.exitCode ?? null,
+    signal: result.signal ?? null,
+    errorSummary: result.errorSummary ?? null,
+    executed: result.executed
   };
 }
 

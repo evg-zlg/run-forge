@@ -60,9 +60,13 @@ describe("runRunForge", () => {
 
     expect(record.status).toBe("blocked");
     expect(record.summary).toContain("trusted-local");
-    const result = JSON.parse(await readFile(record.artifacts.commandResult, "utf8")) as { executed: boolean; blocked: boolean };
+    const result = await readCommandResult(record.artifacts.commandResult);
+    expectCommandResultKeys(result);
     expect(result.executed).toBe(false);
     expect(result.blocked).toBe(true);
+    expect(result.blockReason).toContain("trusted-local");
+    expect(result.exitCode).toBeNull();
+    expect(result.signal).toBeNull();
   });
 
   it("runs command-check in trusted-local", async () => {
@@ -78,9 +82,36 @@ describe("runRunForge", () => {
     expect(record.status).toBe("passed");
     const output = await readFile(record.artifacts.commandOutput, "utf8");
     expect(output).toContain("node --version");
-    const result = JSON.parse(await readFile(record.artifacts.commandResult, "utf8")) as { executed: boolean; exitCode: number };
+    const result = await readCommandResult(record.artifacts.commandResult);
+    expectCommandResultKeys(result);
     expect(result.executed).toBe(true);
+    expect(result.blocked).toBe(false);
+    expect(result.blockReason).toBeNull();
     expect(result.exitCode).toBe(0);
+    expect(result.signal).toBeNull();
+    expect(result.errorSummary).toBeNull();
+  });
+
+  it("writes the full command-result schema for failed commands", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-rails-"));
+    const record = await runRunForge({
+      taskType: "command-check",
+      repoPath: "./fixtures/repos/sample-js",
+      command: "node -e \"process.exit(7)\"",
+      outDir,
+      safetyProfile: "trusted-local"
+    });
+
+    expect(record.status).toBe("failed");
+    const result = await readCommandResult(record.artifacts.commandResult);
+    expectCommandResultKeys(result);
+    expect(result.blocked).toBe(false);
+    expect(result.executed).toBe(true);
+    expect(result.blockReason).toBeNull();
+    expect(result.exitCode).toBe(7);
+    expect(result.signal).toBeNull();
+    expect(result.errorSummary).toEqual(expect.any(String));
+    expect(result.errorSummary?.length).toBeGreaterThan(0);
   });
 
   it.each([
@@ -102,14 +133,13 @@ describe("runRunForge", () => {
 
     expect(record.status).toBe("blocked");
     expect(record.summary).toContain("Blocked dangerous command pattern");
-    const result = JSON.parse(await readFile(record.artifacts.commandResult, "utf8")) as {
-      blocked: boolean;
-      executed: boolean;
-      blockReason: string;
-    };
+    const result = await readCommandResult(record.artifacts.commandResult);
+    expectCommandResultKeys(result);
     expect(result.blocked).toBe(true);
     expect(result.executed).toBe(false);
     expect(result.blockReason).toContain("Blocked dangerous command pattern");
+    expect(result.exitCode).toBeNull();
+    expect(result.signal).toBeNull();
   });
 });
 
@@ -118,4 +148,34 @@ async function expectRequiredArtifacts(artifacts: Record<string, string>): Promi
     expect(artifacts[name]).toBeTruthy();
     await access(artifacts[name]);
   }
+}
+
+type SerializedCommandResult = {
+  command: string;
+  blocked: boolean;
+  blockReason: string | null;
+  stdout: string;
+  stderr: string;
+  exitCode: number | null;
+  signal: string | null;
+  errorSummary: string | null;
+  executed: boolean;
+};
+
+async function readCommandResult(path: string): Promise<SerializedCommandResult> {
+  return JSON.parse(await readFile(path, "utf8")) as SerializedCommandResult;
+}
+
+function expectCommandResultKeys(result: SerializedCommandResult): void {
+  expect(Object.keys(result).sort()).toEqual([
+    "blockReason",
+    "blocked",
+    "command",
+    "errorSummary",
+    "executed",
+    "exitCode",
+    "signal",
+    "stderr",
+    "stdout"
+  ]);
 }
