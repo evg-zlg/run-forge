@@ -1,0 +1,39 @@
+{
+  "name": "runforge",
+  "version": "0.1.0",
+  "description": "Agentic Engineering Harness for safe failure triage.",
+  "type": "module",
+  "bin": {
+    "runforge": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check:structure": "tsx scripts/check-structure.ts",
+    "dev": "tsx src/cli/index.ts",
+    "dev:triage": "tsx src/cli/index.ts triage",
+    "demo:test-failure": "tsx src/cli/index.ts triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/test-failure.log --out ./artifacts/demo-test",
+    "demo:typecheck-failure": "tsx src/cli/index.ts triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/typecheck-failure.log --out ./artifacts/demo-typecheck",
+    "demo:env-config-failure": "tsx src/cli/index.ts triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/env-config-failure.log --out ./artifacts/demo-env-config",
+    "test": "pnpm check:structure && vitest run",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "keywords": [
+    "agentic",
+    "triage",
+    "ci",
+    "harness"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^14.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.15"
+  }
+}

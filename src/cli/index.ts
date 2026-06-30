@@ -1,0 +1,18 @@
+#!/usr/bin/env node
+import { Command } from "commander";
+import { doctorCommand } from "./commands/doctor.js";
+import { initCommand } from "./commands/init.js";
+import { triageCommand } from "./commands/triage.js";
+
+const program = new Command();
+
+program
+  .name("runforge")
+  .description("RunForge Agentic Engineering Harness")
+  .version("0.1.0");
+
+program.addCommand(doctorCommand());
+program.addCommand(initCommand());
+program.addCommand(triageCommand());
+
+await program.parseAsync();

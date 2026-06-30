@@ -1,0 +1,13 @@
+{
+  "caseId": "",
+  "categoryExpected": "",
+  "categoryActual": "",
+  "scores": {
+    "rootCause": 0,
+    "evidence": 0,
+    "safeNextCommand": 0,
+    "honestyCheckedNotChecked": 0,
+    "security": "pass"
+  },
+  "notes": ""
+}
