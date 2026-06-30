@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "RF-REAL-005",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "class": "typecheck_build_failure",
+  "sourceKind": "preview_deploy_report",
+  "sourcePath": "docs/dev-workspace/task-briefs/ai_center__ocr-openrouter-develop.md",
+  "sourceReference": "Preview deploy pr-649 first run",
+  "sanitization": {
+    "secretsRemoved": true,
+    "rawTokensRemoved": true,
+    "customerDataRemoved": true,
+    "notes": "Kept the deploy failure cause and retry outcome; preview URL was public non-production evidence."
+  },
+  "command": "preview deploy build step",
+  "observedFailure": {
+    "summary": "Preview build failed because shared dependencies were not installed before build, leaving tsc unavailable.",
+    "excerpt": [
+      "Preview deploy pr-649 first run failed in canonical preview gateway",
+      "shared dependencies were not installed before build",
+      "tsc: not found"
+    ],
+    "exitCode": 127
+  },
+  "expectedRunForgeClassification": {
+    "primary": "typecheck_build_failure",
+    "secondary": ["preview", "dependency_install", "missing_binary"],
+    "retryable": true,
+    "likelyOwner": "ci_cd"
+  }
+}

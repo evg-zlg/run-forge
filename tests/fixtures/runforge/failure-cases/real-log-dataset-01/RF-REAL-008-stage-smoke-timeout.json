@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "RF-REAL-008",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "class": "infra_timeout_failure",
+  "sourceKind": "github_actions_report",
+  "sourcePath": "docs/dev-workspace/task-briefs/stage_prod_deploy__stage-smoke-prod-rollout.md",
+  "sourceReference": "Stage smoke run 26779719358",
+  "sanitization": {
+    "secretsRemoved": true,
+    "rawTokensRemoved": true,
+    "customerDataRemoved": true,
+    "notes": "Kept only timeout duration and suite-level behavior; no screenshots or tenant data."
+  },
+  "command": "stage smoke workflow",
+  "observedFailure": {
+    "summary": "Stage smoke was cancelled after the 15 minute job timeout even though critical flows had already passed.",
+    "excerpt": [
+      "Stage smoke run 26779719358 was cancelled after the 15 minute job timeout",
+      "shared stage smoke gate timed out after critical release flows passed",
+      "repeated unrelated suite timeouts were observed"
+    ],
+    "exitCode": 124
+  },
+  "expectedRunForgeClassification": {
+    "primary": "infra_timeout_failure",
+    "secondary": ["stage", "smoke", "timeout", "overscoped_suite"],
+    "retryable": true,
+    "likelyOwner": "qa_infra"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "caseId": "RF-REAL-005",
+  "title": "Preview build failed because shared dependencies were not installed before build, leaving tsc unavailable.",
+  "categoryExpected": "typecheck_build_failure",
+  "categoryActual": "typecheck_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-005",
+  "sourceKind": "preview_deploy_report",
+  "sourcePath": "docs/dev-workspace/task-briefs/ai_center__ocr-openrouter-develop.md",
+  "sourceReference": "Preview deploy pr-649 first run",
+  "sanitized": true,
+  "expectedSecondary": [
+    "preview",
+    "dependency_install",
+    "missing_binary"
+  ],
+  "retryable": true,
+  "likelyOwner": "ci_cd",
+  "classificationMatched": true,
+  "scores": {
+    "rootCause": 3,
+    "evidence": 3,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}

@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "id": "RF-REAL-010",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "class": "real_failure_other",
+  "sourceKind": "github_actions_log_excerpt",
+  "sourcePath": "reports/agent-governance/AGENT-RULES-REVIEW-20260618/evidence/ci/pr-1742-mandatory-cross-review-run-27777917600-failed-log.txt",
+  "sourceReference": "PR #1742, run 27777917600, Mandatory agent cross-review",
+  "sanitization": {
+    "secretsRemoved": true,
+    "rawTokensRemoved": true,
+    "customerDataRemoved": true,
+    "notes": "Saved log excerpt contains only preflight section names and command output; ANSI/control noise omitted from this fixture."
+  },
+  "command": "npm run agent:task-preflight -- --github-event <event.json> --require-agent-cross-review",
+  "observedFailure": {
+    "summary": "PR evidence gate failed because required owner/report sections were missing from the PR body.",
+    "excerpt": [
+      "agent-task-preflight: failed",
+      "missing non-empty Context pack effectiveness section",
+      "missing required STARTUP_CONTEXT_BUDGET block",
+      "missing non-empty Cross-review / Agent cross-review section",
+      "missing required AGENTOPS_RUN_SUMMARY block"
+    ],
+    "exitCode": 1
+  },
+  "expectedRunForgeClassification": {
+    "primary": "real_failure_other",
+    "secondary": ["process_gate", "pr_body", "missing_evidence"],
+    "retryable": false,
+    "likelyOwner": "agent_workflow"
+  }
+}

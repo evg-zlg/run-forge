@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "RF-REAL-001",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "class": "test_failure",
+  "sourceKind": "github_actions_report",
+  "sourcePath": "reports/acceptance/meas-c10-garderob/ci-failure-analysis.md",
+  "sourceReference": "PR #1467, run 27697000126, build job",
+  "sanitization": {
+    "secretsRemoved": true,
+    "rawTokensRemoved": true,
+    "customerDataRemoved": true,
+    "notes": "Kept only command, file names, assertion summaries, and short expected strings from the saved report."
+  },
+  "command": "npm run test:unit --prefix frontend",
+  "observedFailure": {
+    "summary": "Frontend unit guard failed two assertions after mobile runtime source moved or changed.",
+    "excerpt": [
+      "components/workspace-runtime/mobile/meas-c10-prod-blockers.spec.ts failed 2 assertions",
+      "expected measurer-mobile-planner.ts to contain return Math.max(0, Math.min(dots, day.visitsCount));",
+      "expected EmpCabinetRuntimeMobileView.tsx to contain the blue header class"
+    ],
+    "exitCode": 1
+  },
+  "expectedRunForgeClassification": {
+    "primary": "test_failure",
+    "secondary": ["frontend", "stale_guard", "assertion_mismatch"],
+    "retryable": false,
+    "likelyOwner": "frontend"
+  }
+}

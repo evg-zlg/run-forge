@@ -1,0 +1,30 @@
+{
+  "caseId": "RF-REAL-002",
+  "title": "Read-only schedule-stack guard expected a source contract string that was absent on the current head.",
+  "categoryExpected": "test_failure",
+  "categoryActual": "test_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-002",
+  "sourceKind": "github_actions_report",
+  "sourcePath": "reports/orchestration-runs/20260617-meas-c10-design-fix-pack-1/ci-failure-9ad23322.md",
+  "sourceReference": "PR #1467, run 27702131376, Frontend unit tests step",
+  "sanitized": true,
+  "expectedSecondary": [
+    "frontend",
+    "source_contract",
+    "assertion_mismatch"
+  ],
+  "retryable": false,
+  "likelyOwner": "frontend",
+  "classificationMatched": true,
+  "scores": {
+    "rootCause": 3,
+    "evidence": 3,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}

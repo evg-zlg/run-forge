@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "RF-REAL-004",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "class": "typecheck_build_failure",
+  "sourceKind": "local_report",
+  "sourcePath": "reports/owner-context/warehouse-mvp-pr-ready-package-20260626.md",
+  "sourceReference": "Warehouse MVP PR-ready package, Typecheck Caveat",
+  "sanitization": {
+    "secretsRemoved": true,
+    "rawTokensRemoved": true,
+    "customerDataRemoved": true,
+    "notes": "Only package name, command, and missing binary signal retained."
+  },
+  "command": "npm run typecheck",
+  "observedFailure": {
+    "summary": "Typecheck failed before TypeScript analysis because the shared workspace lacked the local tsc binary.",
+    "excerpt": [
+      "> @smartsql/shared@0.0.0 build",
+      "> tsc -p tsconfig.json",
+      "sh: tsc: command not found"
+    ],
+    "exitCode": 127
+  },
+  "expectedRunForgeClassification": {
+    "primary": "typecheck_build_failure",
+    "secondary": ["dependency_install", "missing_binary", "workspace_setup"],
+    "retryable": true,
+    "likelyOwner": "repo_tooling"
+  }
+}

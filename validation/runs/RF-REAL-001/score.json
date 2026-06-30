@@ -1,0 +1,30 @@
+{
+  "caseId": "RF-REAL-001",
+  "title": "Frontend unit guard failed two assertions after mobile runtime source moved or changed.",
+  "categoryExpected": "test_failure",
+  "categoryActual": "test_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-001",
+  "sourceKind": "github_actions_report",
+  "sourcePath": "reports/acceptance/meas-c10-garderob/ci-failure-analysis.md",
+  "sourceReference": "PR #1467, run 27697000126, build job",
+  "sanitized": true,
+  "expectedSecondary": [
+    "frontend",
+    "stale_guard",
+    "assertion_mismatch"
+  ],
+  "retryable": false,
+  "likelyOwner": "frontend",
+  "classificationMatched": true,
+  "scores": {
+    "rootCause": 3,
+    "evidence": 3,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}

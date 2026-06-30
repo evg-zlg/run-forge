@@ -1,0 +1,31 @@
+{
+  "caseId": "RF-REAL-009",
+  "title": "Preview deploy built the app and passed local health, then failed because the deploy user lacked passwordless sudo for nginx config install/link operations.",
+  "categoryExpected": "real_failure_other",
+  "categoryActual": "unknown_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-009",
+  "sourceKind": "github_actions_report",
+  "sourcePath": "docs/dev-workspace/task-briefs/platform_deploy__preview-pr-number-automation.md",
+  "sourceReference": "Real preview deploy attempt, run 25994821014",
+  "sanitized": true,
+  "expectedSecondary": [
+    "permission",
+    "nginx",
+    "preview_deploy",
+    "sudoers"
+  ],
+  "retryable": false,
+  "likelyOwner": "platform_ops",
+  "classificationMatched": false,
+  "scores": {
+    "rootCause": 1,
+    "evidence": 3,
+    "safeNextCommand": 1,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": false,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}

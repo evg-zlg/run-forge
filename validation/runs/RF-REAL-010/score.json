@@ -1,0 +1,30 @@
+{
+  "caseId": "RF-REAL-010",
+  "title": "PR evidence gate failed because required owner/report sections were missing from the PR body.",
+  "categoryExpected": "real_failure_other",
+  "categoryActual": "unknown_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-010",
+  "sourceKind": "github_actions_log_excerpt",
+  "sourcePath": "reports/agent-governance/AGENT-RULES-REVIEW-20260618/evidence/ci/pr-1742-mandatory-cross-review-run-27777917600-failed-log.txt",
+  "sourceReference": "PR #1742, run 27777917600, Mandatory agent cross-review",
+  "sanitized": true,
+  "expectedSecondary": [
+    "process_gate",
+    "pr_body",
+    "missing_evidence"
+  ],
+  "retryable": false,
+  "likelyOwner": "agent_workflow",
+  "classificationMatched": false,
+  "scores": {
+    "rootCause": 1,
+    "evidence": 3,
+    "safeNextCommand": 1,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": false,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "RF-REAL-003",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "class": "test_failure",
+  "sourceKind": "local_report",
+  "sourcePath": "docs/CLIENT_SETUP_JOURNEY_FINAL_REPORT.md",
+  "sourceReference": "Client setup journey final report, section 8",
+  "sanitization": {
+    "secretsRemoved": true,
+    "rawTokensRemoved": true,
+    "customerDataRemoved": true,
+    "notes": "Kept only the repeated command result and the generic Prisma/Jest runtime failure summary."
+  },
+  "command": "npm run test:unit --prefix alpha/backend",
+  "observedFailure": {
+    "summary": "First local backend unit run showed two failed suites due to Prisma loading through the Jest runtime; immediate rerun passed.",
+    "excerpt": [
+      "first run in the same session showed 2 failed suites",
+      "error loading Prisma through Jest runtime",
+      "rerun result: 65/65 suites passed"
+    ],
+    "exitCode": 1
+  },
+  "expectedRunForgeClassification": {
+    "primary": "test_failure",
+    "secondary": ["backend", "jest", "prisma_runtime", "flaky_or_environmental"],
+    "retryable": true,
+    "likelyOwner": "backend"
+  }
+}

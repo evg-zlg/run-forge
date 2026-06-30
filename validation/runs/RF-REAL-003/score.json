@@ -1,0 +1,31 @@
+{
+  "caseId": "RF-REAL-003",
+  "title": "First local backend unit run showed two failed suites due to Prisma loading through the Jest runtime; immediate rerun passed.",
+  "categoryExpected": "test_failure",
+  "categoryActual": "test_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-003",
+  "sourceKind": "local_report",
+  "sourcePath": "docs/CLIENT_SETUP_JOURNEY_FINAL_REPORT.md",
+  "sourceReference": "Client setup journey final report, section 8",
+  "sanitized": true,
+  "expectedSecondary": [
+    "backend",
+    "jest",
+    "prisma_runtime",
+    "flaky_or_environmental"
+  ],
+  "retryable": true,
+  "likelyOwner": "backend",
+  "classificationMatched": true,
+  "scores": {
+    "rootCause": 3,
+    "evidence": 3,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}

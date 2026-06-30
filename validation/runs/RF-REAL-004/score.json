@@ -1,0 +1,30 @@
+{
+  "caseId": "RF-REAL-004",
+  "title": "Typecheck failed before TypeScript analysis because the shared workspace lacked the local tsc binary.",
+  "categoryExpected": "typecheck_build_failure",
+  "categoryActual": "typecheck_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-004",
+  "sourceKind": "local_report",
+  "sourcePath": "reports/owner-context/warehouse-mvp-pr-ready-package-20260626.md",
+  "sourceReference": "Warehouse MVP PR-ready package, Typecheck Caveat",
+  "sanitized": true,
+  "expectedSecondary": [
+    "dependency_install",
+    "missing_binary",
+    "workspace_setup"
+  ],
+  "retryable": true,
+  "likelyOwner": "repo_tooling",
+  "classificationMatched": true,
+  "scores": {
+    "rootCause": 3,
+    "evidence": 3,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}

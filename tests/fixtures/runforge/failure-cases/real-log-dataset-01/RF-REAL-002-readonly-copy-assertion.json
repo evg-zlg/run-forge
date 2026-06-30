@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "RF-REAL-002",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "class": "test_failure",
+  "sourceKind": "github_actions_report",
+  "sourcePath": "reports/orchestration-runs/20260617-meas-c10-design-fix-pack-1/ci-failure-9ad23322.md",
+  "sourceReference": "PR #1467, run 27702131376, Frontend unit tests step",
+  "sanitization": {
+    "secretsRemoved": true,
+    "rawTokensRemoved": true,
+    "customerDataRemoved": true,
+    "notes": "Saved report already contains a bounded failure excerpt; no raw workflow log or tenant payload included."
+  },
+  "command": "npm run test:unit --prefix frontend",
+  "observedFailure": {
+    "summary": "Read-only schedule-stack guard expected a source contract string that was absent on the current head.",
+    "excerpt": [
+      "MEAS C10 prod blockers > keeps read-only task sheets from opening scheduling time picker callbacks",
+      "expected source to contain readOnlyDescription",
+      "components/workspace-runtime/mobile/meas-c10-prod-blockers.spec.ts:41"
+    ],
+    "exitCode": 1
+  },
+  "expectedRunForgeClassification": {
+    "primary": "test_failure",
+    "secondary": ["frontend", "source_contract", "assertion_mismatch"],
+    "retryable": false,
+    "likelyOwner": "frontend"
+  }
+}

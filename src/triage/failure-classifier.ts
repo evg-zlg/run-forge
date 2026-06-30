@@ -1,7 +1,7 @@
 import type { FailureClassification, FailureCategory } from "../core/types.js";
 
 const patterns: Array<{ category: FailureCategory; confidence: "medium" | "high"; regex: RegExp }> = [
-  { category: "typecheck_failure", confidence: "high", regex: /\bTS\d{4}\b|Type error|tsc/i },
+  { category: "typecheck_failure", confidence: "high", regex: /\bTS\d{4}\b|Type error|\btsc\b/i },
   { category: "test_failure", confidence: "high", regex: /\bFAIL\b|AssertionError|expected|received|vitest|jest/i },
   { category: "dependency_failure", confidence: "medium", regex: /ERR_PNPM|npm ERR|lockfile|peer dependency/i },
   { category: "env_config_failure", confidence: "medium", regex: /Missing environment variable|\.env|ENOENT|Cannot find module|not found/i },
@@ -10,9 +10,10 @@ const patterns: Array<{ category: FailureCategory; confidence: "medium" | "high"
 ];
 
 export function classifyFailure(logText: string): FailureClassification {
+  const classifiableText = logText.split(/\nExpected classification:/i)[0];
   const signals: string[] = [];
   for (const pattern of patterns) {
-    const match = logText.match(pattern.regex);
+    const match = classifiableText.match(pattern.regex);
     if (match) {
       signals.push(match[0]);
       return { category: pattern.category, confidence: pattern.confidence, signals };

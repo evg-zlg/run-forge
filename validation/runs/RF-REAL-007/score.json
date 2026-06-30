@@ -1,0 +1,30 @@
+{
+  "caseId": "RF-REAL-007",
+  "title": "GitHub-hosted Actions were blocked by an organization billing/payment gate, forcing delivery proof to move to Buildkite lanes.",
+  "categoryExpected": "env_config_dependency_failure",
+  "categoryActual": "unknown_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-007",
+  "sourceKind": "buildkite_migration_report",
+  "sourcePath": "docs/ci/buildkite-migration-analysis-20260629.md",
+  "sourceReference": "Buildkite migration analysis after GitHub Actions billing block",
+  "sanitized": true,
+  "expectedSecondary": [
+    "ci_provider",
+    "billing_gate",
+    "external_dependency"
+  ],
+  "retryable": false,
+  "likelyOwner": "platform_ops",
+  "classificationMatched": false,
+  "scores": {
+    "rootCause": 0,
+    "evidence": 3,
+    "safeNextCommand": 1,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": false,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}

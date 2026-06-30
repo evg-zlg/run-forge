@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "RF-REAL-007",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "class": "env_config_dependency_failure",
+  "sourceKind": "buildkite_migration_report",
+  "sourcePath": "docs/ci/buildkite-migration-analysis-20260629.md",
+  "sourceReference": "Buildkite migration analysis after GitHub Actions billing block",
+  "sanitization": {
+    "secretsRemoved": true,
+    "rawTokensRemoved": true,
+    "customerDataRemoved": true,
+    "notes": "Billing/payment-gate status only; no account identifiers, payment data, or tokens included."
+  },
+  "command": "ordinary delivery proof via GitHub-hosted Actions",
+  "observedFailure": {
+    "summary": "GitHub-hosted Actions were blocked by an organization billing/payment gate, forcing delivery proof to move to Buildkite lanes.",
+    "excerpt": [
+      "current GitHub Actions outage is billing/payment-gate related",
+      "not a code or workflow syntax failure",
+      "Buildkite should become the primary delivery rail"
+    ],
+    "exitCode": null
+  },
+  "expectedRunForgeClassification": {
+    "primary": "env_config_dependency_failure",
+    "secondary": ["ci_provider", "billing_gate", "external_dependency"],
+    "retryable": false,
+    "likelyOwner": "platform_ops"
+  }
+}

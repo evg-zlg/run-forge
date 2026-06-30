@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "id": "RF-REAL-006",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "class": "env_config_dependency_failure",
+  "sourceKind": "github_actions_report",
+  "sourcePath": "docs/dev-workspace/task-briefs/platform_deploy__preview-pr-number-automation.md",
+  "sourceReference": "Real preview deploy attempt, run 25994451721",
+  "sanitization": {
+    "secretsRemoved": true,
+    "rawTokensRemoved": true,
+    "customerDataRemoved": true,
+    "notes": "Template placeholder names are not secrets; no actual database URL included."
+  },
+  "command": "preview deploy gateway",
+  "observedFailure": {
+    "summary": "Preview deploy failed because the remote DB URL template used the wrong placeholder token.",
+    "excerpt": [
+      "Real deploy attempt failed because remote template used __DB__, not **DB**",
+      "Fix changed only the placeholder form in the preview env template",
+      "Secret values were not printed"
+    ],
+    "exitCode": 1
+  },
+  "expectedRunForgeClassification": {
+    "primary": "env_config_dependency_failure",
+    "secondary": ["preview", "config_template", "database_url_template"],
+    "retryable": false,
+    "likelyOwner": "ci_cd"
+  }
+}

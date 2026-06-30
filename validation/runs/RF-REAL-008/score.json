@@ -1,0 +1,31 @@
+{
+  "caseId": "RF-REAL-008",
+  "title": "Stage smoke was cancelled after the 15 minute job timeout even though critical flows had already passed.",
+  "categoryExpected": "infra_timeout_failure",
+  "categoryActual": "infra_timeout_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-008",
+  "sourceKind": "github_actions_report",
+  "sourcePath": "docs/dev-workspace/task-briefs/stage_prod_deploy__stage-smoke-prod-rollout.md",
+  "sourceReference": "Stage smoke run 26779719358",
+  "sanitized": true,
+  "expectedSecondary": [
+    "stage",
+    "smoke",
+    "timeout",
+    "overscoped_suite"
+  ],
+  "retryable": true,
+  "likelyOwner": "qa_infra",
+  "classificationMatched": true,
+  "scores": {
+    "rootCause": 3,
+    "evidence": 3,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}

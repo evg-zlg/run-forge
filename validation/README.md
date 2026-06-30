@@ -2,6 +2,10 @@
 
 Add sanitized failure case folders under `validation/cases/`.
 
+Structured real-log datasets can also be added under `tests/fixtures/runforge/failure-cases/<dataset>/`.
+`RUNFORGE-REAL-LOG-DATASET-01` is read directly from `tests/fixtures/runforge/failure-cases/real-log-dataset-01/*.json`;
+the validation runner renders sanitized deterministic input logs in `validation/runs/RF-REAL-*/input.log` and preserves the original source metadata in each `score.json`.
+
 ## Case format
 
 Each case must use this structure:

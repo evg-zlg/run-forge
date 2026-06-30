@@ -1,0 +1,30 @@
+{
+  "caseId": "RF-REAL-006",
+  "title": "Preview deploy failed because the remote DB URL template used the wrong placeholder token.",
+  "categoryExpected": "env_config_dependency_failure",
+  "categoryActual": "unknown_failure",
+  "source": "real",
+  "dataset": "RUNFORGE-REAL-LOG-DATASET-01",
+  "originalCaseId": "RF-REAL-006",
+  "sourceKind": "github_actions_report",
+  "sourcePath": "docs/dev-workspace/task-briefs/platform_deploy__preview-pr-number-automation.md",
+  "sourceReference": "Real preview deploy attempt, run 25994451721",
+  "sanitized": true,
+  "expectedSecondary": [
+    "preview",
+    "config_template",
+    "database_url_template"
+  ],
+  "retryable": false,
+  "likelyOwner": "ci_cd",
+  "classificationMatched": false,
+  "scores": {
+    "rootCause": 0,
+    "evidence": 3,
+    "safeNextCommand": 1,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": false,
+  "notes": "Current score is deterministic/heuristic and should be reviewed manually before claiming product validation."
+}
