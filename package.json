@@ -17,6 +17,11 @@
     "demo:test-failure": "tsx src/cli/index.ts triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/test-failure.log --out ./artifacts/demo-test",
     "demo:typecheck-failure": "tsx src/cli/index.ts triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/typecheck-failure.log --out ./artifacts/demo-typecheck",
     "demo:env-config-failure": "tsx src/cli/index.ts triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/env-config-failure.log --out ./artifacts/demo-env-config",
+    "demo:run-failure-triage": "tsx src/cli/index.ts run --task failure-triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/typecheck-failure.log --out ./artifacts/runs/demo-failure-triage",
+    "demo:run-command-check": "tsx src/cli/index.ts run --task command-check --repo ./fixtures/repos/sample-js --command \"node --version\" --safety-profile trusted-local --out ./artifacts/runs/demo-command-check",
+    "demo:run-repo-research": "tsx src/cli/index.ts run --task repo-research --repo ./fixtures/repos/sample-js --goal \"Map package scripts\" --out ./artifacts/runs/demo-repo-research",
+    "demo:run-context-pack": "tsx src/cli/index.ts run --task context-pack --repo ./fixtures/repos/sample-js --goal \"Prepare local context\" --log ./fixtures/logs/typecheck-failure.log --out ./artifacts/runs/demo-context-pack",
+    "demo:run-code-proposal": "tsx src/cli/index.ts run --task code-proposal --repo ./fixtures/repos/sample-js --goal \"Propose a calculator fix\" --out ./artifacts/runs/demo-code-proposal",
     "test": "pnpm check:structure && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "validation:run": "pnpm build && node dist/scripts/run-validation.js"
