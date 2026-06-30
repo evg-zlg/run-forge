@@ -1,13 +1,41 @@
 # Validation Summary
 
 - Total cases: 5
+- Source mix: real: 0, fixture: 3, placeholder: 2
 - Case categories: typecheck_failure: 1, test_failure: 1, env_config_failure: 1, dependency_failure: 1, build_failure: 1
-- Root cause score average: 2.80
-- Evidence score average: 2.60
-- Safe command score average: 2.40
+- Validated coverage, excluding placeholders: 3/5
+
+## Metrics By Source
+
+### Real logs
+
+- Cases: 0
+- Root cause score average: 0.00
+- Evidence score average: 0.00
+- Safe command score average: 0.00
+- Honesty score average: 0.00
+- Security pass/fail count: 0 pass / 0 fail
+- Useful report rate: 0/0
+
+### Fixture logs
+
+- Cases: 3
+- Root cause score average: 3.00
+- Evidence score average: 2.67
+- Safe command score average: 2.33
 - Honesty score average: 3.00
-- Security pass/fail count: 5 pass / 0 fail
-- Useful report rate: 5/5 (100%)
+- Security pass/fail count: 3 pass / 0 fail
+- Useful report rate: 3/3 (100%)
+
+### Placeholder cases
+
+- Cases: 2
+- Root cause score average: 2.50
+- Evidence score average: 2.50
+- Safe command score average: 2.50
+- Honesty score average: 3.00
+- Security pass/fail count: 2 pass / 0 fail
+- Useful report rate: 2/2 (100%)
 
 ## Missing Real-log Gaps
 

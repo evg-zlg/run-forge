@@ -36,8 +36,10 @@ runforge triage --repo . --log ./failure.log --out ./runforge-artifacts/case-001
 pnpm dev -- doctor
 pnpm dev -- init --safe
 pnpm dev:triage -- --repo ./fixtures/repos/sample-js --log ./fixtures/logs/typecheck-failure.log --out ./artifacts/demo-typecheck
+pnpm check:governance
 pnpm check:structure
 pnpm test
+pnpm dogfood
 ```
 
 The default provider is deterministic and local. `openai-compatible` is only a skeleton and is never required for tests.
@@ -46,4 +48,4 @@ The default provider is deterministic and local. `openai-compatible` is only a s
 
 MVP triage is read-only against the target repository. RunForge writes only to the requested artifact directory and does not execute repository commands.
 
-See [docs/security-model.md](docs/security-model.md), [docs/report-contract.md](docs/report-contract.md), and [docs/ai-native-codebase.md](docs/ai-native-codebase.md).
+See [docs/security-model.md](docs/security-model.md), [docs/report-contract.md](docs/report-contract.md), [docs/ai-native-codebase.md](docs/ai-native-codebase.md), [docs/engineering-rules.md](docs/engineering-rules.md), and [docs/dogfooding.md](docs/dogfooding.md).

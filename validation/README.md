@@ -14,7 +14,7 @@ validation/cases/case-XXX/
   expected-next-command.md
 ```
 
-`metadata.json` stores the expected category, repo fixture path, source type, and initial scores. Use `"source": "fixture"` when the log came from an available local fixture or artifact. Use `"source": "placeholder"` only when no sanitized real log is available yet, and fill `placeholderReason`.
+`metadata.json` stores the expected category, repo fixture path, source type, and initial scores. Use `"source": "real"` for sanitized logs from real CI/debug failures. Use `"source": "fixture"` when the log came from an available local fixture or artifact. Use `"source": "placeholder"` only when no sanitized real log is available yet, and fill `placeholderReason`.
 
 For each case:
 
@@ -35,6 +35,8 @@ validation/runs/case-XXX/
 ```
 
 It also writes `validation/validation-summary.md`.
+
+The summary separates `real`, `fixture`, and `placeholder` metrics. Placeholder cases are useful for contract coverage, but they must not be counted as real validation coverage.
 
 ## Rubric
 

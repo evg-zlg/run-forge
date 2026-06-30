@@ -16,7 +16,7 @@ type Metadata = {
   title: string;
   categoryExpected: string;
   repoPath: string;
-  source: "fixture" | "placeholder";
+  source: "real" | "fixture" | "placeholder";
   placeholderReason?: string;
   initialScore: Scores;
   usefulReport: boolean;
@@ -82,25 +82,28 @@ function makeScore(metadata: Metadata, categoryActual: string, secretScan: strin
 }
 
 function renderSummary(scores: Array<ReturnType<typeof makeScore>>): string {
-  const securityPass = scores.filter((score) => score.scores.security === "pass").length;
-  const usefulReports = scores.filter((score) => score.usefulReport).length;
   const categoryCounts = countBy(scores.map((score) => score.categoryActual));
   const placeholders = scores.filter((score) => score.source === "placeholder");
+  const real = scores.filter((score) => score.source === "real");
+  const fixtures = scores.filter((score) => score.source === "fixture");
+  const nonPlaceholders = scores.filter((score) => score.source !== "placeholder");
 
   return `# Validation Summary
 
 - Total cases: ${scores.length}
+- Source mix: real: ${real.length}, fixture: ${fixtures.length}, placeholder: ${placeholders.length}
 - Case categories: ${Object.entries(categoryCounts)
     .map(([key, value]) => `${key}: ${value}`)
     .join(", ") || "none"}
-- Root cause score average: ${avg(scores.map((score) => score.scores.rootCause))}
-- Evidence score average: ${avg(scores.map((score) => score.scores.evidence))}
-- Safe command score average: ${avg(scores.map((score) => score.scores.safeNextCommand))}
-- Honesty score average: ${avg(scores.map((score) => score.scores.honestyCheckedNotChecked))}
-- Security pass/fail count: ${securityPass} pass / ${scores.length - securityPass} fail
-- Useful report rate: ${
-    scores.length ? `${usefulReports}/${scores.length} (${Math.round((usefulReports / scores.length) * 100)}%)` : "0/0"
-  }
+- Validated coverage, excluding placeholders: ${nonPlaceholders.length}/${scores.length}
+
+## Metrics By Source
+
+${renderSourceMetrics("Real logs", real)}
+
+${renderSourceMetrics("Fixture logs", fixtures)}
+
+${renderSourceMetrics("Placeholder cases", placeholders)}
 
 ## Missing Real-log Gaps
 
@@ -110,6 +113,23 @@ ${placeholders.length ? placeholders.map((score) => `- ${score.caseId}: ${score.
 
 ${scores.map((score) => `- ${score.caseId}: ${score.title} (${score.categoryActual}, ${score.source})`).join("\n")}
 `;
+}
+
+function renderSourceMetrics(label: string, group: Array<ReturnType<typeof makeScore>>): string {
+  const securityPass = group.filter((score) => score.scores.security === "pass").length;
+  const usefulReports = group.filter((score) => score.usefulReport).length;
+
+  return `### ${label}
+
+- Cases: ${group.length}
+- Root cause score average: ${avg(group.map((score) => score.scores.rootCause))}
+- Evidence score average: ${avg(group.map((score) => score.scores.evidence))}
+- Safe command score average: ${avg(group.map((score) => score.scores.safeNextCommand))}
+- Honesty score average: ${avg(group.map((score) => score.scores.honestyCheckedNotChecked))}
+- Security pass/fail count: ${securityPass} pass / ${group.length - securityPass} fail
+- Useful report rate: ${
+    group.length ? `${usefulReports}/${group.length} (${Math.round((usefulReports / group.length) * 100)}%)` : "0/0"
+  }`;
 }
 
 function avg(values: number[]): string {
