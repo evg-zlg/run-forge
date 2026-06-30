@@ -9,6 +9,35 @@ export type FailureCategory =
 
 export type Confidence = "low" | "medium" | "high";
 
+export type TaskType =
+  | "failure-triage"
+  | "command-check"
+  | "repo-research"
+  | "context-pack"
+  | "code-proposal";
+
+export interface RunSpec {
+  taskType: TaskType;
+  repoPath: string;
+  goal?: string;
+  logPath?: string;
+  command?: string;
+  outDir: string;
+  safetyProfile: "safe-local" | "trusted-local";
+  applyMode?: "none" | "patch-artifact" | "isolated-worktree";
+}
+
+export interface RunRecord {
+  runId: string;
+  taskType: TaskType;
+  startedAt: string;
+  completedAt?: string;
+  status: "passed" | "failed" | "blocked";
+  artifacts: Record<string, string>;
+  safety: unknown;
+  summary: string;
+}
+
 export interface TriageOptions {
   repoPath: string;
   logPath: string;
