@@ -5,12 +5,13 @@ import { join } from "node:path";
 const requiredDocs = [
   "docs/engineering-rules.md",
   "docs/dogfooding.md",
+  "docs/git-worktree-rules.md",
   "docs/report-contract.md",
   "docs/security-model.md",
   "validation/README.md"
 ];
 
-const requiredScripts = ["check:governance", "check:structure", "validation:run", "dogfood"];
+const requiredScripts = ["check:git-safety", "check:governance", "check:structure", "validation:run", "dogfood"];
 const validationSources = new Set(["real", "fixture", "placeholder"]);
 const scopeRoots = ["src", "scripts"];
 const scopeExclusions = new Set(["scripts/check-governance.mjs"]);

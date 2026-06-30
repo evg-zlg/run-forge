@@ -26,6 +26,11 @@ RunForge should obey the same discipline it asks of agentic engineering work: lo
    - `pnpm dogfood` runs governance, structure, typecheck, tests, build, validation, and the three fixture demos.
    - This is the default local command for checking RunForge against its own rules.
 
+6. Keep agent git work isolated and inspectable.
+   - One task gets one branch/worktree; non-trivial agent work does not happen directly on `main`.
+   - Agents inspect branch, status, and base commit before work, stage explicit paths, avoid destructive git operations without approval, and report status, diff summary, checks, and commit hash at handoff.
+   - Documented in `docs/git-worktree-rules.md` and checked lightly by `pnpm check:git-safety`.
+
 ## Rule backlog
 
 Rules that matter but are not fully enforced yet should become one of:

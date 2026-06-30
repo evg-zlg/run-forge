@@ -8,7 +8,8 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "check:governance": "node scripts/check-governance.mjs",
+    "check:git-safety": "node scripts/check-git-safety.mjs",
+    "check:governance": "node scripts/check-governance.mjs && pnpm check:git-safety",
     "check:structure": "node scripts/check-structure.mjs",
     "dev": "tsx src/cli/index.ts",
     "dev:triage": "tsx src/cli/index.ts triage",
