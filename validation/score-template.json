@@ -9,5 +9,6 @@
     "honestyCheckedNotChecked": 0,
     "security": "pass"
   },
+  "usefulReport": false,
   "notes": ""
 }

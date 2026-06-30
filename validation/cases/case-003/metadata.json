@@ -1,0 +1,15 @@
+{
+  "caseId": "case-003",
+  "title": "Missing DATABASE_URL configuration",
+  "categoryExpected": "env_config_failure",
+  "repoPath": "./fixtures/repos/sample-js",
+  "source": "fixture",
+  "initialScore": {
+    "rootCause": 3,
+    "evidence": 2,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true
+}

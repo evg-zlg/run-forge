@@ -1,0 +1,10 @@
+> sample-js@0.0.0 build
+> vite build
+
+vite v6.0.0 building for production...
+error during build:
+RollupError: Could not resolve "./missing-widget" from "src/main.ts"
+    at getRollupError
+    at ModuleLoader.handleInvalidResolvedId
+
+Build failed before assets were emitted.

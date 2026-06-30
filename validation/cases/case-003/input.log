@@ -1,0 +1,4 @@
+Error: Missing environment variable DATABASE_URL
+    at loadConfig (src/config.ts:12:11)
+
+Cannot continue without .env or documented runtime configuration.

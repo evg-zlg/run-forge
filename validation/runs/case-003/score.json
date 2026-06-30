@@ -1,0 +1,16 @@
+{
+  "caseId": "case-003",
+  "title": "Missing DATABASE_URL configuration",
+  "categoryExpected": "env_config_failure",
+  "categoryActual": "env_config_failure",
+  "source": "fixture",
+  "scores": {
+    "rootCause": 3,
+    "evidence": 2,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true,
+  "notes": "Initial score seeded from case metadata; replace with human review after reading review.md."
+}

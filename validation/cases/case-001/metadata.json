@@ -1,0 +1,15 @@
+{
+  "caseId": "case-001",
+  "title": "TypeScript return type mismatch",
+  "categoryExpected": "typecheck_failure",
+  "repoPath": "./fixtures/repos/sample-js",
+  "source": "fixture",
+  "initialScore": {
+    "rootCause": 3,
+    "evidence": 3,
+    "safeNextCommand": 3,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true
+}

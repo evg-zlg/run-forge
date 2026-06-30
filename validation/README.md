@@ -1,12 +1,40 @@
 # RunForge validation harness
 
-Add sanitized failure logs or case folders under `validation/cases/`.
+Add sanitized failure case folders under `validation/cases/`.
+
+## Case format
+
+Each case must use this structure:
+
+```text
+validation/cases/case-XXX/
+  input.log
+  metadata.json
+  human-diagnosis.md
+  expected-next-command.md
+```
+
+`metadata.json` stores the expected category, repo fixture path, source type, and initial scores. Use `"source": "fixture"` when the log came from an available local fixture or artifact. Use `"source": "placeholder"` only when no sanitized real log is available yet, and fill `placeholderReason`.
 
 For each case:
 
 1. Add the log and any minimal repo fixture needed for bounded inspection.
-2. Run `runforge triage --repo <repo> --log <log> --out validation/runs/<case-id>`.
-3. Score the resulting `review.md` using `validation/score-template.json`.
+2. Run `pnpm validation:run`.
+3. Read `validation/runs/<case-id>/review.md`.
+4. Update `validation/runs/<case-id>/score.json` with a human score if the seeded score is not accurate.
+
+The runner writes:
+
+```text
+validation/runs/case-XXX/
+  review.md
+  trajectory.json
+  safety-report.json
+  context-summary.json
+  score.json
+```
+
+It also writes `validation/validation-summary.md`.
 
 ## Rubric
 

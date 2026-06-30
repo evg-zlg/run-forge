@@ -1,0 +1,15 @@
+{
+  "caseId": "case-002",
+  "title": "Vitest assertion mismatch",
+  "categoryExpected": "test_failure",
+  "repoPath": "./fixtures/repos/sample-js",
+  "source": "fixture",
+  "initialScore": {
+    "rootCause": 3,
+    "evidence": 3,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true
+}

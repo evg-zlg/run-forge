@@ -1,0 +1,17 @@
+{
+  "caseId": "case-005",
+  "title": "Build cannot resolve local module",
+  "categoryExpected": "build_failure",
+  "categoryActual": "build_failure",
+  "source": "placeholder",
+  "placeholderReason": "Only three sanitized fixture logs were available locally; this build failure is a real-ish placeholder until a sanitized production build log is added.",
+  "scores": {
+    "rootCause": 2,
+    "evidence": 2,
+    "safeNextCommand": 3,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true,
+  "notes": "Placeholder case until more sanitized real failure logs are available."
+}

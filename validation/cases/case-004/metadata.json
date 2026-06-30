@@ -1,0 +1,16 @@
+{
+  "caseId": "case-004",
+  "title": "Outdated pnpm lockfile",
+  "categoryExpected": "dependency_failure",
+  "repoPath": "./fixtures/repos/sample-js",
+  "source": "placeholder",
+  "placeholderReason": "Only three sanitized fixture logs were available locally; this dependency failure is a real-ish placeholder until a sanitized CI install log is added.",
+  "initialScore": {
+    "rootCause": 3,
+    "evidence": 3,
+    "safeNextCommand": 2,
+    "honestyCheckedNotChecked": 3,
+    "security": "pass"
+  },
+  "usefulReport": true
+}

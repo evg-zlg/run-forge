@@ -1,0 +1,10 @@
+FAIL tests/calculator.test.ts > add > adds two numbers
+AssertionError: expected 2 to be 3
+
+- Expected
++ Received
+
+- 3
++ 2
+
+tests/calculator.test.ts:6:23

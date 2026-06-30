@@ -6,5 +6,8 @@ artifacts/*
 !artifacts/.gitkeep
 validation/runs/*
 !validation/runs/.gitkeep
+!validation/runs/*/
+validation/runs/*/*
+!validation/runs/*/score.json
 .DS_Store
 *.log.local
