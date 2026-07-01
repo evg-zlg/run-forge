@@ -1,0 +1,8 @@
+{
+  "name": "external-docs-fixture",
+  "private": true,
+  "scripts": {
+    "dev": "node server.js",
+    "dev:stable": "node server.js --stable"
+  }
+}

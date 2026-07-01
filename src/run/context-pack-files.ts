@@ -30,7 +30,7 @@ export interface ContextPackFileSelection {
   limitations: string[];
 }
 
-const defaultSkips = ["node_modules/**", "dist/**", "build/**", "coverage/**", ".git/**", "artifacts/**"];
+const defaultSkips = ["node_modules/**", "dist/**", "build/**", "coverage/**", ".git/**", "artifacts/**", "output/**", "tmp/**", "reports/**"];
 const defaultSkipRules = defaultSkips.map(globToRegExp);
 
 export async function collectContextPackFiles(input: {

@@ -24,12 +24,22 @@ export interface RunSpec {
   goal?: string;
   logPath?: string;
   command?: string;
+  allowExternalRepo?: boolean;
   contextPack?: {
+    allowExternalRepo: boolean;
     include: string[];
     exclude: string[];
     maxBytesPerFile: number;
     maxTotalFiles: number;
     maxTotalBytes: number;
+  };
+  docsProposal?: {
+    allowExternalRepo: boolean;
+    targetFile: string;
+    anchorText: string;
+    insertedText: string;
+    rationale: string;
+    evidenceFiles: string[];
   };
   outDir: string;
   safetyProfile: "safe-local" | "trusted-local";

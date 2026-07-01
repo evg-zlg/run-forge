@@ -24,7 +24,9 @@ export async function buildContextPack(input: {
       maxTotalBytes: options.maxTotalBytes
     }
   });
-  const repo = await inspectRepo(repoRoot, input.spec.goal ?? "");
+  const scripts = options.allowExternalRepo
+    ? scriptsFromIncludedPackageJson(files.fileSummaries)
+    : (await inspectRepo(repoRoot, input.spec.goal ?? "")).scripts;
   const contextPack = {
     schemaVersion: 1,
     taskType: input.spec.taskType,
@@ -39,7 +41,7 @@ export async function buildContextPack(input: {
       "No provider calls.",
       "No patch application or repository writes."
     ],
-    relevantCommands: relevantCommands(repo.scripts),
+    relevantCommands: relevantCommands(scripts),
     artifactReferences: {
       contextPackJson: contextJsonPath,
       contextPackMarkdown: contextMarkdownPath,
@@ -76,6 +78,7 @@ export async function buildContextPack(input: {
 
 function defaultContextPackOptions(): NonNullable<RunSpec["contextPack"]> {
   return {
+    allowExternalRepo: false,
     include: ["**/*"],
     exclude: [],
     maxBytesPerFile: 12_000,
@@ -88,6 +91,20 @@ function relevantCommands(scripts: Record<string, string>): string[] {
   return Object.entries(scripts)
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, command]) => `pnpm ${name}: ${command}`);
+}
+
+function scriptsFromIncludedPackageJson(fileSummaries: Array<{ path: string; excerpt: string }>): Record<string, string> {
+  const packageJson = fileSummaries.find((file) => file.path === "package.json");
+  if (!packageJson) return {};
+  try {
+    const parsed = JSON.parse(packageJson.excerpt) as { scripts?: unknown };
+    if (typeof parsed.scripts !== "object" || parsed.scripts === null || Array.isArray(parsed.scripts)) return {};
+    return Object.fromEntries(
+      Object.entries(parsed.scripts).filter((entry): entry is [string, string] => typeof entry[1] === "string")
+    );
+  } catch {
+    return {};
+  }
 }
 
 function renderContextPackMarkdown(contextPack: {
