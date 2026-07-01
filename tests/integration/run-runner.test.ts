@@ -23,6 +23,8 @@ describe("runRunForge", () => {
 
     const review = await readFile(record.artifacts.review, "utf8");
     expect(review).toContain("# RunForge Review");
+    const humanReview = await readFile(record.artifacts.humanReview, "utf8");
+    expect(humanReview).toContain("# RunForge Review");
   });
 
   it("keeps code-proposal gated as artifacts only", async () => {
@@ -423,7 +425,7 @@ describe("runRunForge", () => {
 });
 
 async function expectRequiredArtifacts(artifacts: Record<string, string>): Promise<void> {
-  for (const name of ["run", "review", "trajectory", "safetyReport", "contextSummary"]) {
+  for (const name of ["run", "review", "humanReview", "trajectory", "safetyReport", "contextSummary"]) {
     expect(artifacts[name]).toBeTruthy();
     await access(artifacts[name]);
   }

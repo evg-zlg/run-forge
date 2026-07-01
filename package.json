@@ -28,6 +28,7 @@
     "demo:spec-context-pack-sample-js": "tsx src/cli/index.ts run --spec ./examples/runspecs/context-pack-sample-js.json",
     "demo:spec-code-proposal": "tsx src/cli/index.ts run --spec ./examples/runspecs/code-proposal-gated.json",
     "demo:spec-code-proposal-fixture": "tsx src/cli/index.ts run --spec ./examples/runspecs/code-proposal-fixture-fix.json",
+    "demo:mvp": "tsx scripts/mvp-demo.ts",
     "test": "pnpm check:structure && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "validation:run": "pnpm build && node dist/scripts/run-validation.js"
