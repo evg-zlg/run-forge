@@ -1,13 +1,34 @@
 # RunForge
 
-RunForge is a local Agentic Engineering Harness.
-It routes engineering tasks through explicit rails:
+RunForge is a local agentic engineering harness for turning an engineering task into a reviewable artifact packet. The current MVP demonstrates one safe loop: collect task context, capture deterministic check evidence, generate a proposal-only patch, record safety decisions, and hand the result to a human reviewer.
+
+It solves the "what did the agent see, do, and propose?" problem for local code work. Instead of hiding work inside an autonomous run, RunForge writes the task, context, command evidence, trajectory, safety report, patch proposal, and human review packet to disk so a person can inspect the decision trail before anything is applied.
+
+RunForge is not a SaaS product, dashboard, remote compute system, queue, provider platform, LLM coding agent, auto-PR tool, auto-merge tool, or automatic patch applier. The MVP is local, deterministic, proposal-only, and human-gated.
+
+Run the MVP demo:
+
+```bash
+pnpm install
+pnpm demo:mvp
+```
+
+The demo writes `artifacts/mvp-demo/sample-js-fix/`.
+
+Start with:
+
+- `human-review.md`
+- `task.md`
+- `proposal/proposal.patch`
+- `proposal/patch-summary.md`
+- `safety-report.json`
+- `trajectory.json`
+
+RunForge routes engineering tasks through explicit rails:
 
 ```text
 Run -> Task -> SafetyPolicy -> Context -> Execution -> Artifacts -> Trajectory -> Report -> Human decision
 ```
-
-RunForge - harness для агентной инженерии. Сначала он помогает безопасно разбирать CI/debug failures в Docker.
 
 ## Rails MVP
 
@@ -82,12 +103,22 @@ Inspect `patch-summary.md` and `proposal.patch` in the emitted run directory. If
 ## Run the MVP demo
 
 ```bash
+pnpm install
 pnpm demo:mvp
 ```
 
 This writes a complete local demo packet to `artifacts/mvp-demo/sample-js-fix/`.
 
-Inspect `artifacts/mvp-demo/sample-js-fix/human-review.md` first. It explains the attempted sample-js calculator task, the context pack, the captured check evidence, the proposal-only patch, the safety gates, and the human next step.
+Inspect these first:
+
+- `artifacts/mvp-demo/sample-js-fix/human-review.md` - reviewer-oriented summary and next step.
+- `artifacts/mvp-demo/sample-js-fix/task.md` - the task RunForge attempted.
+- `artifacts/mvp-demo/sample-js-fix/context/context-pack.md` - the collected fixture context.
+- `artifacts/mvp-demo/sample-js-fix/checks/command-output.txt` - deterministic command evidence.
+- `artifacts/mvp-demo/sample-js-fix/proposal/proposal.patch` - proposal-only unified diff.
+- `artifacts/mvp-demo/sample-js-fix/proposal/patch-summary.md` - patch summary and human gate.
+- `artifacts/mvp-demo/sample-js-fix/safety-report.json` - safety decisions for the packet.
+- `artifacts/mvp-demo/sample-js-fix/trajectory.json` - end-to-end demo trajectory.
 
 The demo proves the current local harness can compose task context, deterministic failure evidence, gated code proposal artifacts, `git apply --check` validation, and a human review packet without mutating the fixture repo.
 
@@ -113,4 +144,4 @@ RunSpec files are documented in [docs/runspec.md](docs/runspec.md), with example
 
 MVP triage is read-only against the target repository. RunForge writes only to the requested artifact directory and does not execute repository commands.
 
-See [docs/run-rails.md](docs/run-rails.md), [docs/runspec.md](docs/runspec.md), [docs/security-model.md](docs/security-model.md), [docs/report-contract.md](docs/report-contract.md), [docs/ai-native-codebase.md](docs/ai-native-codebase.md), [docs/engineering-rules.md](docs/engineering-rules.md), and [docs/dogfooding.md](docs/dogfooding.md).
+See [docs/demo-walkthrough.md](docs/demo-walkthrough.md), [docs/product-scope.md](docs/product-scope.md), [docs/safety-model.md](docs/safety-model.md), [docs/run-rails.md](docs/run-rails.md), [docs/runspec.md](docs/runspec.md), [docs/security-model.md](docs/security-model.md), [docs/report-contract.md](docs/report-contract.md), [docs/ai-native-codebase.md](docs/ai-native-codebase.md), [docs/engineering-rules.md](docs/engineering-rules.md), and [docs/dogfooding.md](docs/dogfooding.md).
