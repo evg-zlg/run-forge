@@ -24,6 +24,13 @@ export interface RunSpec {
   goal?: string;
   logPath?: string;
   command?: string;
+  contextPack?: {
+    include: string[];
+    exclude: string[];
+    maxBytesPerFile: number;
+    maxTotalFiles: number;
+    maxTotalBytes: number;
+  };
   outDir: string;
   safetyProfile: "safe-local" | "trusted-local";
   applyMode?: "none" | "patch-artifact" | "isolated-worktree";

@@ -2,13 +2,14 @@ import { exec } from "node:child_process";
 import { readdir, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { readText, writeJson, writeText } from "../core/artifact-store.js";
+import { writeJson, writeText } from "../core/artifact-store.js";
 import type { RunSpec } from "../core/types.js";
 import { scanSecrets } from "../security/secret-scan.js";
 import { runTriage } from "../triage/triage-runner.js";
 import { inspectRepo } from "../triage/repo-inspector.js";
 import { buildFixtureCodeProposal, type DeterministicCodeProposal } from "./code-proposal-fixtures.js";
 import { validateCommandSafety } from "./command-safety.js";
+import { buildContextPack } from "./context-pack.js";
 import type { RunSafetyPolicy } from "./safety-policy.js";
 
 const execAsync = promisify(exec);
@@ -51,7 +52,7 @@ export async function executeTask(input: {
     case "repo-research":
       return repoResearch(input.spec, input.runDir);
     case "context-pack":
-      return contextPack(input.spec, input.runDir);
+      return contextPack(input.spec, input.runDir, input.safety);
     case "code-proposal":
       return codeProposal(input.spec, input.runDir);
   }
@@ -167,12 +168,9 @@ async function repoResearch(spec: RunSpec, runDir: string): Promise<TaskResult> 
   return { status: "passed", artifacts: { repoResearch: researchPath }, summary: "Repository metadata and guidance files inspected." };
 }
 
-async function contextPack(spec: RunSpec, runDir: string): Promise<TaskResult> {
-  const logText = spec.logPath ? await readText(spec.logPath) : "";
-  const repo = await inspectRepo(spec.repoPath, `${spec.goal ?? ""}\n${logText}`);
-  const contextPath = join(runDir, "context-pack.json");
-  await writeJson(contextPath, { goal: spec.goal, logPath: spec.logPath, repo });
-  return { status: "passed", artifacts: { contextPack: contextPath }, summary: "Context pack generated from repo metadata and optional log input." };
+async function contextPack(spec: RunSpec, runDir: string, safety: RunSafetyPolicy): Promise<TaskResult> {
+  const result = await buildContextPack({ spec, runDir, safety });
+  return { status: "passed", artifacts: result.artifacts, summary: result.summary };
 }
 
 async function codeProposal(spec: RunSpec, runDir: string): Promise<TaskResult> {
