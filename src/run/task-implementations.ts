@@ -8,6 +8,7 @@ import { scanSecrets } from "../security/secret-scan.js";
 import { runTriage } from "../triage/triage-runner.js";
 import { inspectRepo } from "../triage/repo-inspector.js";
 import { buildFixtureCodeProposal, type DeterministicCodeProposal } from "./code-proposal-fixtures.js";
+import { blockedByCodeProposalScope, collectCodeProposalFiles } from "./code-proposal-scope.js";
 import { validateCommandSafety } from "./command-safety.js";
 import { buildContextPack } from "./context-pack.js";
 import type { RunSafetyPolicy } from "./safety-policy.js";
@@ -170,23 +171,21 @@ async function repoResearch(spec: RunSpec, runDir: string): Promise<TaskResult> 
 
 async function contextPack(spec: RunSpec, runDir: string, safety: RunSafetyPolicy): Promise<TaskResult> {
   const result = await buildContextPack({ spec, runDir, safety });
-  return { status: "passed", artifacts: result.artifacts, summary: result.summary };
+  return { status: result.selectedNoFiles ? "blocked" : "passed", artifacts: result.artifacts, summary: result.summary };
 }
 
 async function codeProposal(spec: RunSpec, runDir: string): Promise<TaskResult> {
   const summaryPath = join(runDir, "patch-summary.md");
   const patchPath = join(runDir, "proposal.patch");
-  const files = spec.docsProposal
-    ? [...new Set([spec.docsProposal.targetFile, ...spec.docsProposal.evidenceFiles])]
-    : await listRepoFiles(spec.repoPath);
-  const proposal = await buildFixtureCodeProposal(spec);
+  const files = spec.docsProposal ? await collectCodeProposalFiles(spec) : await listRepoFiles(spec.repoPath);
+  const proposal = blockedByCodeProposalScope(spec, files) ?? await buildFixtureCodeProposal(spec);
   await writeText(summaryPath, renderProposal(spec, files, proposal));
   await writeText(patchPath, proposal?.patch ?? "");
   if (proposal?.patch === "") {
     return {
       status: "blocked",
       artifacts: { patchSummary: summaryPath, proposalPatch: patchPath },
-      summary: "Code proposal produced no patch; inspect patch-summary.md for the deterministic reason."
+      summary: `${proposal.rationale} No patch was written; inspect patch-summary.md before changing the target repo.`
     };
   }
   return {

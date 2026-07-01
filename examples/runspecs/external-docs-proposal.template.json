@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "taskType": "code-proposal",
+  "runId": "external-docs-proposal-alpha",
+  "artifactNamespace": "external-dogfood",
+  "outDir": "../../artifacts/runspec/external-docs-proposal-alpha",
+  "input": {
+    "repoPath": "/EDIT-ME/absolute/path/to/local/repo",
+    "allowExternalRepo": true,
+    "include": [
+      "README.md",
+      "package.json",
+      "docs/**/*.md"
+    ],
+    "exclude": [
+      "node_modules/**",
+      "dist/**",
+      "build/**",
+      "coverage/**",
+      ".git/**",
+      "artifacts/**",
+      "output/**",
+      "tmp/**",
+      "reports/**"
+    ],
+    "docsProposal": {
+      "targetFile": "README.md",
+      "anchorText": "EDIT-ME exact anchor text from targetFile",
+      "insertedText": "\n\nEDIT-ME docs text to insert after the anchor.",
+      "rationale": "EDIT-ME explain why this docs-only proposal is supported by the included evidence files.",
+      "evidenceFiles": [
+        "README.md",
+        "package.json"
+      ]
+    }
+  },
+  "safety": {
+    "repoWritesAllowed": false,
+    "networkAllowed": false,
+    "applyMode": "patch-artifact"
+  }
+}

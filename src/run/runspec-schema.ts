@@ -147,7 +147,7 @@ function validateExternalRepoOptIn(repoPath: string, allowExternalRepo: boolean,
   const target = resolve(repoPath);
   const rel = relative(root, target);
   if (!allowExternalRepo && (rel.startsWith("..") || isAbsolute(rel))) {
-    throw new Error(`${taskType} repoPath must resolve inside the current RunForge workspace unless input.allowExternalRepo=true.`);
+    throw new Error(`${taskType} repoPath resolved outside the current RunForge workspace: ${target}. Set input.allowExternalRepo=true only when you intentionally want a read-only external local repo trial.`);
   }
 }
 
@@ -160,8 +160,12 @@ function readDocsProposalInput(input: Record<string, unknown>, repoPath: string)
   const insertedText = readRequiredString(raw.insertedText, "input.docsProposal.insertedText");
   const rationale = readRequiredString(raw.rationale, "input.docsProposal.rationale");
   const evidenceFiles = readOptionalStringArray(raw.evidenceFiles, "input.docsProposal.evidenceFiles") ?? [];
+  const include = readOptionalStringArray(input.include, "input.include");
+  const exclude = readOptionalStringArray(input.exclude, "input.exclude");
   validateContextPackPatterns([targetFile, ...evidenceFiles], "docsProposal");
-  return { allowExternalRepo, targetFile, anchorText, insertedText, rationale, evidenceFiles };
+  if (include) validateContextPackPatterns(include, "include");
+  if (exclude) validateContextPackPatterns(exclude, "exclude");
+  return { allowExternalRepo, include, exclude, targetFile, anchorText, insertedText, rationale, evidenceFiles };
 }
 
 function readOptionalStringArray(value: unknown, field: string): string[] | undefined {

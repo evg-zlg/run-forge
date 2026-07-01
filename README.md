@@ -6,6 +6,25 @@ It solves the "what did the agent see, do, and propose?" problem for local code 
 
 RunForge is not a SaaS product, dashboard, remote compute system, queue, provider platform, LLM coding agent, auto-PR tool, auto-merge tool, or automatic patch applier. The MVP is local, deterministic, proposal-only, and human-gated.
 
+## Alpha Trial
+
+For a first local external-repo trial, read [docs/alpha-trial-guide.md](docs/alpha-trial-guide.md).
+
+Start with the fixture MVP:
+
+```bash
+pnpm install
+pnpm demo:mvp
+```
+
+Then run the docs-only external proposal flow:
+
+```bash
+pnpm demo:external-docs-proposal
+```
+
+Use [examples/runspecs/external-docs-proposal.template.json](examples/runspecs/external-docs-proposal.template.json) for a custom local target repo and [docs/templates/external-dogfood-report.md](docs/templates/external-dogfood-report.md) to report the result.
+
 Run the MVP demo:
 
 ```bash

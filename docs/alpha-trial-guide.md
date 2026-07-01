@@ -1,0 +1,187 @@
+# RunForge Alpha Trial Guide
+
+This guide is for a first local alpha trial against another repository. The goal
+is to produce a docs-only proposal packet that a human can inspect. RunForge must
+not mutate the target repo during this trial.
+
+## What RunForge Can Do Today
+
+- Build a deterministic local artifact packet for a task.
+- Collect scoped context from a local repository.
+- Produce a narrow docs-only proposal patch when given a target file, anchor
+  text, insertion text, and rationale.
+- Write `human-review.md`, `proposal.patch`, `patch-summary.md`,
+  `safety-report.json`, `trajectory.json`, and normalized run specs.
+- Validate a proposal manually with `git apply --check`.
+
+## What RunForge Cannot Do Yet
+
+- It is not a SaaS product, dashboard, daemon, queue, or remote compute system.
+- It does not call an LLM or external API for this flow.
+- It does not apply patches automatically.
+- It does not open PRs, push branches, merge code, or manage credentials.
+- It does not infer arbitrary code fixes. The alpha external path is a
+  deterministic docs proposal workflow.
+
+## Prerequisites
+
+- Node.js 20 or newer.
+- `pnpm install` has been run in the RunForge repo.
+- A separate local target repo you are willing to read from.
+- A docs-only task with a known file and exact anchor text.
+- A clean target repo before the trial.
+
+Check the target repo first:
+
+```bash
+cd /path/to/target-repo
+git status --short
+```
+
+## Run The MVP Demo
+
+From the RunForge repo:
+
+```bash
+pnpm demo:mvp
+```
+
+The demo writes `artifacts/mvp-demo/sample-js-fix/`. Start with:
+
+- `human-review.md`
+- `proposal/proposal.patch`
+- `proposal/patch-summary.md`
+- `safety-report.json`
+- `trajectory.json`
+
+This proves the local packet flow on a checked-in fixture before you point
+RunForge at another repo.
+
+## Run The Built-In External Docs Proposal Demo
+
+The built-in script defaults to Evgeny's local SmartSQL path, but you can point
+it at a different local repo with environment variables:
+
+```bash
+RUNFORGE_EXTERNAL_REPO=/path/to/target-repo \
+RUNFORGE_EXTERNAL_OUT=artifacts/runs/external-docs-proposal \
+pnpm demo:external-docs-proposal
+```
+
+The script writes a packet under:
+
+```text
+artifacts/runs/external-docs-proposal/packet/
+```
+
+Inspect:
+
+- `human-review.md`
+- `proposal.patch`
+- `patch-summary.md`
+- `context-pack.md`
+- `safety-report.json`
+- `run-spec.json`
+
+If the target repo does not contain the expected demo anchor, use the reusable
+spec template below instead of changing the target repo.
+
+## Run A Custom External Docs Proposal
+
+Copy `examples/runspecs/external-docs-proposal.template.json` to a scratch file
+outside version control or to an ignored path, then edit:
+
+- `input.repoPath`
+- `input.include`
+- `input.exclude`
+- `input.docsProposal.targetFile`
+- `input.docsProposal.anchorText`
+- `input.docsProposal.insertedText`
+- `input.docsProposal.rationale`
+- `input.docsProposal.evidenceFiles`
+- `outDir`
+
+Keep these safety settings:
+
+- `input.allowExternalRepo: true`
+- `safety.repoWritesAllowed: false`
+- `safety.networkAllowed: false`
+- `safety.applyMode: "patch-artifact"`
+
+Run the spec:
+
+```bash
+pnpm dev run --spec /path/to/edited-external-docs-proposal.json
+```
+
+RunForge rejects external `repoPath` values unless `input.allowExternalRepo` is
+explicitly `true`. Include/exclude patterns must be relative POSIX paths scoped
+inside the target repo. Avoid broad includes such as `**/*` for alpha trials.
+
+## Inspect The Human Review Packet
+
+Open the emitted `human-review.md` first. Confirm:
+
+- The task matches what you intended.
+- Status is understood. `blocked` is expected for proposal-only work because a
+  human decision is required.
+- The artifact paths point to the proposal and safety files.
+- The summary does not claim that the target repo was changed.
+
+## Inspect The Proposal Patch
+
+Open `proposal.patch`.
+
+- A useful proposal should be non-empty and contain a unified diff.
+- If it is empty, read `patch-summary.md`; common reasons are missing target
+  file, anchor text not found, or requested text already present.
+- Do not apply the patch during the trial unless you intentionally leave the
+  RunForge alpha flow and make a manual human decision.
+
+## Check The Patch Without Applying It
+
+From the target repo:
+
+```bash
+git apply --check /absolute/path/to/proposal.patch
+```
+
+This checks whether the patch can apply cleanly. It does not apply the patch.
+Record the result in `docs/templates/external-dogfood-report.md`.
+
+## Confirm The Target Repo Stayed Clean
+
+From the target repo:
+
+```bash
+git status --short
+```
+
+Expected result: no changes caused by RunForge. If the repo was dirty before
+the trial, compare against the before snapshot you recorded.
+
+Also check the RunForge repo:
+
+```bash
+cd /path/to/runforge
+git status --short
+```
+
+Generated alpha artifacts may appear under `artifacts/`; source files should not
+change unless you intentionally edited RunForge itself.
+
+## What To Report Back
+
+Use `docs/templates/external-dogfood-report.md` and include:
+
+- Project tested.
+- Task chosen.
+- Command or spec used.
+- Artifact paths.
+- Whether `proposal.patch` was non-empty.
+- `git apply --check` result.
+- Target repo before/after status.
+- RunForge repo status.
+- What worked.
+- What was confusing.
+- Verdict: `USEFUL_NOW`, `USEFUL_WITH_FRICTION`, or `NOT_USEFUL_YET`.
