@@ -26,6 +26,7 @@ describe("runRunForge", () => {
 
   it("keeps code-proposal gated as artifacts only", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "runforge-rails-"));
+    const before = await fixtureSnapshot();
     const record = await runRunForge({
       taskType: "code-proposal",
       repoPath: "./fixtures/repos/sample-js",
@@ -46,6 +47,8 @@ describe("runRunForge", () => {
     const review = await readFile(record.artifacts.review, "utf8");
     expect(review).toContain("proposal.patch");
     expect(review).toContain("patch-summary.md");
+    await access(record.artifacts.proposalPatch);
+    expect(await fixtureSnapshot()).toEqual(before);
   });
 
   it("blocks command-check unless trusted-local is selected", async () => {
@@ -178,4 +181,13 @@ function expectCommandResultKeys(result: SerializedCommandResult): void {
     "stderr",
     "stdout"
   ]);
+}
+
+async function fixtureSnapshot(): Promise<Record<string, string>> {
+  const files = ["package.json", "src/calculator.ts", "tests/calculator.test.ts"];
+  const snapshot: Record<string, string> = {};
+  for (const file of files) {
+    snapshot[file] = await readFile(join("fixtures/repos/sample-js", file), "utf8");
+  }
+  return snapshot;
 }

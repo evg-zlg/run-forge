@@ -39,3 +39,13 @@ Task implementations may add task-specific artifacts beside those files.
 - human decision required before applying any patch.
 
 The minimal local rails implementation emits `proposal.patch` and `patch-summary.md`. `proposal.patch` may be empty when RunForge cannot produce a deterministic patch safely.
+
+## Rails Dogfood
+
+`pnpm dogfood:rails` exercises RunForge's own checks through `runforge run --task command-check`. Artifacts are written under:
+
+```text
+artifacts/runs/dogfood-rails/
+```
+
+Inspect a check by opening its newest run directory and reading `run.json` for status, `review.md` for the human-facing summary, `trajectory.json` for stage evidence, `safety-report.json` for policy decisions, `context-summary.json` for inputs and artifact paths, and `command-result.json` / `command-output.txt` for the command result.
