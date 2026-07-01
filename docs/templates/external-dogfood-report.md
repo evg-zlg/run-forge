@@ -26,12 +26,15 @@
 - proposal.patch:
 - patch-summary.md:
 - context-pack.md:
+- context-pack.json:
+- proposal-status.json:
 - safety-report.json:
 - run-spec.json:
 
 ## Proposal Patch Status
 
 - `proposal.patch` non-empty: yes/no
+- Outcome from `proposal-status.json`:
 - If empty, reason from `patch-summary.md`:
 
 ## git apply --check Result

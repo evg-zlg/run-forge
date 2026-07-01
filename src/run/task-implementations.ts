@@ -7,7 +7,8 @@ import type { RunSpec } from "../core/types.js";
 import { scanSecrets } from "../security/secret-scan.js";
 import { runTriage } from "../triage/triage-runner.js";
 import { inspectRepo } from "../triage/repo-inspector.js";
-import { buildFixtureCodeProposal, type DeterministicCodeProposal } from "./code-proposal-fixtures.js";
+import { buildFixtureCodeProposal } from "./code-proposal-fixtures.js";
+import { renderProposal } from "./code-proposal-renderer.js";
 import { blockedByCodeProposalScope, collectCodeProposalFiles } from "./code-proposal-scope.js";
 import { validateCommandSafety } from "./command-safety.js";
 import { buildContextPack } from "./context-pack.js";
@@ -55,7 +56,7 @@ export async function executeTask(input: {
     case "context-pack":
       return contextPack(input.spec, input.runDir, input.safety);
     case "code-proposal":
-      return codeProposal(input.spec, input.runDir);
+      return codeProposal(input.spec, input.runDir, input.safety);
   }
 }
 
@@ -174,25 +175,65 @@ async function contextPack(spec: RunSpec, runDir: string, safety: RunSafetyPolic
   return { status: result.selectedNoFiles ? "blocked" : "passed", artifacts: result.artifacts, summary: result.summary };
 }
 
-async function codeProposal(spec: RunSpec, runDir: string): Promise<TaskResult> {
+async function codeProposal(spec: RunSpec, runDir: string, safety: RunSafetyPolicy): Promise<TaskResult> {
   const summaryPath = join(runDir, "patch-summary.md");
   const patchPath = join(runDir, "proposal.patch");
+  const proposalStatusPath = join(runDir, "proposal-status.json");
+  const contextResult = spec.docsProposal ? await buildDocsProposalContextPack(spec, runDir, safety) : null;
   const files = spec.docsProposal ? await collectCodeProposalFiles(spec) : await listRepoFiles(spec.repoPath);
-  const proposal = blockedByCodeProposalScope(spec, files) ?? await buildFixtureCodeProposal(spec);
+  const proposal = blockedByCodeProposalScope(spec, files) ?? await buildFixtureCodeProposal(spec, files);
   await writeText(summaryPath, renderProposal(spec, files, proposal));
   await writeText(patchPath, proposal?.patch ?? "");
+  await writeJson(proposalStatusPath, {
+    outcome: proposal?.outcome ?? "no_proposal_generated",
+    filesChanged: proposal?.filesChanged ?? [],
+    evidenceFiles: proposal?.evidenceFiles ?? [],
+    diagnostics: proposal?.diagnostics ?? [],
+    patchBytes: proposal?.patch.length ?? 0
+  });
+  const artifacts = {
+    ...(contextResult?.artifacts ?? {}),
+    patchSummary: summaryPath,
+    proposalPatch: patchPath,
+    proposalStatus: proposalStatusPath
+  };
   if (proposal?.patch === "") {
     return {
       status: "blocked",
-      artifacts: { patchSummary: summaryPath, proposalPatch: patchPath },
-      summary: `${proposal.rationale} No patch was written; inspect patch-summary.md before changing the target repo.`
+      artifacts,
+      summary: `${proposal.outcome ?? "no_proposal_generated"}: ${proposal.rationale} No patch was written; inspect patch-summary.md before changing the target repo.`
     };
   }
   return {
     status: "blocked",
-    artifacts: { patchSummary: summaryPath, proposalPatch: patchPath },
-    summary: "Code proposal prepared as gated artifacts only; human review is required before any write."
+    artifacts,
+    summary: "proposal_ready: Code proposal prepared as gated artifacts only; human review is required before any write."
   };
+}
+
+async function buildDocsProposalContextPack(
+  spec: RunSpec,
+  runDir: string,
+  safety: RunSafetyPolicy
+): Promise<{ artifacts: Record<string, string> }> {
+  if (!spec.docsProposal) return { artifacts: {} };
+  const include = spec.docsProposal.include ?? [...new Set([spec.docsProposal.targetFile, ...spec.docsProposal.evidenceFiles])];
+  return buildContextPack({
+    spec: {
+      ...spec,
+      taskType: "context-pack",
+      contextPack: {
+        allowExternalRepo: spec.docsProposal.allowExternalRepo,
+        include,
+        exclude: spec.docsProposal.exclude ?? [],
+        maxBytesPerFile: 12_000,
+        maxTotalFiles: 80,
+        maxTotalBytes: 240_000
+      }
+    },
+    runDir,
+    safety
+  });
 }
 
 async function writeCommandResult(runDir: string, input: CommandResultInput): Promise<TaskResult> {
@@ -272,52 +313,4 @@ async function walk(root: string, relative: string, found: string[]): Promise<vo
 
 function skip(path: string): boolean {
   return /(^|\/)(\.git|node_modules|dist|build|coverage|artifacts)(\/|$)/.test(path);
-}
-
-function renderProposal(spec: RunSpec, files: string[], proposal: DeterministicCodeProposal | null): string {
-  const filesChanged = proposal?.filesChanged.map((file) => `- ${file}`).join("\n") ?? "- No files proposed for change.";
-  const why = proposal?.rationale ?? "No deterministic fixture rule matched this repository and goal.";
-  const proposedPatch =
-    proposal === null
-      ? "No patch generated: no deterministic fixture or docsProposal rule matched this repository and goal. The patch artifact is intentionally empty."
-      : proposal.patch.length === 0
-        ? proposal.rationale
-      : "A deterministic patch was written to proposal.patch for human review.";
-
-  return `# Code Proposal
-
-## Task Summary
-
-${proposal?.taskSummary ?? spec.goal ?? "No goal provided."}
-
-## Files Proposed To Change
-
-${filesChanged}
-
-## Why This Patch Is Suggested
-
-${why}
-
-## Safety Status
-
-- Proposal-first only.
-- No direct writes to the target repository.
-- Repository was not modified by RunForge.
-- Artifact-only output: inspect proposal.patch and patch-summary.md.
-- No auto-push.
-- No auto-merge.
-- Human decision required before applying any patch.
-
-## Repo Snapshot
-
-${files.length > 0 ? files.map((file) => `- ${file}`).join("\n") : "- No files listed."}
-
-## Proposed Patch
-
-${proposedPatch}
-
-## Manual Next Step
-
-A human can inspect proposal.patch and, if acceptable, apply it manually outside RunForge.
-`;
 }

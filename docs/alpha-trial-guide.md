@@ -10,8 +10,11 @@ not mutate the target repo during this trial.
 - Collect scoped context from a local repository.
 - Produce a narrow docs-only proposal patch when given a target file, anchor
   text, insertion text, and rationale.
-- Write `human-review.md`, `proposal.patch`, `patch-summary.md`,
-  `safety-report.json`, `trajectory.json`, and normalized run specs.
+- Write one complete external proposal packet: `human-review.md`,
+  `context-pack.json`, `context-pack.md`, `proposal.patch`,
+  `patch-summary.md`, `safety-report.json`, `run-spec.json`, and
+  `trajectory.json`.
+- Validate declared evidence files before generating a proposal patch.
 - Validate a proposal manually with `git apply --check`.
 
 ## What RunForge Cannot Do Yet
@@ -80,6 +83,7 @@ Inspect:
 - `proposal.patch`
 - `patch-summary.md`
 - `context-pack.md`
+- `proposal-status.json`
 - `safety-report.json`
 - `run-spec.json`
 
@@ -100,6 +104,11 @@ outside version control or to an ignored path, then edit:
 - `input.docsProposal.rationale`
 - `input.docsProposal.evidenceFiles`
 - `outDir`
+
+Every file named in `input.docsProposal.evidenceFiles` must exist under the
+target repository root, be readable, and be selected by `input.include` after
+`input.exclude`. RunForge will not generate a patch if declared evidence is
+missing or excluded.
 
 Keep these safety settings:
 
@@ -123,18 +132,21 @@ inside the target repo. Avoid broad includes such as `**/*` for alpha trials.
 Open the emitted `human-review.md` first. Confirm:
 
 - The task matches what you intended.
-- Status is understood. `blocked` is expected for proposal-only work because a
-  human decision is required.
+- Status is understood. `blocked` can be expected for proposal-only work because
+  a human decision is required; check the summary for `proposal_ready`,
+  `no_proposal_generated`, or `evidence_missing`.
 - The artifact paths point to the proposal and safety files.
 - The summary does not claim that the target repo was changed.
+- The context pack and proposal summary cite only files included in the packet.
 
 ## Inspect The Proposal Patch
 
 Open `proposal.patch`.
 
 - A useful proposal should be non-empty and contain a unified diff.
-- If it is empty, read `patch-summary.md`; common reasons are missing target
-  file, anchor text not found, or requested text already present.
+- If it is empty, read `patch-summary.md` and `proposal-status.json`; common
+  reasons are missing evidence, missing target file, anchor text not found, or
+  requested text already present.
 - Do not apply the patch during the trial unless you intentionally leave the
   RunForge alpha flow and make a manual human decision.
 

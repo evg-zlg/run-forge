@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -226,13 +226,52 @@ describe("runRunForge", () => {
     expect(record.status).toBe("passed");
     expect(contextPack.includedFiles.map((file) => file.path)).toEqual(["README.md", "package.json"]);
     expect(contextPack.includedFiles.map((file) => file.path)).not.toContain("docs/BUILD_STABILITY.md");
-    expect(contextPack.relevantCommands).toContain("pnpm dev:stable: node server.js --stable");
+    expect(contextPack.relevantCommands).toContain("dev:stable: node server.js --stable");
 
     const markdown = await readFile(record.artifacts.contextPackMarkdown, "utf8");
     expect(markdown).toContain("README.md");
     expect(markdown).toContain("package.json");
     expect(markdown).not.toContain("docs/BUILD_STABILITY.md (");
     expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
+  });
+
+  it("detects scripts from nested package.json files in context-pack markdown", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-context-pack-nested-"));
+    const externalRepo = await copyExternalDocsFixture();
+    await mkdir(join(externalRepo, "frontend"), { recursive: true });
+    await writeFile(join(externalRepo, "frontend/package.json"), JSON.stringify({
+      name: "nested-frontend",
+      scripts: {
+        dev: "vite --host 0.0.0.0",
+        typecheck: "tsc --noEmit"
+      }
+    }, null, 2), "utf8");
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "context-pack",
+      runId: "external-context-pack-nested-package",
+      artifactNamespace: "tests",
+      input: {
+        repoPath: externalRepo,
+        allowExternalRepo: true,
+        include: ["README.md", "frontend/package.json"],
+        exclude: [],
+        maxBytesPerFile: 12_000,
+        maxTotalFiles: 10,
+        maxTotalBytes: 50_000
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+    const contextPack = await readContextPack(record.artifacts.contextPack);
+    expect(contextPack.relevantCommands).toContain("frontend:dev: vite --host 0.0.0.0");
+    expect(contextPack.relevantCommands).toContain("frontend:typecheck: tsc --noEmit");
+
+    const markdown = await readFile(record.artifacts.contextPackMarkdown, "utf8");
+    expect(markdown).toContain("frontend:dev: vite --host 0.0.0.0");
+    expect(markdown).not.toContain("No package scripts detected");
   });
 
   it("blocks context-pack when scoped include/exclude selects no files", async () => {
@@ -360,6 +399,9 @@ describe("runRunForge", () => {
 
     const record = await runRunForge(await loadRunSpecFile(specPath));
     expect(record.status).toBe("blocked");
+    expect(record.summary).toContain("proposal_ready");
+    expect(record.artifacts.contextPack).toMatch(/context-pack\.json$/);
+    expect(record.artifacts.contextPackMarkdown).toMatch(/context-pack\.md$/);
     const patch = await readFile(record.artifacts.proposalPatch, "utf8");
     expect(patch.length).toBeGreaterThan(0);
     expect(patch).toContain("diff --git a/README.md b/README.md");
@@ -367,7 +409,92 @@ describe("runRunForge", () => {
     expect(patch).toContain("+++ b/README.md");
     expect(patch).toContain("+npm run dev:stable");
     await execFileAsync("git", ["apply", "--check", record.artifacts.proposalPatch], { cwd: externalRepo });
+    const status = await readProposalStatus(record.artifacts.proposalStatus);
+    expect(status).toMatchObject({
+      outcome: "proposal_ready",
+      evidenceFiles: ["README.md", "package.json", "docs/BUILD_STABILITY.md"]
+    });
     expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
+  });
+
+  it("writes an empty no-proposal artifact when declared evidence is missing", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-missing-evidence-"));
+    const externalRepo = await copyExternalDocsFixture();
+    await rm(join(externalRepo, "docs/BUILD_STABILITY.md"));
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "code-proposal",
+      runId: "external-docs-proposal-missing-evidence",
+      artifactNamespace: "tests",
+      input: {
+        repoPath: externalRepo,
+        allowExternalRepo: true,
+        include: ["README.md", "package.json", "docs/BUILD_STABILITY.md"],
+        exclude: [],
+        docsProposal: {
+          targetFile: "README.md",
+          anchorText: "npm run dev\n```",
+          insertedText: "\n\nFor the stable frontend dev path, use the existing root command:\n\n```bash\nnpm run dev:stable\n```",
+          rationale: "`package.json` exposes a root `dev:stable` script and docs/BUILD_STABILITY.md documents it.",
+          evidenceFiles: ["README.md", "package.json", "docs/BUILD_STABILITY.md"]
+        }
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+    expect(record.status).toBe("blocked");
+    expect(record.summary).toContain("evidence_missing");
+    const patch = await readFile(record.artifacts.proposalPatch, "utf8");
+    expect(patch).toBe("");
+
+    const summary = await readFile(record.artifacts.patchSummary, "utf8");
+    expect(summary).toContain("evidence_missing");
+    expect(summary).toContain("docs/BUILD_STABILITY.md");
+    expect(summary).not.toContain("A deterministic patch was written");
+    const status = await readProposalStatus(record.artifacts.proposalStatus);
+    expect(status.outcome).toBe("evidence_missing");
+    expect(status.diagnostics.join("\n")).toContain("docs/BUILD_STABILITY.md");
+  });
+
+  it("writes docs proposal patches that apply when the target file has no trailing newline", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-no-newline-"));
+    const externalRepo = await copyExternalDocsFixture();
+    await writeFile(join(externalRepo, "README.md"), [
+      "# External Docs Fixture",
+      "",
+      "## Quick Start",
+      "",
+      "```bash",
+      "npm install",
+      "npm run dev",
+      "```"
+    ].join("\n"), "utf8");
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "code-proposal",
+      runId: "external-docs-proposal-no-newline",
+      artifactNamespace: "tests",
+      input: {
+        repoPath: externalRepo,
+        allowExternalRepo: true,
+        docsProposal: {
+          targetFile: "README.md",
+          anchorText: "npm run dev\n```",
+          insertedText: "\n\nFor the stable frontend dev path, use the existing root command:\n\n```bash\nnpm run dev:stable\n```",
+          rationale: "`package.json` exposes a root `dev:stable` script and BUILD_STABILITY documents it.",
+          evidenceFiles: ["README.md", "package.json", "docs/BUILD_STABILITY.md"]
+        }
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+    const patch = await readFile(record.artifacts.proposalPatch, "utf8");
+    expect(patch).toContain("\\ No newline at end of file");
+    await execFileAsync("git", ["apply", "--check", record.artifacts.proposalPatch], { cwd: externalRepo });
   });
 
   it("blocks docs proposal with useful artifacts when the anchor is not found", async () => {
@@ -744,6 +871,12 @@ type SerializedContextPack = {
   limitations: string[];
 };
 
+type SerializedProposalStatus = {
+  outcome: string;
+  evidenceFiles: string[];
+  diagnostics: string[];
+};
+
 async function readCommandResult(path: string): Promise<SerializedCommandResult> {
   return JSON.parse(await readFile(path, "utf8")) as SerializedCommandResult;
 }
@@ -764,6 +897,10 @@ function expectCommandResultKeys(result: SerializedCommandResult): void {
 
 async function readContextPack(path: string): Promise<SerializedContextPack> {
   return JSON.parse(await readFile(path, "utf8")) as SerializedContextPack;
+}
+
+async function readProposalStatus(path: string): Promise<SerializedProposalStatus> {
+  return JSON.parse(await readFile(path, "utf8")) as SerializedProposalStatus;
 }
 
 async function fixtureSnapshot(): Promise<Record<string, string>> {
