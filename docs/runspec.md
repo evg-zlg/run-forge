@@ -65,6 +65,7 @@ pnpm dev run --spec ./examples/runspecs/command-check-typecheck.json
 pnpm demo:spec-command-check
 pnpm demo:spec-context-pack
 pnpm demo:spec-code-proposal
+pnpm demo:spec-code-proposal-fixture
 ```
 
 Runs from spec files persist the normalized spec at `run-spec.json` alongside
@@ -79,6 +80,10 @@ the standard root artifacts:
 
 `command-check` also writes `command-result.json` and `command-output.txt`.
 `code-proposal` also writes `proposal.patch` and `patch-summary.md`.
+
+`examples/runspecs/code-proposal-fixture-fix.json` demonstrates the current useful `code-proposal` path. It targets the controlled `fixtures/repos/sample-js` fixture and proposes a deterministic unified diff for a known calculator assertion. This is not LLM coding, remote execution, auto-PR, or auto-merge. It writes reviewable artifacts only and leaves the fixture repository unchanged.
+
+To review a code proposal, open `patch-summary.md` for the task summary, files proposed to change, rationale, safety status, and manual next step. Then inspect `proposal.patch`. A human may apply the patch manually outside RunForge with `git apply path/to/proposal.patch` after review.
 
 ## Difference From Demo Scripts
 

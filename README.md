@@ -39,7 +39,7 @@ failure-triage/safety-report.json
 failure-triage/context-summary.json
 ```
 
-`code-proposal` is first-class but gated. It is proposal-first, writes `proposal.patch` and `patch-summary.md`, never writes directly to the target repository, never pushes, never merges, and always requires a human decision before apply.
+`code-proposal` is first-class but gated. It is proposal-first, writes `proposal.patch` and `patch-summary.md`, never writes directly to the target repository, never pushes, never merges, and always requires a human decision before apply. Today it is deterministic and fixture-based, not an LLM coder: the sample-js fixture can produce a reviewable unified diff, while unmatched repositories may produce an empty patch artifact.
 
 ## Legacy triage command
 
@@ -69,6 +69,14 @@ runforge run --task code-proposal --repo . --goal "Propose a fix" --out ./runfor
 runforge run --task command-check --repo . --command "pnpm test" --safety-profile trusted-local --out ./runforge-artifacts
 runforge run --spec ./examples/runspecs/command-check-typecheck.json
 ```
+
+For the controlled fixture proposal demo:
+
+```bash
+pnpm demo:spec-code-proposal-fixture
+```
+
+Inspect `patch-summary.md` and `proposal.patch` in the emitted run directory. If a human accepts the proposal, they can apply it manually outside RunForge with `git apply path/to/proposal.patch`.
 
 ## Commands
 
