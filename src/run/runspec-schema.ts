@@ -22,9 +22,17 @@ export interface RunSpecDocument {
     logPath?: string;
     include?: string[];
     exclude?: string[];
+    allowExternalRepo?: boolean;
     maxBytesPerFile?: number;
     maxTotalFiles?: number;
     maxTotalBytes?: number;
+    docsProposal?: {
+      targetFile?: string;
+      anchorText?: string;
+      insertedText?: string;
+      rationale?: string;
+      evidenceFiles?: string[];
+    };
   };
   safety?: {
     repoWritesAllowed?: boolean;
@@ -52,6 +60,9 @@ export function normalizeRunSpecDocument(document: unknown, cwd: string): RunSpe
   const rawRepoPath = readOptionalString(raw.repoPath, "repoPath") ?? readOptionalString(input.repoPath, "input.repoPath") ?? ".";
   const repoPath = resolveStringPath(rawRepoPath, cwd);
   const contextPack = taskType === "context-pack" ? readContextPackInput(input, repoPath) : undefined;
+  const allowExternalRepo = taskType === "code-proposal" ? readOptionalBoolean(input.allowExternalRepo, "input.allowExternalRepo") ?? false : undefined;
+  if (taskType === "code-proposal") validateExternalRepoOptIn(repoPath, allowExternalRepo ?? false, "code-proposal");
+  const docsProposal = taskType === "code-proposal" ? readDocsProposalInput(input, repoPath) : undefined;
 
   if (taskType === "command-check") {
     if (!command) throw new Error("command-check RunSpec requires input.command.");
@@ -68,7 +79,9 @@ export function normalizeRunSpecDocument(document: unknown, cwd: string): RunSpe
     goal: readOptionalString(raw.goal, "goal") ?? readOptionalString(input.goal, "input.goal"),
     logPath: resolveOptionalPath(readOptionalString(raw.logPath, "logPath") ?? readOptionalString(input.logPath, "input.logPath"), cwd),
     command,
+    allowExternalRepo,
     contextPack,
+    docsProposal,
     outDir: resolveStringPath(readOptionalString(raw.outDir, "outDir") ?? "./artifacts/runspec", cwd),
     safetyProfile: readSafetyProfile(safety.safetyProfile, taskType),
     applyMode: readApplyMode(safety.applyMode)
@@ -106,13 +119,21 @@ function readOptionalString(value: unknown, field: string): string | undefined {
   return value;
 }
 
+function readRequiredString(value: unknown, field: string): string {
+  const text = readOptionalString(value, field);
+  if (text === undefined || text.length === 0) throw new Error(`RunSpec ${field} must be a non-empty string.`);
+  return text;
+}
+
 function readContextPackInput(input: Record<string, unknown>, repoPath: string): NonNullable<RunSpec["contextPack"]> {
-  validateContextPackRoot(repoPath);
+  const allowExternalRepo = readOptionalBoolean(input.allowExternalRepo, "input.allowExternalRepo") ?? false;
+  validateExternalRepoOptIn(repoPath, allowExternalRepo, "context-pack");
   const include = readOptionalStringArray(input.include, "input.include") ?? ["**/*"];
   const exclude = readOptionalStringArray(input.exclude, "input.exclude") ?? [];
   validateContextPackPatterns(include, "include");
   validateContextPackPatterns(exclude, "exclude");
   return {
+    allowExternalRepo,
     include,
     exclude,
     maxBytesPerFile: readOptionalPositiveInteger(input.maxBytesPerFile, "input.maxBytesPerFile") ?? 12_000,
@@ -121,13 +142,26 @@ function readContextPackInput(input: Record<string, unknown>, repoPath: string):
   };
 }
 
-function validateContextPackRoot(repoPath: string): void {
+function validateExternalRepoOptIn(repoPath: string, allowExternalRepo: boolean, taskType: string): void {
   const root = resolve(process.cwd());
   const target = resolve(repoPath);
   const rel = relative(root, target);
-  if (rel.startsWith("..") || isAbsolute(rel)) {
-    throw new Error("context-pack repoPath must resolve inside the current RunForge workspace.");
+  if (!allowExternalRepo && (rel.startsWith("..") || isAbsolute(rel))) {
+    throw new Error(`${taskType} repoPath must resolve inside the current RunForge workspace unless input.allowExternalRepo=true.`);
   }
+}
+
+function readDocsProposalInput(input: Record<string, unknown>, repoPath: string): RunSpec["docsProposal"] {
+  if (input.docsProposal === undefined) return undefined;
+  const allowExternalRepo = readOptionalBoolean(input.allowExternalRepo, "input.allowExternalRepo") ?? false;
+  const raw = expectRecord(input.docsProposal, "RunSpec input.docsProposal must be an object.");
+  const targetFile = readRequiredString(raw.targetFile, "input.docsProposal.targetFile");
+  const anchorText = readRequiredString(raw.anchorText, "input.docsProposal.anchorText");
+  const insertedText = readRequiredString(raw.insertedText, "input.docsProposal.insertedText");
+  const rationale = readRequiredString(raw.rationale, "input.docsProposal.rationale");
+  const evidenceFiles = readOptionalStringArray(raw.evidenceFiles, "input.docsProposal.evidenceFiles") ?? [];
+  validateContextPackPatterns([targetFile, ...evidenceFiles], "docsProposal");
+  return { allowExternalRepo, targetFile, anchorText, insertedText, rationale, evidenceFiles };
 }
 
 function readOptionalStringArray(value: unknown, field: string): string[] | undefined {
@@ -135,6 +169,12 @@ function readOptionalStringArray(value: unknown, field: string): string[] | unde
   if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
     throw new Error(`RunSpec ${field} must be an array of strings.`);
   }
+  return value;
+}
+
+function readOptionalBoolean(value: unknown, field: string): boolean | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value !== "boolean") throw new Error(`RunSpec ${field} must be a boolean.`);
   return value;
 }
 

@@ -80,6 +80,7 @@ async function runChildRuns(fixtureRepo: string, outDir: string) {
     outDir,
     safetyProfile: "safe-local",
     contextPack: {
+      allowExternalRepo: false,
       include: ["src/**/*.ts", "tests/**/*.ts", "package.json"],
       exclude: [],
       maxBytesPerFile: 12_000,
