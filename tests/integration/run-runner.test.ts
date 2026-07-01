@@ -97,6 +97,127 @@ describe("runRunForge", () => {
     expect(await fixtureSnapshot()).toEqual(before);
   });
 
+  it("writes deterministic context-pack JSON and markdown from RunSpec include/exclude input", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-context-pack-"));
+    const before = await fixtureSnapshot();
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "context-pack",
+      runId: "context-pack-valid",
+      artifactNamespace: "tests",
+      input: {
+        repoPath: resolve("fixtures/repos/sample-js"),
+        include: ["tests/**/*.ts", "src/**/*.ts", "package.json"],
+        exclude: ["package.json"],
+        maxBytesPerFile: 12_000,
+        maxTotalFiles: 10,
+        maxTotalBytes: 50_000
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+
+    expect(record.status).toBe("passed");
+    await expectRequiredArtifacts(record.artifacts);
+    expect(record.artifacts.contextPack).toMatch(/context-pack\.json$/);
+    expect(record.artifacts.contextPackMarkdown).toMatch(/context-pack\.md$/);
+
+    const contextPack = await readContextPack(record.artifacts.contextPack);
+    expect(contextPack).toMatchObject({
+      schemaVersion: 1,
+      taskType: "context-pack",
+      runId: "context-pack-valid"
+    });
+    expect(contextPack.includedFiles.map((file) => file.path)).toEqual([
+      "src/calculator.ts",
+      "tests/calculator.test.ts"
+    ]);
+    expect(contextPack.includedFiles.map((file) => file.path)).not.toContain("package.json");
+    expect(contextPack.fileSummaries.map((file) => file.path)).toEqual(contextPack.includedFiles.map((file) => file.path));
+    expect(contextPack.constraints).toContain("Read-only repository access.");
+    expect(contextPack.safety.repoWritesAllowed).toBe(false);
+
+    const markdown = await readFile(record.artifacts.contextPackMarkdown, "utf8");
+    expect(markdown).toContain("# Context Pack");
+    expect(markdown).toContain("src/calculator.ts");
+    expect(markdown).not.toContain("package.json (");
+    expect(await fixtureSnapshot()).toEqual(before);
+  });
+
+  it("represents context-pack files truncated by maxBytesPerFile", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-context-pack-"));
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "context-pack",
+      runId: "context-pack-truncated",
+      input: {
+        repoPath: resolve("fixtures/repos/sample-js"),
+        include: ["src/calculator.ts"],
+        exclude: [],
+        maxBytesPerFile: 8
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+    const contextPack = await readContextPack(record.artifacts.contextPack);
+
+    expect(contextPack.includedFiles).toHaveLength(1);
+    expect(contextPack.includedFiles[0]?.path).toBe("src/calculator.ts");
+    expect(contextPack.includedFiles[0]?.includedBytes).toBe(8);
+    expect(contextPack.includedFiles[0]?.truncated).toBe(true);
+    expect(contextPack.includedFiles[0]?.sha256Scope).toBe("included-prefix");
+    expect(contextPack.limitations.join("\n")).toContain("src/calculator.ts was truncated");
+  });
+
+  it("rejects context-pack repoPath outside the workspace", async () => {
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "context-pack",
+      runId: "context-pack-unsafe-absolute-root",
+      input: {
+        repoPath: tmpdir(),
+        include: ["**/*"]
+      },
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("repoPath must resolve inside");
+  });
+
+  it("rejects context-pack repoPath traversal outside the workspace", async () => {
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "context-pack",
+      runId: "context-pack-unsafe-relative-root",
+      input: {
+        repoPath: "../../..",
+        include: ["**/*"]
+      },
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("repoPath must resolve inside");
+  });
+
+  it("rejects context-pack path traversal patterns", async () => {
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "context-pack",
+      runId: "context-pack-traversal",
+      input: {
+        repoPath: resolve("fixtures/repos/sample-js"),
+        include: ["../README.md"]
+      },
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("path traversal");
+  });
+
   it("blocks command-check unless trusted-local is selected", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "runforge-rails-"));
     const record = await runRunForge({
@@ -320,6 +441,17 @@ type SerializedCommandResult = {
   executed: boolean;
 };
 
+type SerializedContextPack = {
+  schemaVersion: number;
+  taskType: string;
+  runId: string;
+  includedFiles: Array<{ path: string; includedBytes: number; truncated: boolean; sha256Scope: string }>;
+  fileSummaries: Array<{ path: string }>;
+  constraints: string[];
+  safety: { repoWritesAllowed: boolean };
+  limitations: string[];
+};
+
 async function readCommandResult(path: string): Promise<SerializedCommandResult> {
   return JSON.parse(await readFile(path, "utf8")) as SerializedCommandResult;
 }
@@ -336,6 +468,10 @@ function expectCommandResultKeys(result: SerializedCommandResult): void {
     "stderr",
     "stdout"
   ]);
+}
+
+async function readContextPack(path: string): Promise<SerializedContextPack> {
+  return JSON.parse(await readFile(path, "utf8")) as SerializedContextPack;
 }
 
 async function fixtureSnapshot(): Promise<Record<string, string>> {

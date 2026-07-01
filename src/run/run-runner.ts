@@ -69,7 +69,8 @@ function buildRunTrajectory(spec: RunSpec, record: RunRecord, runDir: string) {
       repoPath: spec.repoPath,
       goal: spec.goal,
       logPath: spec.logPath,
-      command: spec.command
+      command: spec.command,
+      contextPack: spec.contextPack
     },
     stages: ["Run", "Task", "SafetyPolicy", "Context", "Execution", "Artifacts", "Trajectory", "Report", "HumanDecision"],
     result: {
@@ -87,6 +88,7 @@ function buildContextSummary(spec: RunSpec, record: RunRecord) {
     goal: spec.goal,
     logPath: spec.logPath,
     command: spec.command,
+    contextPack: spec.contextPack,
     status: record.status,
     summary: record.summary,
     artifacts: record.artifacts

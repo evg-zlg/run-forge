@@ -1,18 +1,14 @@
 {
   "schemaVersion": 1,
   "taskType": "context-pack",
-  "runId": "context-pack",
+  "runId": "sample-js-context",
   "artifactNamespace": "examples",
-  "repoPath": "../../fixtures/repos/sample-js",
-  "outDir": "../../artifacts/runspec",
-  "goal": "Prepare local context for the typecheck failure.",
   "input": {
-    "logPath": "../../fixtures/logs/typecheck-failure.log",
+    "repoPath": "../../fixtures/repos/sample-js",
     "include": [
       "src/**/*.ts",
       "tests/**/*.ts",
-      "README.md",
-      "package.json"
+      "README.md"
     ],
     "exclude": [
       "node_modules/**",
@@ -20,6 +16,7 @@
     ],
     "maxBytesPerFile": 12000
   },
+  "outDir": "../../artifacts/runspec",
   "safety": {
     "repoWritesAllowed": false,
     "networkAllowed": false
