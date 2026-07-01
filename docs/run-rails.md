@@ -38,7 +38,17 @@ Task implementations may add task-specific artifacts beside those files.
 - patch artifacts only;
 - human decision required before applying any patch.
 
-The minimal local rails implementation emits `proposal.patch` and `patch-summary.md`. `proposal.patch` may be empty when RunForge cannot produce a deterministic patch safely.
+The local rails implementation is currently deterministic and fixture-based, not an LLM coder. For the controlled `fixtures/repos/sample-js` calculator assertion task, it can emit a real unified diff in `proposal.patch`; for repositories without a matching deterministic rule, `proposal.patch` may still be empty.
+
+Inspect `patch-summary.md` first for the task summary, proposed files, rationale, safety status, and manual next step. Then inspect `proposal.patch` as a reviewable artifact. RunForge does not apply the patch, does not mutate the target repository, does not push, and does not merge.
+
+If a human accepts the proposal, they can apply it manually outside RunForge, for example:
+
+```sh
+git apply path/to/proposal.patch
+```
+
+That manual apply step is intentionally outside the RunForge run boundary.
 
 ## Rails Dogfood
 

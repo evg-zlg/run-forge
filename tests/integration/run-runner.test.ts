@@ -40,15 +40,60 @@ describe("runRunForge", () => {
     await expectRequiredArtifacts(record.artifacts);
     expect(record.artifacts.patchSummary).toMatch(/patch-summary\.md$/);
     expect(record.artifacts.proposalPatch).toMatch(/proposal\.patch$/);
+    expect(record.safety).toMatchObject({
+      applyMode: "patch-artifact",
+      repoWritesAllowed: false,
+      humanDecisionRequired: true
+    });
 
     const proposal = await readFile(record.artifacts.patchSummary, "utf8");
     expect(proposal).toContain("Human decision required");
     expect(proposal).toContain("No auto-merge");
+    expect(proposal).toContain("Artifact-only");
+    expect(proposal).toContain("Repository was not modified");
+    const patch = await readFile(record.artifacts.proposalPatch, "utf8");
+    expect(patch.length).toBeGreaterThan(0);
+    expect(patch).toContain("diff --git a/tests/calculator.test.ts b/tests/calculator.test.ts");
+    expect(patch).toContain("--- a/tests/calculator.test.ts");
+    expect(patch).toContain("+++ b/tests/calculator.test.ts");
+    expect(patch).toContain("-    expect(add(1, 1)).toBe(3);");
+    expect(patch).toContain("+    expect(add(1, 1)).toBe(2);");
 
     const review = await readFile(record.artifacts.review, "utf8");
     expect(review).toContain("proposal.patch");
     expect(review).toContain("patch-summary.md");
     await access(record.artifacts.proposalPatch);
+    expect(await fixtureSnapshot()).toEqual(before);
+  });
+
+  it("writes a deterministic fixture proposal from the checked-in RunSpec", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-runspec-out-"));
+    const before = await fixtureSnapshot();
+    const spec = await loadRunSpecFile("examples/runspecs/code-proposal-fixture-fix.json");
+    const record = await runRunForge({ ...spec, outDir });
+
+    expect(record.status).toBe("blocked");
+    expect(record.runId).toBe("code-proposal-fixture-fix");
+    expect(record.summary).toContain("gated artifacts only");
+    expect(record.safety).toMatchObject({
+      applyMode: "patch-artifact",
+      repoWritesAllowed: false,
+      autoPushAllowed: false,
+      autoMergeAllowed: false,
+      humanDecisionRequired: true
+    });
+
+    const patch = await readFile(record.artifacts.proposalPatch, "utf8");
+    expect(patch.length).toBeGreaterThan(0);
+    expect(patch).toContain("diff --git");
+    expect(patch).toContain("tests/calculator.test.ts");
+    expect(patch).toContain("@@ -3,6 +3,6 @@");
+
+    const summary = await readFile(record.artifacts.patchSummary, "utf8");
+    expect(summary).toMatch(/artifact/i);
+    expect(summary).toContain("Repository was not modified");
+    expect(summary).toMatch(/human/i);
+    expect(summary).toContain("apply it manually outside RunForge");
     expect(await fixtureSnapshot()).toEqual(before);
   });
 
@@ -239,6 +284,20 @@ describe("runRunForge", () => {
     await access(record.artifacts.proposalPatch);
     await access(record.artifacts.patchSummary);
     expect(await fixtureSnapshot()).toEqual(before);
+  });
+
+  it("rejects RunSpecs that request repository writes", async () => {
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "code-proposal",
+      runId: "write-request",
+      repoPath: resolve("fixtures/repos/sample-js"),
+      outDir: await mkdtemp(join(tmpdir(), "runforge-runspec-out-")),
+      goal: "Try to apply a patch.",
+      safety: { repoWritesAllowed: true, networkAllowed: false }
+    });
+
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("repoWritesAllowed=true is not supported");
   });
 });
 
