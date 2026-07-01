@@ -9,7 +9,7 @@ export async function buildContextPack(input: {
   spec: RunSpec;
   runDir: string;
   safety: RunSafetyPolicy;
-}): Promise<{ artifacts: Record<string, string>; summary: string }> {
+}): Promise<{ artifacts: Record<string, string>; summary: string; selectedNoFiles: boolean }> {
   const contextJsonPath = join(input.runDir, "context-pack.json");
   const contextMarkdownPath = join(input.runDir, "context-pack.md");
   const repoRoot = resolve(input.spec.repoPath);
@@ -72,7 +72,10 @@ export async function buildContextPack(input: {
   await writeText(contextMarkdownPath, renderContextPackMarkdown(contextPack));
   return {
     artifacts: { contextPack: contextJsonPath, contextPackMarkdown: contextMarkdownPath },
-    summary: "Context pack generated as deterministic local artifacts."
+    summary: files.includedFiles.length === 0
+      ? "Context pack selected no files. Check input.include/input.exclude patterns and keep them scoped to the target repository."
+      : "Context pack generated as deterministic local artifacts.",
+    selectedNoFiles: files.includedFiles.length === 0
   };
 }
 

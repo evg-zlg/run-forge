@@ -191,7 +191,7 @@ describe("runRunForge", () => {
       safety: { repoWritesAllowed: false, networkAllowed: false }
     });
 
-    await expect(loadRunSpecFile(specPath)).rejects.toThrow("repoPath must resolve inside");
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("Set input.allowExternalRepo=true");
   });
 
   it("allows an explicit external context-pack repoPath and keeps include/exclude scoped", async () => {
@@ -235,6 +235,42 @@ describe("runRunForge", () => {
     expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
   });
 
+  it("blocks context-pack when scoped include/exclude selects no files", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-context-pack-empty-"));
+    const externalRepo = await copyExternalDocsFixture();
+    const before = await externalDocsSnapshot(externalRepo);
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "context-pack",
+      runId: "external-context-pack-empty",
+      artifactNamespace: "tests",
+      input: {
+        repoPath: externalRepo,
+        allowExternalRepo: true,
+        include: ["docs/DOES_NOT_EXIST.md"],
+        exclude: [],
+        maxBytesPerFile: 12_000,
+        maxTotalFiles: 10,
+        maxTotalBytes: 50_000
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+    expect(record.status).toBe("blocked");
+    expect(record.summary).toContain("selected no files");
+
+    const contextPack = await readContextPack(record.artifacts.contextPack);
+    expect(contextPack.includedFiles).toEqual([]);
+    const markdown = await readFile(record.artifacts.contextPackMarkdown, "utf8");
+    expect(markdown).toContain("No files included");
+
+    const humanReview = await readFile(record.artifacts.humanReview, "utf8");
+    expect(humanReview).toContain("selected no files");
+    expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
+  });
+
   it("rejects external context-pack repoPath unless it is explicitly allowed", async () => {
     const externalRepo = await copyExternalDocsFixture();
     const specPath = await writeTempRunSpec({
@@ -248,7 +284,7 @@ describe("runRunForge", () => {
       safety: { repoWritesAllowed: false, networkAllowed: false }
     });
 
-    await expect(loadRunSpecFile(specPath)).rejects.toThrow("repoPath must resolve inside");
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("Set input.allowExternalRepo=true");
   });
 
   it("rejects context-pack repoPath traversal outside the workspace", async () => {
@@ -263,7 +299,7 @@ describe("runRunForge", () => {
       safety: { repoWritesAllowed: false, networkAllowed: false }
     });
 
-    await expect(loadRunSpecFile(specPath)).rejects.toThrow("repoPath must resolve inside");
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("Set input.allowExternalRepo=true");
   });
 
   it("rejects context-pack path traversal patterns", async () => {
@@ -334,6 +370,82 @@ describe("runRunForge", () => {
     expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
   });
 
+  it("blocks docs proposal with useful artifacts when the anchor is not found", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-anchor-"));
+    const externalRepo = await copyExternalDocsFixture();
+    const before = await externalDocsSnapshot(externalRepo);
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "code-proposal",
+      runId: "external-docs-proposal-anchor-missing",
+      artifactNamespace: "tests",
+      input: {
+        repoPath: externalRepo,
+        allowExternalRepo: true,
+        docsProposal: {
+          targetFile: "README.md",
+          anchorText: "this anchor is not in the fixture",
+          insertedText: "\n\nDocument the stable local dev command.",
+          rationale: "The stable command should be easy to discover.",
+          evidenceFiles: ["README.md", "package.json", "docs/BUILD_STABILITY.md"]
+        }
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+    expect(record.status).toBe("blocked");
+    expect(record.summary).toContain("anchor text was not found in README.md");
+
+    const patch = await readFile(record.artifacts.proposalPatch, "utf8");
+    expect(patch).toBe("");
+    const summary = await readFile(record.artifacts.patchSummary, "utf8");
+    expect(summary).toContain("No patch generated: anchor text was not found in README.md.");
+    expect(summary).toContain("Repository was not modified");
+    const humanReview = await readFile(record.artifacts.humanReview, "utf8");
+    expect(humanReview).toContain("anchor text was not found in README.md");
+    expect(humanReview).toContain("No patch was written");
+    expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
+  });
+
+  it("blocks docs proposal when include/exclude omits required proposal files", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-scope-"));
+    const externalRepo = await copyExternalDocsFixture();
+    const before = await externalDocsSnapshot(externalRepo);
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "code-proposal",
+      runId: "external-docs-proposal-scope-miss",
+      artifactNamespace: "tests",
+      input: {
+        repoPath: externalRepo,
+        allowExternalRepo: true,
+        include: ["package.json"],
+        exclude: [],
+        docsProposal: {
+          targetFile: "README.md",
+          anchorText: "npm run dev\n```",
+          insertedText: "\n\nFor the stable frontend dev path, use the existing root command:\n\n```bash\nnpm run dev:stable\n```",
+          rationale: "`package.json` exposes a root `dev:stable` script and BUILD_STABILITY documents it.",
+          evidenceFiles: ["README.md", "package.json", "docs/BUILD_STABILITY.md"]
+        }
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+    expect(record.status).toBe("blocked");
+    expect(record.summary).toContain("did not select required docs proposal file");
+    const patch = await readFile(record.artifacts.proposalPatch, "utf8");
+    expect(patch).toBe("");
+    const summary = await readFile(record.artifacts.patchSummary, "utf8");
+    expect(summary).toContain("README.md");
+    expect(summary).toContain("docs/BUILD_STABILITY.md");
+    expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
+  });
+
   it("rejects external docs proposals unless the repoPath is explicitly allowed", async () => {
     const externalRepo = await copyExternalDocsFixture();
     const specPath = await writeTempRunSpec({
@@ -353,7 +465,7 @@ describe("runRunForge", () => {
       safety: { repoWritesAllowed: false, networkAllowed: false }
     });
 
-    await expect(loadRunSpecFile(specPath)).rejects.toThrow("code-proposal repoPath must resolve inside");
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("Set input.allowExternalRepo=true");
   });
 
   it("rejects external fixture code-proposal repoPath unless it is explicitly allowed", async () => {
@@ -369,7 +481,7 @@ describe("runRunForge", () => {
       safety: { repoWritesAllowed: false, networkAllowed: false }
     });
 
-    await expect(loadRunSpecFile(specPath)).rejects.toThrow("code-proposal repoPath must resolve inside");
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("Set input.allowExternalRepo=true");
   });
 
   it("blocks command-check unless trusted-local is selected", async () => {
@@ -573,6 +685,31 @@ describe("runRunForge", () => {
     });
 
     await expect(loadRunSpecFile(specPath)).rejects.toThrow("repoWritesAllowed=true is not supported");
+  });
+
+  it("loads the external docs proposal template with explicit alpha safety settings", async () => {
+    const spec = await loadRunSpecFile("examples/runspecs/external-docs-proposal.template.json");
+
+    expect(spec.taskType).toBe("code-proposal");
+    expect(spec.allowExternalRepo).toBe(true);
+    expect(spec.docsProposal).toMatchObject({
+      allowExternalRepo: true,
+      include: ["README.md", "package.json", "docs/**/*.md"],
+      exclude: [
+        "node_modules/**",
+        "dist/**",
+        "build/**",
+        "coverage/**",
+        ".git/**",
+        "artifacts/**",
+        "output/**",
+        "tmp/**",
+        "reports/**"
+      ],
+      targetFile: "README.md"
+    });
+    expect(spec.safetyProfile).toBe("safe-local");
+    expect(spec.applyMode).toBe("patch-artifact");
   });
 });
 

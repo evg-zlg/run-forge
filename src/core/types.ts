@@ -35,6 +35,8 @@ export interface RunSpec {
   };
   docsProposal?: {
     allowExternalRepo: boolean;
+    include?: string[];
+    exclude?: string[];
     targetFile: string;
     anchorText: string;
     insertedText: string;

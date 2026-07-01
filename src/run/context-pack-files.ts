@@ -49,6 +49,10 @@ export async function collectContextPackFiles(input: {
   const limitations: string[] = [];
   let totalBytes = 0;
 
+  if (candidates.length === 0) {
+    limitations.push("No files matched input.include after input.exclude and default safety skips were applied.");
+  }
+
   for (const path of candidates) {
     if (includedFiles.length >= input.limits.maxTotalFiles) {
       limitations.push(`File limit reached at ${input.limits.maxTotalFiles} files.`);

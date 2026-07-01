@@ -56,7 +56,7 @@ function assertExternalCodeProposalAllowed(spec: RunSpec): void {
   const target = resolve(spec.repoPath);
   const rel = relative(root, target);
   if (!spec.allowExternalRepo && !spec.docsProposal?.allowExternalRepo && (rel.startsWith("..") || isAbsolute(rel))) {
-    throw new Error("code-proposal repoPath must resolve inside the current RunForge workspace unless input.allowExternalRepo=true.");
+    throw new Error(`code-proposal repoPath resolved outside the current RunForge workspace: ${target}. Set input.allowExternalRepo=true only when you intentionally want a read-only external local repo trial.`);
   }
 }
 
