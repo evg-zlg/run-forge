@@ -14,3 +14,7 @@ It must include:
 Confidence must be one of `low`, `medium`, or `high`.
 
 The report must never claim that a command was run if RunForge only suggested it.
+
+RunForge `run` artifacts also persist the normalized input contract as
+`run-spec.json` next to `run.json`, `review.md`, `trajectory.json`,
+`safety-report.json`, and `context-summary.json`.

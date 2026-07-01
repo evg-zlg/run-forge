@@ -17,6 +17,8 @@ export type TaskType =
   | "code-proposal";
 
 export interface RunSpec {
+  runId?: string;
+  artifactNamespace?: string;
   taskType: TaskType;
   repoPath: string;
   goal?: string;

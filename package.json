@@ -23,6 +23,9 @@
     "demo:run-repo-research": "tsx src/cli/index.ts run --task repo-research --repo ./fixtures/repos/sample-js --goal \"Map package scripts\" --out ./artifacts/runs/demo-repo-research",
     "demo:run-context-pack": "tsx src/cli/index.ts run --task context-pack --repo ./fixtures/repos/sample-js --goal \"Prepare local context\" --log ./fixtures/logs/typecheck-failure.log --out ./artifacts/runs/demo-context-pack",
     "demo:run-code-proposal": "tsx src/cli/index.ts run --task code-proposal --repo ./fixtures/repos/sample-js --goal \"Propose a calculator fix\" --out ./artifacts/runs/demo-code-proposal",
+    "demo:spec-command-check": "tsx src/cli/index.ts run --spec ./examples/runspecs/command-check-typecheck.json",
+    "demo:spec-context-pack": "tsx src/cli/index.ts run --spec ./examples/runspecs/context-pack.json",
+    "demo:spec-code-proposal": "tsx src/cli/index.ts run --spec ./examples/runspecs/code-proposal-gated.json",
     "test": "pnpm check:structure && vitest run",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "validation:run": "pnpm build && node dist/scripts/run-validation.js"

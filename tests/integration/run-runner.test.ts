@@ -1,7 +1,8 @@
-import { access, mkdtemp, readFile } from "node:fs/promises";
+import { access, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
+import { loadRunSpecFile } from "../../src/run/runspec-loader.js";
 import { runRunForge } from "../../src/run/run-runner.js";
 
 describe("runRunForge", () => {
@@ -144,6 +145,101 @@ describe("runRunForge", () => {
     expect(result.exitCode).toBeNull();
     expect(result.signal).toBeNull();
   });
+
+  it("runs a valid command-check RunSpec and writes artifacts", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-runspec-out-"));
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "command-check",
+      runId: "valid-command-check",
+      artifactNamespace: "tests",
+      repoPath: resolve("fixtures/repos/sample-js"),
+      outDir,
+      input: { command: "node --version" },
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+
+    expect(record.status).toBe("passed");
+    expect(record.runId).toBe("valid-command-check");
+    expect(record.artifacts.runSpec).toContain("/tests/valid-command-check/run-spec.json");
+    await expectRequiredArtifacts(record.artifacts);
+    const result = await readCommandResult(record.artifacts.commandResult);
+    expectCommandResultKeys(result);
+    expect(result.executed).toBe(true);
+  });
+
+  it("rejects invalid RunSpec task types", async () => {
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "unsafe-task",
+      runId: "bad-task",
+      input: {}
+    });
+
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("Unknown RunSpec taskType");
+  });
+
+  it("rejects command-check RunSpecs without a command", async () => {
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "command-check",
+      runId: "missing-command",
+      input: {}
+    });
+
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("requires input.command");
+  });
+
+  it.each([
+    { runId: "../escape" },
+    { runId: "safe-run", artifactNamespace: "../escape" }
+  ])("rejects unsafe RunSpec artifact paths: %o", async (fields) => {
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "repo-research",
+      ...fields
+    });
+
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("safe artifact path segment");
+  });
+
+  it("rejects dangerous command-check commands from RunSpec before execution", async () => {
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "command-check",
+      runId: "dangerous-command",
+      input: { command: "rm -rf ./tmp" },
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    await expect(loadRunSpecFile(specPath)).rejects.toThrow("Blocked dangerous command pattern");
+  });
+
+  it("keeps code-proposal RunSpec gated as artifacts only", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-runspec-out-"));
+    const before = await fixtureSnapshot();
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "code-proposal",
+      runId: "gated-code-proposal",
+      artifactNamespace: "tests",
+      repoPath: resolve("fixtures/repos/sample-js"),
+      outDir,
+      goal: "Propose a calculator fix.",
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+
+    expect(record.status).toBe("blocked");
+    expect(record.artifacts.proposalPatch).toMatch(/proposal\.patch$/);
+    expect(record.artifacts.patchSummary).toMatch(/patch-summary\.md$/);
+    await access(record.artifacts.proposalPatch);
+    await access(record.artifacts.patchSummary);
+    expect(await fixtureSnapshot()).toEqual(before);
+  });
 });
 
 async function expectRequiredArtifacts(artifacts: Record<string, string>): Promise<void> {
@@ -190,4 +286,11 @@ async function fixtureSnapshot(): Promise<Record<string, string>> {
     snapshot[file] = await readFile(join("fixtures/repos/sample-js", file), "utf8");
   }
   return snapshot;
+}
+
+async function writeTempRunSpec(value: unknown): Promise<string> {
+  const dir = await mkdtemp(join(tmpdir(), "runforge-runspec-"));
+  const path = join(dir, "spec.json");
+  await writeFile(path, `${JSON.stringify(value, null, 2)}\n`, "utf8");
+  return path;
 }

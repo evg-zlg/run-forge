@@ -27,6 +27,7 @@ review.md
 trajectory.json
 safety-report.json
 context-summary.json
+run-spec.json
 ```
 
 Task-specific artifacts are written beside those common files. The original failure triage task still writes:
@@ -66,6 +67,7 @@ runforge triage --repo . --log ./failure.log --out ./runforge-artifacts/case-001
 runforge run --task repo-research --repo . --goal "Map package scripts" --out ./runforge-artifacts
 runforge run --task code-proposal --repo . --goal "Propose a fix" --out ./runforge-artifacts
 runforge run --task command-check --repo . --command "pnpm test" --safety-profile trusted-local --out ./runforge-artifacts
+runforge run --spec ./examples/runspecs/command-check-typecheck.json
 ```
 
 ## Commands
@@ -82,9 +84,10 @@ pnpm dogfood
 ```
 
 The default provider is deterministic and local. `openai-compatible` is only a skeleton and is never required for tests.
+RunSpec files are documented in [docs/runspec.md](docs/runspec.md), with examples in [examples/runspecs](examples/runspecs).
 
 ## Safety
 
 MVP triage is read-only against the target repository. RunForge writes only to the requested artifact directory and does not execute repository commands.
 
-See [docs/run-rails.md](docs/run-rails.md), [docs/security-model.md](docs/security-model.md), [docs/report-contract.md](docs/report-contract.md), [docs/ai-native-codebase.md](docs/ai-native-codebase.md), [docs/engineering-rules.md](docs/engineering-rules.md), and [docs/dogfooding.md](docs/dogfooding.md).
+See [docs/run-rails.md](docs/run-rails.md), [docs/runspec.md](docs/runspec.md), [docs/security-model.md](docs/security-model.md), [docs/report-contract.md](docs/report-contract.md), [docs/ai-native-codebase.md](docs/ai-native-codebase.md), [docs/engineering-rules.md](docs/engineering-rules.md), and [docs/dogfooding.md](docs/dogfooding.md).
