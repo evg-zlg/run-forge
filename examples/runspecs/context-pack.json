@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "taskType": "context-pack",
+  "runId": "context-pack",
+  "artifactNamespace": "examples",
+  "repoPath": "../../fixtures/repos/sample-js",
+  "outDir": "../../artifacts/runspec",
+  "goal": "Prepare local context for the typecheck failure.",
+  "input": {
+    "logPath": "../../fixtures/logs/typecheck-failure.log"
+  },
+  "safety": {
+    "repoWritesAllowed": false,
+    "networkAllowed": false
+  }
+}

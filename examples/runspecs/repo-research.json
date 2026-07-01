@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "taskType": "repo-research",
+  "runId": "repo-research",
+  "artifactNamespace": "examples",
+  "repoPath": "../../fixtures/repos/sample-js",
+  "outDir": "../../artifacts/runspec",
+  "goal": "Map package manager, scripts, and guidance files.",
+  "safety": {
+    "repoWritesAllowed": false,
+    "networkAllowed": false
+  }
+}

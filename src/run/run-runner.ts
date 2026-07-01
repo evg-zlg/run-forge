@@ -9,8 +9,8 @@ import { executeTask } from "./task-implementations.js";
 
 export async function runRunForge(spec: RunSpec): Promise<RunRecord> {
   const startedAt = new Date().toISOString();
-  const runId = createRunId();
-  const runDir = join(resolve(spec.outDir), runId);
+  const runId = spec.runId ?? createRunId();
+  const runDir = join(resolve(spec.outDir), ...(spec.artifactNamespace ? [spec.artifactNamespace] : []), runId);
   const normalized = { ...spec, repoPath: resolve(spec.repoPath), outDir: resolve(spec.outDir) };
   await ensureDir(runDir);
 

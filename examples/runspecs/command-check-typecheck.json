@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "taskType": "command-check",
+  "runId": "command-check-typecheck",
+  "artifactNamespace": "examples",
+  "repoPath": "../..",
+  "outDir": "../../artifacts/runspec",
+  "input": {
+    "command": "pnpm typecheck"
+  },
+  "safety": {
+    "repoWritesAllowed": false,
+    "networkAllowed": false
+  }
+}
