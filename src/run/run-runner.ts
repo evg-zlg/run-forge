@@ -24,6 +24,7 @@ export async function runRunForge(spec: RunSpec): Promise<RunRecord> {
   const artifacts = {
     run: join(runDir, "run.json"),
     review: join(runDir, "review.md"),
+    humanReview: join(runDir, "human-review.md"),
     trajectory: join(runDir, "trajectory.json"),
     safetyReport: join(runDir, "safety-report.json"),
     contextSummary: join(runDir, "context-summary.json"),
@@ -45,7 +46,9 @@ export async function runRunForge(spec: RunSpec): Promise<RunRecord> {
 
   await writeJson(record.artifacts.contextSummary, buildContextSummary(normalized, record));
   await writeJson(record.artifacts.trajectory, buildRunTrajectory(normalized, record, runDir));
-  await writeText(record.artifacts.review, renderRunReview(record));
+  const reviewText = renderRunReview(record);
+  await writeText(record.artifacts.review, reviewText);
+  await writeText(record.artifacts.humanReview, reviewText);
   await writeText(record.artifacts.report, renderRunReport(record));
   await writeJson(record.artifacts.run, record);
   await writeJson(record.artifacts.runRecord, record);

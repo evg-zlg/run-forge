@@ -46,6 +46,7 @@ export async function buildContextPack(input: {
       rootArtifacts: [
         "run.json",
         "review.md",
+        "human-review.md",
         "trajectory.json",
         "safety-report.json",
         "context-summary.json",

@@ -24,6 +24,7 @@ Every `runforge run` invocation writes a run directory under `--out` with:
 ```text
 run.json
 review.md
+human-review.md
 trajectory.json
 safety-report.json
 context-summary.json
@@ -77,6 +78,20 @@ pnpm demo:spec-code-proposal-fixture
 ```
 
 Inspect `patch-summary.md` and `proposal.patch` in the emitted run directory. If a human accepts the proposal, they can apply it manually outside RunForge with `git apply path/to/proposal.patch`.
+
+## Run the MVP demo
+
+```bash
+pnpm demo:mvp
+```
+
+This writes a complete local demo packet to `artifacts/mvp-demo/sample-js-fix/`.
+
+Inspect `artifacts/mvp-demo/sample-js-fix/human-review.md` first. It explains the attempted sample-js calculator task, the context pack, the captured check evidence, the proposal-only patch, the safety gates, and the human next step.
+
+The demo proves the current local harness can compose task context, deterministic failure evidence, gated code proposal artifacts, `git apply --check` validation, and a human review packet without mutating the fixture repo.
+
+It does not prove hosted execution or autonomous delivery. There is no LLM/API call yet, no repo mutation, no auto-PR, no auto-merge, and no automatic patch application. The patch is proposal-only; a human applies or approves it manually.
 
 ## Commands
 
