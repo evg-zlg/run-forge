@@ -7,11 +7,14 @@ export interface DeterministicCodeProposal {
   filesChanged: string[];
   rationale: string;
   patch: string;
+  outcome?: "proposal_ready" | "no_proposal_generated" | "evidence_missing";
+  evidenceFiles?: string[];
+  diagnostics?: string[];
 }
 
-export async function buildFixtureCodeProposal(spec: RunSpec): Promise<DeterministicCodeProposal | null> {
+export async function buildFixtureCodeProposal(spec: RunSpec, scopedFiles?: string[]): Promise<DeterministicCodeProposal | null> {
   assertExternalCodeProposalAllowed(spec);
-  const docsProposal = await buildDocsProposal(spec);
+  const docsProposal = await buildDocsProposal(spec, scopedFiles);
   if (docsProposal) return docsProposal;
 
   const testPath = "tests/calculator.test.ts";
@@ -27,8 +30,16 @@ export async function buildFixtureCodeProposal(spec: RunSpec): Promise<Determini
   };
 }
 
-async function buildDocsProposal(spec: RunSpec): Promise<DeterministicCodeProposal | null> {
+async function buildDocsProposal(spec: RunSpec, scopedFiles?: string[]): Promise<DeterministicCodeProposal | null> {
   if (!spec.docsProposal) return null;
+  const evidenceState = await validateDocsProposalEvidence(spec, scopedFiles);
+  if (evidenceState.errors.length > 0) {
+    return noDocsPatch(spec, `evidence_missing: ${evidenceState.errors.join(" ")}`, {
+      outcome: "evidence_missing",
+      evidenceFiles: evidenceState.included,
+      diagnostics: evidenceState.errors
+    });
+  }
   const source = await readOptionalRepoFile(spec.repoPath, spec.docsProposal.targetFile);
   if (source === null) {
     return noDocsPatch(spec, `${spec.docsProposal.targetFile} was not found.`);
@@ -47,7 +58,9 @@ async function buildDocsProposal(spec: RunSpec): Promise<DeterministicCodePropos
     taskSummary: spec.goal ?? "Prepare a docs proposal.",
     filesChanged: [spec.docsProposal.targetFile],
     rationale: spec.docsProposal.rationale,
-    patch: renderUnifiedDiff(spec.docsProposal.targetFile, source, nextSource)
+    patch: renderUnifiedDiff(spec.docsProposal.targetFile, source, nextSource),
+    outcome: "proposal_ready",
+    evidenceFiles: evidenceState.included
   };
 }
 
@@ -60,13 +73,46 @@ function assertExternalCodeProposalAllowed(spec: RunSpec): void {
   }
 }
 
-function noDocsPatch(spec: RunSpec, reason: string): DeterministicCodeProposal {
+function noDocsPatch(
+  spec: RunSpec,
+  reason: string,
+  overrides: Partial<Pick<DeterministicCodeProposal, "outcome" | "evidenceFiles" | "diagnostics">> = {}
+): DeterministicCodeProposal {
   return {
     taskSummary: spec.goal ?? "Prepare a docs proposal.",
     filesChanged: [],
     rationale: `No patch generated: ${reason}`,
-    patch: ""
+    patch: "",
+    outcome: overrides.outcome ?? "no_proposal_generated",
+    evidenceFiles: overrides.evidenceFiles ?? [],
+    diagnostics: overrides.diagnostics ?? [reason]
   };
+}
+
+async function validateDocsProposalEvidence(spec: RunSpec, scopedFiles?: string[]): Promise<{
+  included: string[];
+  errors: string[];
+}> {
+  if (!spec.docsProposal) return { included: [], errors: [] };
+  const required = [...new Set([spec.docsProposal.targetFile, ...spec.docsProposal.evidenceFiles])];
+  const scoped = scopedFiles ? new Set(scopedFiles) : new Set(required);
+  const included: string[] = [];
+  const errors: string[] = [];
+
+  for (const file of required) {
+    if (!scoped.has(file)) {
+      errors.push(`${file} is not included in scoped context.`);
+      continue;
+    }
+    const content = await readOptionalRepoFile(spec.repoPath, file);
+    if (content === null) {
+      errors.push(`${file} does not exist or is not readable under the repository root.`);
+      continue;
+    }
+    included.push(file);
+  }
+
+  return { included, errors };
 }
 
 async function readOptionalRepoFile(repoPath: string, relativePath: string): Promise<string | null> {
@@ -117,18 +163,18 @@ function renderUnifiedDiff(filePath: string, before: string, after: string): str
   let afterIndex = afterStart;
 
   while (beforeIndex < beforeEnd || afterIndex < afterEnd) {
-    if (beforeIndex < beforeEnd && afterIndex < afterEnd && beforeLines[beforeIndex] === afterLines[afterIndex]) {
-      hunk.push(` ${beforeLines[beforeIndex]}`);
+    if (beforeIndex < beforeEnd && afterIndex < afterEnd && sameDiffLine(beforeLines[beforeIndex], afterLines[afterIndex])) {
+      pushDiffLine(hunk, " ", beforeLines[beforeIndex]);
       beforeIndex += 1;
       afterIndex += 1;
       continue;
     }
-    if (beforeIndex < beforeEnd && (afterIndex >= afterEnd || !afterLines.slice(afterIndex, afterEnd).includes(beforeLines[beforeIndex]))) {
-      hunk.push(`-${beforeLines[beforeIndex]}`);
+    if (beforeIndex < beforeEnd && (afterIndex >= afterEnd || !includesDiffLine(afterLines, afterIndex, afterEnd, beforeLines[beforeIndex]))) {
+      pushDiffLine(hunk, "-", beforeLines[beforeIndex]);
       beforeIndex += 1;
     }
-    if (afterIndex < afterEnd && (beforeIndex >= beforeEnd || !beforeLines.slice(beforeIndex, beforeEnd).includes(afterLines[afterIndex]))) {
-      hunk.push(`+${afterLines[afterIndex]}`);
+    if (afterIndex < afterEnd && (beforeIndex >= beforeEnd || !includesDiffLine(beforeLines, beforeIndex, beforeEnd, afterLines[afterIndex]))) {
+      pushDiffLine(hunk, "+", afterLines[afterIndex]);
       afterIndex += 1;
     }
   }
@@ -142,24 +188,46 @@ function renderUnifiedDiff(filePath: string, before: string, after: string): str
   ].join("\n") + "\n";
 }
 
-function splitLines(text: string): string[] {
-  return text.replace(/\n$/, "").split("\n");
+interface DiffLine {
+  text: string;
+  hasNewline: boolean;
 }
 
-function firstChangedLine(left: string[], right: string[]): number {
+function splitLines(text: string): DiffLine[] {
+  if (text.length === 0) return [];
+  return text.split(/(?<=\n)/).map((line) => ({
+    text: line.endsWith("\n") ? line.slice(0, -1) : line,
+    hasNewline: line.endsWith("\n")
+  }));
+}
+
+function pushDiffLine(hunk: string[], prefix: " " | "-" | "+", line: DiffLine): void {
+  hunk.push(`${prefix}${line.text}`);
+  if (!line.hasNewline) hunk.push("\\ No newline at end of file");
+}
+
+function firstChangedLine(left: DiffLine[], right: DiffLine[]): number {
   const length = Math.min(left.length, right.length);
   for (let index = 0; index < length; index += 1) {
-    if (left[index] !== right[index]) return index;
+    if (!sameDiffLine(left[index], right[index])) return index;
   }
   return length;
 }
 
-function lastChangedLine(left: string[], right: string[]): number {
+function lastChangedLine(left: DiffLine[], right: DiffLine[]): number {
   let leftIndex = left.length - 1;
   let rightIndex = right.length - 1;
-  while (leftIndex >= 0 && rightIndex >= 0 && left[leftIndex] === right[rightIndex]) {
+  while (leftIndex >= 0 && rightIndex >= 0 && sameDiffLine(left[leftIndex], right[rightIndex])) {
     leftIndex -= 1;
     rightIndex -= 1;
   }
   return Math.max(leftIndex, 0);
+}
+
+function sameDiffLine(left: DiffLine, right: DiffLine): boolean {
+  return left.text === right.text && left.hasNewline === right.hasNewline;
+}
+
+function includesDiffLine(lines: DiffLine[], start: number, end: number, expected: DiffLine): boolean {
+  return lines.slice(start, end).some((line) => sameDiffLine(line, expected));
 }

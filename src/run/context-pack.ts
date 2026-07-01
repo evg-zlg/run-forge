@@ -93,20 +93,25 @@ function defaultContextPackOptions(): NonNullable<RunSpec["contextPack"]> {
 function relevantCommands(scripts: Record<string, string>): string[] {
   return Object.entries(scripts)
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, command]) => `pnpm ${name}: ${command}`);
+    .map(([name, command]) => `${name}: ${command}`);
 }
 
 function scriptsFromIncludedPackageJson(fileSummaries: Array<{ path: string; excerpt: string }>): Record<string, string> {
-  const packageJson = fileSummaries.find((file) => file.path === "package.json");
-  if (!packageJson) return {};
+  return Object.fromEntries(fileSummaries
+    .filter((file) => file.path === "package.json" || file.path.endsWith("/package.json"))
+    .flatMap((file) => packageScripts(file.path, file.excerpt)));
+}
+
+function packageScripts(path: string, excerpt: string): Array<[string, string]> {
   try {
-    const parsed = JSON.parse(packageJson.excerpt) as { scripts?: unknown };
-    if (typeof parsed.scripts !== "object" || parsed.scripts === null || Array.isArray(parsed.scripts)) return {};
-    return Object.fromEntries(
-      Object.entries(parsed.scripts).filter((entry): entry is [string, string] => typeof entry[1] === "string")
-    );
+    const parsed = JSON.parse(excerpt) as { scripts?: unknown };
+    if (typeof parsed.scripts !== "object" || parsed.scripts === null || Array.isArray(parsed.scripts)) return [];
+    const prefix = path === "package.json" ? "" : `${path.slice(0, -"/package.json".length)}:`;
+    return Object.entries(parsed.scripts)
+      .filter((entry): entry is [string, string] => typeof entry[1] === "string")
+      .map(([name, command]) => [`${prefix}${name}`, command]);
   } catch {
-    return {};
+    return [];
   }
 }
 

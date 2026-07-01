@@ -233,11 +233,12 @@ for docs-only README proposals:
 ```
 
 This mode is deterministic and non-LLM. It reads the target file, finds the
-anchor text, writes a proposal-only unified diff to `proposal.patch`, and leaves
-the target repository unchanged. If the target file, anchor, or requested text
-state prevents a deterministic patch, `proposal.patch` remains empty and
-`patch-summary.md` explains why instead of silently pretending a proposal was
-created.
+anchor text, validates declared evidence files against the scoped context,
+writes a proposal-only unified diff to `proposal.patch`, and leaves the target
+repository unchanged. If evidence is missing or excluded, or if the target file,
+anchor, or requested text state prevents a deterministic patch, `proposal.patch`
+remains empty and `patch-summary.md` plus `proposal-status.json` explain why
+instead of silently pretending a proposal was created.
 
 To review a code proposal, open `patch-summary.md` for the task summary, files proposed to change, rationale, safety status, and manual next step. Then inspect `proposal.patch`. A human may apply the patch manually outside RunForge with `git apply path/to/proposal.patch` after review.
 
@@ -261,14 +262,17 @@ The command produces a combined packet under
 - `context-pack.md`
 - `proposal.patch`
 - `patch-summary.md`
+- `proposal-status.json`
 - `safety-report.json`
 - `trajectory.json`
 - `run-spec.json`
 
-The demo verifies that `proposal.patch` is non-empty and that
-`git apply --check proposal.patch` accepts the patch against the external repo.
-It does not apply the patch and does not write to SmartSQL. Tests use a local
-fixture external repo so CI does not depend on the SmartSQL path existing.
+The demo emits the complete packet in one flow. When a patch is generated, it
+checks `git apply --check proposal.patch` against the external repo. When
+evidence is missing, it writes an empty patch with an explicit no-proposal
+status instead of claiming unsupported evidence. It does not apply the patch and
+does not write to SmartSQL. Tests use a local fixture external repo so CI does
+not depend on the SmartSQL path existing.
 
 Current limitations: `docsProposal` is intentionally narrow. It inserts
 reviewed text after an exact anchor in one target file and does not perform
