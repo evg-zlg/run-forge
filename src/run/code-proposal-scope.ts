@@ -40,7 +40,7 @@ function emptyDocsProposal(spec: RunSpec, reason: string): DeterministicCodeProp
     filesChanged: [],
     rationale: `No patch generated: ${reason}`,
     patch: "",
-    outcome: reason.includes("required docs proposal file") ? "evidence_missing" : "no_proposal_generated",
+    outcome: reason.includes("required docs proposal file") ? "evidence_missing" : "proposal_not_generated",
     evidenceFiles: [],
     diagnostics: [reason]
   };

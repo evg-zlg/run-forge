@@ -117,6 +117,21 @@ ${record.summary}
 ## Artifacts
 
 ${artifacts}
+${renderTaskSpecificReview(record)}
+`;
+}
+
+function renderTaskSpecificReview(record: RunRecord): string {
+  if (record.taskType !== "code-proposal") return "";
+  const outcome = record.summary.includes(":") ? record.summary.split(":")[0] : record.status;
+  return `
+## Code Proposal Human Gate
+
+- Outcome: ${outcome}
+- Task attempted: ${record.summary}
+- Artifacts produced: inspect proposal-status.json, patch-summary.md, proposal.patch, safety-report.json, and trajectory.json when present.
+- Target repository modified: no; RunForge writes artifacts only.
+- Human next step: review proposal-status.json and patch-summary.md. Apply any acceptable patch manually outside RunForge.
 `;
 }
 

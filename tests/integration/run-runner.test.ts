@@ -536,6 +536,86 @@ describe("runRunForge", () => {
     expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
   });
 
+  it("finalizes external docs proposal artifacts on timeout", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-timeout-"));
+    const externalRepo = await copyExternalDocsFixture();
+    const before = await externalDocsSnapshot(externalRepo);
+    const previousTimeout = process.env.RUNFORGE_DOCS_PROPOSAL_TIMEOUT_MS;
+    process.env.RUNFORGE_DOCS_PROPOSAL_TIMEOUT_MS = "0";
+    try {
+      const specPath = await writeTempRunSpec({
+        schemaVersion: 1,
+        taskType: "code-proposal",
+        runId: "external-docs-proposal-timeout",
+        artifactNamespace: "tests",
+        input: {
+          repoPath: externalRepo,
+          allowExternalRepo: true,
+          docsProposal: {
+            targetFile: "README.md",
+            anchorText: "npm run dev\n```",
+            insertedText: "\n\nFor the stable frontend dev path, use the existing root command:\n\n```bash\nnpm run dev:stable\n```",
+            rationale: "`package.json` exposes a root `dev:stable` script and BUILD_STABILITY documents it.",
+            evidenceFiles: ["README.md", "package.json", "docs/BUILD_STABILITY.md"]
+          }
+        },
+        outDir,
+        safety: { repoWritesAllowed: false, networkAllowed: false }
+      });
+
+      const record = await runRunForge(await loadRunSpecFile(specPath));
+      expect(record.status).toBe("blocked");
+      await expectRequiredArtifacts(record.artifacts);
+      expect(record.summary).toContain("timeout");
+      for (const artifact of ["runSpec", "safetyReport", "proposalStatus", "humanReview", "patchSummary", "trajectory"]) {
+        expect(record.artifacts[artifact]).toBeTruthy();
+        await access(record.artifacts[artifact]);
+      }
+      const status = await readProposalStatus(record.artifacts.proposalStatus);
+      expect(status.outcome).toBe("timeout");
+      expect(status.diagnostics.join("\n")).toContain("context-pack timed out");
+      expect(await readFile(record.artifacts.proposalPatch, "utf8")).toBe("");
+      expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
+    } finally {
+      if (previousTimeout === undefined) delete process.env.RUNFORGE_DOCS_PROPOSAL_TIMEOUT_MS;
+      else process.env.RUNFORGE_DOCS_PROPOSAL_TIMEOUT_MS = previousTimeout;
+    }
+  });
+
+  it("finalizes external docs proposal artifacts on internal proposal failure", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-failure-"));
+    const missingRepo = join(tmpdir(), `runforge-missing-repo-${Date.now()}`);
+    const record = await runRunForge({
+      taskType: "code-proposal",
+      runId: "external-docs-proposal-failure",
+      artifactNamespace: "tests",
+      repoPath: missingRepo,
+      allowExternalRepo: true,
+      goal: "Prepare a docs proposal.",
+      docsProposal: {
+        allowExternalRepo: true,
+        targetFile: "README.md",
+        anchorText: "npm run dev\n```",
+        insertedText: "\n\n```bash\nnpm run dev:stable\n```",
+        rationale: "Mention the stable dev script.",
+        evidenceFiles: ["README.md", "package.json"]
+      },
+      outDir,
+      safetyProfile: "safe-local",
+      applyMode: "patch-artifact"
+    });
+
+    expect(record.status).toBe("blocked");
+    await expectRequiredArtifacts(record.artifacts);
+    expect(record.summary).toContain("proposal_failed");
+    const status = await readProposalStatus(record.artifacts.proposalStatus);
+    expect(status.outcome).toBe("proposal_failed");
+    expect(status.diagnostics.join("\n")).toContain("context-pack");
+    expect(await readFile(record.artifacts.proposalPatch, "utf8")).toBe("");
+    const humanReview = await readFile(record.artifacts.humanReview, "utf8");
+    expect(humanReview).toContain("proposal_failed");
+  });
+
   it("blocks docs proposal when include/exclude omits required proposal files", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-scope-"));
     const externalRepo = await copyExternalDocsFixture();
@@ -837,6 +917,36 @@ describe("runRunForge", () => {
     });
     expect(spec.safetyProfile).toBe("safe-local");
     expect(spec.applyMode).toBe("patch-artifact");
+  });
+
+  it("prints proposal-ready CLI output as a human gate instead of a failure", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-cli-"));
+    const externalRepo = await copyExternalDocsFixture();
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "code-proposal",
+      runId: "external-docs-proposal-cli",
+      artifactNamespace: "tests",
+      input: {
+        repoPath: externalRepo,
+        allowExternalRepo: true,
+        docsProposal: {
+          targetFile: "README.md",
+          anchorText: "npm run dev\n```",
+          insertedText: "\n\nFor the stable frontend dev path, use the existing root command:\n\n```bash\nnpm run dev:stable\n```",
+          rationale: "`package.json` exposes a root `dev:stable` script and BUILD_STABILITY documents it.",
+          evidenceFiles: ["README.md", "package.json", "docs/BUILD_STABILITY.md"]
+        }
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const result = await execFileAsync("pnpm", ["exec", "tsx", "src/cli/index.ts", "run", "--spec", specPath], {
+      cwd: resolve(".")
+    });
+    expect(result.stdout).toContain("RunForge proposal ready: Human decision required. Repo not modified.");
+    expect(result.stdout).not.toContain("RunForge blocked: proposal_ready");
   });
 });
 
