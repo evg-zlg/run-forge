@@ -376,6 +376,28 @@ describe("runRunForge", () => {
   it("writes a non-empty docs proposal patch that git apply --check accepts without mutating the external fixture", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-"));
     const externalRepo = await copyExternalDocsFixture();
+    await writeFile(join(externalRepo, "README.md"), [
+      "# External Docs Fixture",
+      "",
+      "Small fixture used to prove RunForge can prepare proposal-only docs packets for",
+      "an explicitly declared external repository.",
+      "",
+      "## Quick Start",
+      "",
+      "Локальная заметка keeps UTF-8 context in the generated patch.",
+      "",
+      "From the repository root:",
+      "",
+      "```bash",
+      "# стабильный локальный запуск",
+      "npm install",
+      "npm run dev",
+      "```",
+      "",
+      "The stable dev command exists in `package.json` and is useful when the frontend",
+      "dev server cache needs a calmer startup path.",
+      ""
+    ].join("\n"), "utf8");
     const before = await externalDocsSnapshot(externalRepo);
     const specPath = await writeTempRunSpec({
       schemaVersion: 1,
@@ -388,7 +410,7 @@ describe("runRunForge", () => {
         docsProposal: {
           targetFile: "README.md",
           anchorText: "npm run dev\n```",
-          insertedText: "\n\nFor the stable frontend dev path, use the existing root command:\n\n```bash\nnpm run dev:stable\n```",
+          insertedText: "\n\nСтабильный local frontend dev path uses the existing root command:\n\n```bash\nnpm run dev:stable\n```",
           rationale: "`package.json` exposes a root `dev:stable` script and BUILD_STABILITY documents it.",
           evidenceFiles: ["README.md", "package.json", "docs/BUILD_STABILITY.md"]
         }
@@ -408,12 +430,15 @@ describe("runRunForge", () => {
     expect(patch).toContain("--- a/README.md");
     expect(patch).toContain("+++ b/README.md");
     expect(patch).toContain("+npm run dev:stable");
+    expect(patch).toContain("+Стабильный local frontend dev path");
     await execFileAsync("git", ["apply", "--check", record.artifacts.proposalPatch], { cwd: externalRepo });
     const status = await readProposalStatus(record.artifacts.proposalStatus);
     expect(status).toMatchObject({
       outcome: "proposal_ready",
       evidenceFiles: ["README.md", "package.json", "docs/BUILD_STABILITY.md"]
     });
+    expect(status.patchBytes).toBe(Buffer.byteLength(patch, "utf8"));
+    expect(status.patchBytes).toBeGreaterThan(patch.length);
     expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
   });
 
@@ -1067,6 +1092,7 @@ type SerializedProposalStatus = {
   outcome: string;
   evidenceFiles: string[];
   diagnostics: string[];
+  patchBytes: number;
 };
 
 async function readCommandResult(path: string): Promise<SerializedCommandResult> {

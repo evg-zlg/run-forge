@@ -97,7 +97,7 @@ async function finalizeDocsProposalRun(input: {
     filesChanged: fallback.filesChanged,
     evidenceFiles: fallback.evidenceFiles ?? [],
     diagnostics: fallback.diagnostics ?? [],
-    patchBytes: fallback.patch.length
+    patchBytes: Buffer.byteLength(fallback.patch, "utf8")
   });
   const artifacts = {
     ...input.contextArtifacts,

@@ -191,7 +191,7 @@ async function codeProposal(spec: RunSpec, runDir: string, safety: RunSafetyPoli
     filesChanged: proposal?.filesChanged ?? [],
     evidenceFiles: proposal?.evidenceFiles ?? [],
     diagnostics: proposal?.diagnostics ?? [],
-    patchBytes: proposal?.patch.length ?? 0
+    patchBytes: proposal ? Buffer.byteLength(proposal.patch, "utf8") : 0
   });
   const artifacts = {
     patchSummary: summaryPath,

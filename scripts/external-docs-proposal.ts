@@ -54,7 +54,7 @@ export async function runExternalDocsProposal(input: {
       externalRepo,
       proposalRecord,
       applyCheck,
-      patchBytes: patch.length,
+      patchBytes: Buffer.byteLength(patch, "utf8"),
       proposalStatus
     }), "utf8");
 
