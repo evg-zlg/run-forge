@@ -13,9 +13,12 @@ function docsProposalCommand(): Command {
     .requiredOption("--repo <path>", "external local repository path")
     .requiredOption("--target <relative-path>", "target docs file relative to --repo")
     .option("--evidence <relative-path>", "scoped evidence file relative to --repo; repeatable", collect, [])
-    .requiredOption("--anchor <text>", "exact anchor text in --target")
-    .requiredOption("--insert <text>", "text to insert after --anchor")
+    .option("--anchor <text>", "exact anchor text in --target")
+    .option("--anchor-file <path>", "file containing exact anchor text")
+    .option("--insert <text>", "text to insert after --anchor")
+    .option("--insert-file <path>", "file containing text to insert after --anchor")
     .option("--rationale <text>", "why the insertion is supported by the evidence")
+    .option("--rationale-file <path>", "file containing why the insertion is supported by the evidence")
     .option("--out <artifact-dir>", "artifact output directory")
     .option("--run-id <id>", "safe artifact run id")
     .option("--artifact-namespace <name>", "safe artifact namespace")
@@ -28,9 +31,12 @@ function docsProposalCommand(): Command {
           repo: opts.repo as string,
           target: opts.target as string,
           evidence: opts.evidence as string[],
-          anchor: opts.anchor as string,
-          insert: opts.insert as string,
+          anchor: opts.anchor as string | undefined,
+          anchorFile: opts.anchorFile as string | undefined,
+          insert: opts.insert as string | undefined,
+          insertFile: opts.insertFile as string | undefined,
           rationale: opts.rationale as string | undefined,
+          rationaleFile: opts.rationaleFile as string | undefined,
           out: opts.out as string | undefined,
           runId: opts.runId as string | undefined,
           artifactNamespace: opts.artifactNamespace as string | undefined,

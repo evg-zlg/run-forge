@@ -34,6 +34,21 @@ not mutate the target repo during this trial.
 - A docs-only task with a known file and exact anchor text.
 - A clean target repo before the trial.
 
+Start from the latest RunForge main before external trials:
+
+```bash
+cd /path/to/runforge
+git fetch origin
+git pull --ff-only
+git rev-parse HEAD
+pnpm dev --version
+```
+
+The external docs proposal CLI also prints the local RunForge version and git
+SHA in its final packet summary. If the checkout can be compared with an
+upstream branch without network access and is behind, the summary warns you to
+fast-forward before trial runs.
+
 Check the target repo first:
 
 ```bash
@@ -121,6 +136,39 @@ pnpm dev external docs-proposal \
   --out /tmp/runforge-factory-docs
 ````
 
+File-based inputs are easier for multiline anchors and insertions:
+
+````bash
+pnpm dev external docs-proposal \
+  --repo ./tests/fixtures/external-docs-repo \
+  --target README.md \
+  --evidence README.md \
+  --evidence package.json \
+  --evidence docs/BUILD_STABILITY.md \
+  --anchor-file ./examples/external-docs-proposal-inputs/anchor.txt \
+  --insert-file ./examples/external-docs-proposal-inputs/insert.md \
+  --rationale-file ./examples/external-docs-proposal-inputs/rationale.md \
+  --out artifacts/runs/external-docs-cli-files
+````
+
+PartKom-style multiline example:
+
+````bash
+pnpm dev external docs-proposal \
+  --repo /Users/evgeny/.codex/worktrees/d6d8/b2c \
+  --target README.md \
+  --evidence README.md \
+  --evidence package.json \
+  --anchor-file /tmp/partkom-anchor.txt \
+  --insert-file /tmp/partkom-insert.md \
+  --rationale-file /tmp/partkom-rationale.md \
+  --out /tmp/runforge-partkom-docs
+````
+
+`--anchor-file`, `--insert-file`, and `--rationale-file` preserve exact
+newlines from caller-provided local files. Each file flag is mutually exclusive
+with the matching direct flag.
+
 The CLI validates that `--repo` exists, `--target` and every repeated
 `--evidence` file exist under that repo, paths cannot traverse outside the repo,
 `--anchor` is present in the target file, and at least one evidence file was
@@ -177,9 +225,11 @@ inside the target repo. Avoid broad includes such as `**/*` for alpha trials.
 Open the emitted `human-review.md` first. Confirm:
 
 - The task matches what you intended.
-- Status is understood. `blocked` can be expected for proposal-only work because
-  a human decision is required; check the summary for `proposal_ready`,
-  `no_proposal_generated`, or `evidence_missing`.
+- Status is understood. `proposal-status.json` now records
+  `executionStatus: "completed"`, `proposalOutcome`, `humanGate: "required"`,
+  and `runStatus: "blocked"`. The internal run status may stay `blocked`
+  because repository mutation is blocked by design; use `proposalOutcome` for
+  the packet decision.
 - The artifact paths point to the proposal and safety files.
 - The summary does not claim that the target repo was changed.
 - The context pack and proposal summary cite only files included in the packet.

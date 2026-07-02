@@ -77,7 +77,14 @@ function buildRunTrajectory(spec: RunSpec, record: RunRecord, runDir: string) {
     },
     stages: ["Run", "Task", "SafetyPolicy", "Context", "Execution", "Artifacts", "Trajectory", "Report", "HumanDecision"],
     result: {
+      executionStatus: record.completedAt ? "completed" : "running",
       status: record.status,
+      ...(record.taskType === "code-proposal"
+        ? {
+            proposalOutcome: proposalOutcome(record),
+            humanGate: humanDecisionRequired(record) ? "required" : "not_required"
+          }
+        : {}),
       summary: record.summary
     }
   };
@@ -123,11 +130,12 @@ ${renderTaskSpecificReview(record)}
 
 function renderTaskSpecificReview(record: RunRecord): string {
   if (record.taskType !== "code-proposal") return "";
-  const outcome = record.summary.includes(":") ? record.summary.split(":")[0] : record.status;
+  const outcome = proposalOutcome(record);
   return `
 ## Code Proposal Human Gate
 
 - Outcome: ${outcome}
+- Internal status: ${record.status} (proposal-only runs may be blocked because repository mutation is blocked by design).
 - Task attempted: ${record.summary}
 - Artifacts produced: inspect proposal-status.json, patch-summary.md, proposal.patch, safety-report.json, and trajectory.json when present.
 - Target repository modified: no; RunForge writes artifacts only.
@@ -160,4 +168,8 @@ ${artifacts}
 function humanDecisionRequired(record: RunRecord): boolean {
   const safety = record.safety as { humanDecisionRequired?: boolean };
   return safety.humanDecisionRequired === true || record.status === "blocked";
+}
+
+function proposalOutcome(record: RunRecord): string {
+  return record.summary.includes(":") ? record.summary.split(":")[0] : record.status;
 }

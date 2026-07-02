@@ -12,11 +12,11 @@ The current alpha includes:
 - Context pack generation for selected repository files.
 - Deterministic command evidence capture under explicit safety profiles.
 - Gated `code-proposal` output that writes `proposal.patch` and `patch-summary.md`.
-- A validated external docs proposal wedge that writes complete proposal packets, checks patch applicability, leaves external repositories unmodified, and can be run from flags without hand-writing RunSpec JSON.
+- A validated external docs proposal wedge that writes complete proposal packets, checks patch applicability, leaves external repositories unmodified, and can be run from direct flags or file-based multiline inputs without hand-writing RunSpec JSON.
 - Safety reports, trajectories, run records, and human review packets.
 - The end-to-end `pnpm demo:mvp` packet at `artifacts/mvp-demo/sample-js-fix/`.
 
-The alpha is useful for showing how a future agent run can be made inspectable: every important input, command, proposal, and safety decision is written as an artifact. The validated product wedge is external docs proposal, not generic autonomous engineering. The CLI wedge removes the need to hand-write RunSpec JSON for that validated case while preserving read-only external repo behavior.
+The alpha is useful for showing how a future agent run can be made inspectable: every important input, command, proposal, and safety decision is written as an artifact. The validated product wedge is external docs proposal, not generic autonomous engineering. The CLI wedge removes the need to hand-write RunSpec JSON for that validated case while preserving read-only external repo behavior. Its summaries print the local RunForge version/SHA, packet directory, proposal outcome, key artifact paths, and the reminder that generated patches are not applied automatically.
 
 See [alpha-snapshot-2026-07-02.md](alpha-snapshot-2026-07-02.md) for the current external validation summary.
 
