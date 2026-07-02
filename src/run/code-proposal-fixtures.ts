@@ -158,26 +158,7 @@ function renderUnifiedDiff(filePath: string, before: string, after: string): str
   const afterStart = Math.max(0, firstChanged - context);
   const beforeEnd = Math.min(beforeLines.length, lastBeforeChanged + context + 1);
   const afterEnd = Math.min(afterLines.length, lastAfterChanged + context + 1);
-  const hunk: string[] = [];
-  let beforeIndex = beforeStart;
-  let afterIndex = afterStart;
-
-  while (beforeIndex < beforeEnd || afterIndex < afterEnd) {
-    if (beforeIndex < beforeEnd && afterIndex < afterEnd && sameDiffLine(beforeLines[beforeIndex], afterLines[afterIndex])) {
-      pushDiffLine(hunk, " ", beforeLines[beforeIndex]);
-      beforeIndex += 1;
-      afterIndex += 1;
-      continue;
-    }
-    if (beforeIndex < beforeEnd && (afterIndex >= afterEnd || !includesDiffLine(afterLines, afterIndex, afterEnd, beforeLines[beforeIndex]))) {
-      pushDiffLine(hunk, "-", beforeLines[beforeIndex]);
-      beforeIndex += 1;
-    }
-    if (afterIndex < afterEnd && (beforeIndex >= beforeEnd || !includesDiffLine(beforeLines, beforeIndex, beforeEnd, afterLines[afterIndex]))) {
-      pushDiffLine(hunk, "+", afterLines[afterIndex]);
-      afterIndex += 1;
-    }
-  }
+  const hunk = renderDiffHunk(beforeLines.slice(beforeStart, beforeEnd), afterLines.slice(afterStart, afterEnd));
 
   return [
     `diff --git a/${filePath} b/${filePath}`,
@@ -228,6 +209,44 @@ function sameDiffLine(left: DiffLine, right: DiffLine): boolean {
   return left.text === right.text && left.hasNewline === right.hasNewline;
 }
 
-function includesDiffLine(lines: DiffLine[], start: number, end: number, expected: DiffLine): boolean {
-  return lines.slice(start, end).some((line) => sameDiffLine(line, expected));
+function renderDiffHunk(beforeLines: DiffLine[], afterLines: DiffLine[]): string[] {
+  const hunk: string[] = [];
+  const lcs = buildLcsTable(beforeLines, afterLines);
+  let beforeIndex = 0;
+  let afterIndex = 0;
+
+  while (beforeIndex < beforeLines.length || afterIndex < afterLines.length) {
+    if (
+      beforeIndex < beforeLines.length &&
+      afterIndex < afterLines.length &&
+      sameDiffLine(beforeLines[beforeIndex], afterLines[afterIndex])
+    ) {
+      pushDiffLine(hunk, " ", beforeLines[beforeIndex]);
+      beforeIndex += 1;
+      afterIndex += 1;
+    } else if (
+      afterIndex < afterLines.length &&
+      (beforeIndex >= beforeLines.length || lcs[beforeIndex][afterIndex + 1] >= lcs[beforeIndex + 1][afterIndex])
+    ) {
+      pushDiffLine(hunk, "+", afterLines[afterIndex]);
+      afterIndex += 1;
+    } else if (beforeIndex < beforeLines.length) {
+      pushDiffLine(hunk, "-", beforeLines[beforeIndex]);
+      beforeIndex += 1;
+    }
+  }
+
+  return hunk;
+}
+
+function buildLcsTable(beforeLines: DiffLine[], afterLines: DiffLine[]): number[][] {
+  const table = Array.from({ length: beforeLines.length + 1 }, () => Array(afterLines.length + 1).fill(0));
+  for (let beforeIndex = beforeLines.length - 1; beforeIndex >= 0; beforeIndex -= 1) {
+    for (let afterIndex = afterLines.length - 1; afterIndex >= 0; afterIndex -= 1) {
+      table[beforeIndex][afterIndex] = sameDiffLine(beforeLines[beforeIndex], afterLines[afterIndex])
+        ? table[beforeIndex + 1][afterIndex + 1] + 1
+        : Math.max(table[beforeIndex + 1][afterIndex], table[beforeIndex][afterIndex + 1]);
+    }
+  }
+  return table;
 }

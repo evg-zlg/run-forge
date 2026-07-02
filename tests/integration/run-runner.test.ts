@@ -497,6 +497,83 @@ describe("runRunForge", () => {
     await execFileAsync("git", ["apply", "--check", record.artifacts.proposalPatch], { cwd: externalRepo });
   });
 
+  it("finalizes a PartKom-like docs proposal with repeated blank lines instead of hanging", async () => {
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-partkom-"));
+    const externalRepo = await mkdtemp(join(tmpdir(), "runforge-partkom-like-repo-"));
+    await mkdir(join(externalRepo, "docs"), { recursive: true });
+    await mkdir(join(externalRepo, "frontend"), { recursive: true });
+    await writeFile(join(externalRepo, "README.md"), [
+      "# b2c",
+      "",
+      "## Quickstart",
+      "",
+      "### Start developing",
+      "",
+      "You are now ready to start up your project.",
+      "",
+      "```shell",
+      "yarn dev",
+      "```",
+      "",
+      "### Open the code and start customizing",
+      "",
+      "Your site is now running at http://localhost:8000!"
+    ].join("\n"), "utf8");
+    await writeFile(join(externalRepo, "docs/README.md"), "# Project docs\n", "utf8");
+    await writeFile(join(externalRepo, "frontend/package.json"), `${JSON.stringify({
+      scripts: {
+        dev: "next dev -p 8000 --webpack"
+      }
+    }, null, 2)}\n`, "utf8");
+    const before = {
+      readme: await readFile(join(externalRepo, "README.md"), "utf8"),
+      docsReadme: await readFile(join(externalRepo, "docs/README.md"), "utf8"),
+      packageJson: await readFile(join(externalRepo, "frontend/package.json"), "utf8")
+    };
+    const specPath = await writeTempRunSpec({
+      schemaVersion: 1,
+      taskType: "code-proposal",
+      runId: "external-docs-proposal-partkom-like",
+      artifactNamespace: "tests",
+      input: {
+        repoPath: externalRepo,
+        allowExternalRepo: true,
+        include: ["README.md", "docs/README.md", "frontend/package.json"],
+        exclude: [],
+        docsProposal: {
+          targetFile: "README.md",
+          anchorText: "yarn dev\n```",
+          insertedText: "\n\nThis command runs the frontend script declared in `frontend/package.json` and starts Next.js on port 8000.",
+          rationale: "`frontend/package.json` exposes `dev` as `next dev -p 8000 --webpack`.",
+          evidenceFiles: ["README.md", "docs/README.md", "frontend/package.json"]
+        }
+      },
+      outDir,
+      safety: { repoWritesAllowed: false, networkAllowed: false }
+    });
+
+    const record = await runRunForge(await loadRunSpecFile(specPath));
+    expect(record.status).toBe("blocked");
+    await expectRequiredArtifacts(record.artifacts);
+    for (const artifact of ["proposalStatus", "humanReview", "patchSummary", "trajectory"]) {
+      expect(record.artifacts[artifact]).toBeTruthy();
+      await access(record.artifacts[artifact]);
+    }
+    const status = await readProposalStatus(record.artifacts.proposalStatus);
+    expect(status).toMatchObject({
+      outcome: "proposal_ready",
+      evidenceFiles: ["README.md", "docs/README.md", "frontend/package.json"]
+    });
+    const patch = await readFile(record.artifacts.proposalPatch, "utf8");
+    expect(patch).toContain("+This command runs the frontend script declared in `frontend/package.json`");
+    await execFileAsync("git", ["apply", "--check", record.artifacts.proposalPatch], { cwd: externalRepo });
+    expect({
+      readme: await readFile(join(externalRepo, "README.md"), "utf8"),
+      docsReadme: await readFile(join(externalRepo, "docs/README.md"), "utf8"),
+      packageJson: await readFile(join(externalRepo, "frontend/package.json"), "utf8")
+    }).toEqual(before);
+  });
+
   it("blocks docs proposal with useful artifacts when the anchor is not found", async () => {
     const outDir = await mkdtemp(join(tmpdir(), "runforge-docs-proposal-anchor-"));
     const externalRepo = await copyExternalDocsFixture();
@@ -946,6 +1023,11 @@ describe("runRunForge", () => {
       cwd: resolve(".")
     });
     expect(result.stdout).toContain("RunForge proposal ready: Human decision required. Repo not modified.");
+    expect(result.stdout).toContain("Packet directory:");
+    expect(result.stdout).toContain("Final outcome: proposal_ready");
+    expect(result.stdout).toContain("Human decision required: yes");
+    expect(result.stdout).toContain("proposal-status.json:");
+    expect(result.stdout).toContain("human-review.md:");
     expect(result.stdout).not.toContain("RunForge blocked: proposal_ready");
   });
 });

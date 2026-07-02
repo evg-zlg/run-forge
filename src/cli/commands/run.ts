@@ -1,4 +1,5 @@
 import { Command, InvalidArgumentError } from "commander";
+import { dirname } from "node:path";
 import type { RunSpec, TaskType } from "../../core/types.js";
 import { loadRunSpecFile } from "../../run/runspec-loader.js";
 import { runRunForge } from "../../run/run-runner.js";
@@ -27,10 +28,31 @@ export function runCommand(): Command {
 }
 
 function renderRunSummary(record: Awaited<ReturnType<typeof runRunForge>>): string {
-  if (record.summary.startsWith("proposal_ready:")) {
-    return `RunForge proposal ready: Human decision required. Repo not modified. ${record.summary.replace(/^proposal_ready:\s*/, "")}`;
-  }
+  if (record.taskType === "code-proposal") return renderCodeProposalSummary(record);
   return `RunForge ${record.status}: ${record.summary}`;
+}
+
+function renderCodeProposalSummary(record: Awaited<ReturnType<typeof runRunForge>>): string {
+  const outcome = record.summary.includes(":") ? record.summary.split(":")[0] : record.status;
+  const humanDecisionRequired = ((record.safety as { humanDecisionRequired?: boolean }).humanDecisionRequired ?? record.status === "blocked")
+    ? "yes"
+    : "no";
+  const lines = [
+    record.summary.startsWith("proposal_ready:")
+      ? `RunForge proposal ready: Human decision required. Repo not modified. ${record.summary.replace(/^proposal_ready:\s*/, "")}`
+      : `RunForge ${record.status}: ${record.summary}`,
+    `Packet directory: ${dirname(record.artifacts.runRecord)}`,
+    `Final outcome: ${outcome}`,
+    `Human decision required: ${humanDecisionRequired}`,
+    "Key artifacts:",
+    `- human-review.md: ${record.artifacts.humanReview}`,
+    `- proposal-status.json: ${record.artifacts.proposalStatus}`,
+    `- proposal.patch: ${record.artifacts.proposalPatch}`,
+    `- patch-summary.md: ${record.artifacts.patchSummary}`,
+    `- safety-report.json: ${record.artifacts.safetyReport}`,
+    `- trajectory.json: ${record.artifacts.trajectory}`
+  ];
+  return lines.join("\n");
 }
 
 function buildCliRunSpec(opts: {
