@@ -170,7 +170,7 @@ async function buildDocsProposalContextPack(
         allowExternalRepo: spec.docsProposal.allowExternalRepo,
         include,
         exclude: spec.docsProposal.exclude ?? [],
-        maxBytesPerFile: 12_000,
+        maxBytesPerFile: spec.docsProposal.maxBytesPerFile ?? 12_000,
         maxTotalFiles: 80,
         maxTotalBytes: 240_000
       }

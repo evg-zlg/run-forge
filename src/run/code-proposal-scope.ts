@@ -11,7 +11,7 @@ export async function collectCodeProposalFiles(spec: RunSpec): Promise<string[]>
     include: spec.docsProposal.include,
     exclude: spec.docsProposal.exclude ?? [],
     limits: {
-      maxBytesPerFile: 12_000,
+      maxBytesPerFile: spec.docsProposal.maxBytesPerFile ?? 12_000,
       maxTotalFiles: 80,
       maxTotalBytes: 240_000
     }

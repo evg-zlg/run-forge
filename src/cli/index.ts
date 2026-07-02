@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { doctorCommand } from "./commands/doctor.js";
+import { externalCommand } from "./commands/external.js";
 import { initCommand } from "./commands/init.js";
 import { runCommand } from "./commands/run.js";
 import { triageCommand } from "./commands/triage.js";
@@ -13,6 +14,7 @@ program
   .version("0.1.0");
 
 program.addCommand(doctorCommand());
+program.addCommand(externalCommand());
 program.addCommand(initCommand());
 program.addCommand(runCommand());
 program.addCommand(triageCommand());

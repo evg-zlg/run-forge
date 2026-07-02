@@ -90,6 +90,51 @@ Inspect:
 If the target repo does not contain the expected demo anchor, use the reusable
 spec template below instead of changing the target repo.
 
+## Run The External Docs Proposal CLI
+
+For custom docs proposals, prefer the CLI wedge when you already know the
+target file, exact anchor, insertion text, and evidence files:
+
+````bash
+pnpm dev external docs-proposal \
+  --repo /path/to/target-repo \
+  --target README.md \
+  --evidence README.md \
+  --evidence package.json \
+  --anchor "exact text already present in README.md" \
+  --insert "\n\nDocument the existing command declared in package.json." \
+  --rationale "package.json defines the command" \
+  --out artifacts/runs/external-docs-cli
+````
+
+Factory-style example for documenting an existing root build command:
+
+````bash
+pnpm dev external docs-proposal \
+  --repo /Users/evgeny/Documents/projects/factory \
+  --target README.md \
+  --evidence README.md \
+  --evidence package.json \
+  --anchor "## Development" \
+  --insert "\n\nThe root build command is declared in package.json:\n\n```bash\nnpm run build\n```" \
+  --rationale "package.json defines the build script" \
+  --out /tmp/runforge-factory-docs
+````
+
+The CLI validates that `--repo` exists, `--target` and every repeated
+`--evidence` file exist under that repo, paths cannot traverse outside the repo,
+`--anchor` is present in the target file, and at least one evidence file was
+declared. It then generates and validates the RunSpec internally, preserving:
+
+- `input.allowExternalRepo: true`
+- `safety.repoWritesAllowed: false`
+- `safety.networkAllowed: false`
+- `safety.applyMode: "patch-artifact"`
+
+The output packet is proposal-only. RunForge writes artifacts, runs no LLM/API
+call, does not apply the patch, does not push, does not merge, and does not
+mutate the external repo.
+
 ## Run A Custom External Docs Proposal
 
 Copy `examples/runspecs/external-docs-proposal.template.json` to a scratch file

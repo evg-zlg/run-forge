@@ -37,6 +37,7 @@ export interface RunSpec {
     allowExternalRepo: boolean;
     include?: string[];
     exclude?: string[];
+    maxBytesPerFile?: number;
     targetFile: string;
     anchorText: string;
     insertedText: string;

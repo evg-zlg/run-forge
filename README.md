@@ -27,6 +27,21 @@ Then run the docs-only external proposal flow:
 pnpm demo:external-docs-proposal
 ```
 
+Or create a proposal-only packet directly from flags, without hand-writing
+RunSpec JSON:
+
+````bash
+pnpm dev external docs-proposal \
+  --repo /path/to/target-repo \
+  --target README.md \
+  --evidence README.md \
+  --evidence package.json \
+  --anchor "npm run build" \
+  --insert "\n\nThe build command is declared in package.json:\n\n```bash\nnpm run build\n```" \
+  --rationale "package.json defines the build script" \
+  --out ./artifacts/runs/external-docs-cli
+````
+
 Use [examples/runspecs/external-docs-proposal.template.json](examples/runspecs/external-docs-proposal.template.json) for a custom local target repo and [docs/templates/external-dogfood-report.md](docs/templates/external-dogfood-report.md) to report the result.
 
 Run the MVP demo:
@@ -115,6 +130,27 @@ runforge run --task command-check --repo . --command "pnpm test" --safety-profil
 runforge run --spec ./examples/runspecs/command-check-typecheck.json
 ```
 
+For external docs proposals:
+
+````bash
+runforge external docs-proposal \
+  --repo /path/to/target-repo \
+  --target README.md \
+  --evidence README.md \
+  --evidence package.json \
+  --anchor "exact text already in README.md" \
+  --insert "\n\nNew docs text supported by the evidence files." \
+  --rationale "why the evidence supports this insertion" \
+  --out ./runforge-artifacts/external-docs
+````
+
+The command generates a normal validated RunSpec internally with
+`allowExternalRepo: true`, `repoWritesAllowed: false`, and
+`networkAllowed: false`. It writes `packet/human-review.md`,
+`packet/proposal-status.json`, `packet/proposal.patch`, and
+`packet/patch-summary.md`, but it does not apply, push, merge, call an LLM/API,
+or mutate the external repository.
+
 For the controlled fixture proposal demo:
 
 ```bash
@@ -149,16 +185,17 @@ It does not prove hosted execution or autonomous delivery. There is no LLM/API c
 
 ## Commands
 
-```bash
+````bash
 pnpm dev doctor
 pnpm dev init --safe
 pnpm dev run --task context-pack --repo ./fixtures/repos/sample-js --goal "Prepare local context" --out ./artifacts/rails-context
+pnpm dev external docs-proposal --repo ./tests/fixtures/external-docs-repo --target README.md --evidence README.md --evidence package.json --anchor "npm run dev\n```" --insert "\n\nFor the stable frontend dev path, use the existing root command:\n\n```bash\nnpm run dev:stable\n```" --out ./artifacts/runs/external-docs-cli-demo
 pnpm dev triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/typecheck-failure.log --out ./artifacts/demo-typecheck
 pnpm check:governance
 pnpm check:structure
 pnpm test
 pnpm dogfood
-```
+````
 
 The default provider is deterministic and local. `openai-compatible` is only a skeleton and is never required for tests.
 RunSpec files are documented in [docs/runspec.md](docs/runspec.md), with examples in [examples/runspecs](examples/runspecs).

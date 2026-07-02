@@ -32,6 +32,7 @@ export interface RunSpecDocument {
       insertedText?: string;
       rationale?: string;
       evidenceFiles?: string[];
+      maxBytesPerFile?: number;
     };
   };
   safety?: {
@@ -160,12 +161,13 @@ function readDocsProposalInput(input: Record<string, unknown>, repoPath: string)
   const insertedText = readRequiredString(raw.insertedText, "input.docsProposal.insertedText");
   const rationale = readRequiredString(raw.rationale, "input.docsProposal.rationale");
   const evidenceFiles = readOptionalStringArray(raw.evidenceFiles, "input.docsProposal.evidenceFiles") ?? [];
+  const maxBytesPerFile = readOptionalPositiveInteger(raw.maxBytesPerFile, "input.docsProposal.maxBytesPerFile");
   const include = readOptionalStringArray(input.include, "input.include");
   const exclude = readOptionalStringArray(input.exclude, "input.exclude");
   validateContextPackPatterns([targetFile, ...evidenceFiles], "docsProposal");
   if (include) validateContextPackPatterns(include, "include");
   if (exclude) validateContextPackPatterns(exclude, "exclude");
-  return { allowExternalRepo, include, exclude, targetFile, anchorText, insertedText, rationale, evidenceFiles };
+  return { allowExternalRepo, include, exclude, maxBytesPerFile, targetFile, anchorText, insertedText, rationale, evidenceFiles };
 }
 
 function readOptionalStringArray(value: unknown, field: string): string[] | undefined {
