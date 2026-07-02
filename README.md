@@ -21,6 +21,15 @@ pnpm install
 pnpm demo:mvp
 ```
 
+Before external trials, make sure the RunForge checkout is current:
+
+```bash
+git fetch origin
+git pull --ff-only
+git rev-parse HEAD
+pnpm dev --version
+```
+
 Then run the docs-only external proposal flow:
 
 ```bash
@@ -40,6 +49,20 @@ pnpm dev external docs-proposal \
   --insert "\n\nThe build command is declared in package.json:\n\n```bash\nnpm run build\n```" \
   --rationale "package.json defines the build script" \
   --out ./artifacts/runs/external-docs-cli
+````
+
+For multiline anchors or insertions, prefer file inputs:
+
+````bash
+pnpm dev external docs-proposal \
+  --repo /path/to/target-repo \
+  --target README.md \
+  --evidence README.md \
+  --evidence package.json \
+  --anchor-file ./examples/external-docs-proposal-inputs/anchor.txt \
+  --insert-file ./examples/external-docs-proposal-inputs/insert.md \
+  --rationale-file ./examples/external-docs-proposal-inputs/rationale.md \
+  --out ./artifacts/runs/external-docs-cli-files
 ````
 
 Use [examples/runspecs/external-docs-proposal.template.json](examples/runspecs/external-docs-proposal.template.json) for a custom local target repo and [docs/templates/external-dogfood-report.md](docs/templates/external-dogfood-report.md) to report the result.
@@ -144,12 +167,17 @@ runforge external docs-proposal \
   --out ./runforge-artifacts/external-docs
 ````
 
+Use `--anchor-file`, `--insert-file`, and `--rationale-file` for multiline
+text. Each file flag is mutually exclusive with its direct text flag.
+
 The command generates a normal validated RunSpec internally with
 `allowExternalRepo: true`, `repoWritesAllowed: false`, and
 `networkAllowed: false`. It writes `packet/human-review.md`,
 `packet/proposal-status.json`, `packet/proposal.patch`, and
 `packet/patch-summary.md`, but it does not apply, push, merge, call an LLM/API,
-or mutate the external repository.
+or mutate the external repository. The final CLI summary prints the RunForge
+version, local git SHA, packet directory, proposal outcome, key artifact paths,
+a `git apply --check` suggestion, and a reminder that the patch was not applied.
 
 For the controlled fixture proposal demo:
 

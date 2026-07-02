@@ -2,6 +2,8 @@ import { spawnSync } from "node:child_process";
 import { copyFile, mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { RunRecord, RunSpec } from "../core/types.js";
+import { getRunForgeVersionInfo, type RunForgeVersionInfo } from "../core/version.js";
+import { resolveExternalDocsTextInputs, type ResolvedExternalDocsTextInputs } from "./external-docs-cli-inputs.js";
 import { runRunForge } from "./run-runner.js";
 import { normalizeRunSpecDocument, type RunSpecDocument } from "./runspec-schema.js";
 
@@ -11,9 +13,12 @@ export interface ExternalDocsProposalOptions {
   repo: string;
   target: string;
   evidence: string[];
-  anchor: string;
-  insert: string;
+  anchor?: string;
+  anchorFile?: string;
+  insert?: string;
+  insertFile?: string;
   rationale?: string;
+  rationaleFile?: string;
   out?: string;
   runId?: string;
   artifactNamespace?: string;
@@ -25,6 +30,8 @@ export async function runExternalDocsProposalPacket(options: ExternalDocsProposa
   packetDir: string;
   proposalRecord: RunRecord;
   applyCheck: string;
+  proposalOutcome: string;
+  versionInfo: RunForgeVersionInfo;
 }> {
   const spec = await buildExternalDocsProposalSpec(options);
   const packetDir = join(resolve(options.out ?? defaultOutDir()), "packet");
@@ -32,6 +39,7 @@ export async function runExternalDocsProposalPacket(options: ExternalDocsProposa
   const proposalRecord = await runRunForge(spec);
   const patch = await readFile(proposalRecord.artifacts.proposalPatch, "utf8");
   const proposalStatus = await readFile(proposalRecord.artifacts.proposalStatus, "utf8");
+  const proposalOutcome = parseProposalOutcome(proposalStatus, proposalRecord);
   const applyCheck = patch.length === 0
     ? "not run: proposal.patch is empty because no proposal was generated"
     : safeGitApplyCheck(spec.repoPath, proposalRecord.artifacts.proposalPatch);
@@ -54,17 +62,24 @@ export async function runExternalDocsProposalPacket(options: ExternalDocsProposa
     proposalStatus
   }), "utf8");
 
-  return { packetDir, proposalRecord, applyCheck };
+  return {
+    packetDir,
+    proposalRecord,
+    applyCheck,
+    proposalOutcome,
+    versionInfo: getRunForgeVersionInfo()
+  };
 }
 
 export async function buildExternalDocsProposalSpec(options: ExternalDocsProposalOptions): Promise<RunSpec> {
-  validateCliOptions(options);
+  const resolved = await resolveTextOptions(options);
+  validateResolvedCliOptions(options, resolved);
   const repoPath = resolve(options.repo);
   await assertDirectory(repoPath, "--repo");
   await assertFile(repoPath, options.target, "--target");
   for (const file of options.evidence) await assertFile(repoPath, file, "--evidence");
   const targetText = await readFile(join(repoPath, options.target), "utf8");
-  if (!targetText.includes(options.anchor)) throw new Error(`--anchor text was not found in ${options.target}.`);
+  if (!targetText.includes(resolved.anchor)) throw new Error(`--anchor text was not found in ${options.target}.`);
 
   const include = [...new Set([options.target, ...options.evidence])];
   const document: RunSpecDocument = {
@@ -80,9 +95,9 @@ export async function buildExternalDocsProposalSpec(options: ExternalDocsProposa
       exclude: options.exclude ?? defaultExcludes,
       docsProposal: {
         targetFile: options.target,
-        anchorText: options.anchor,
-        insertedText: options.insert,
-        rationale: options.rationale ?? "Docs proposal requested from CLI flags.",
+        anchorText: resolved.anchor,
+        insertedText: resolved.insert,
+        rationale: resolved.rationale,
         evidenceFiles: options.evidence,
         maxBytesPerFile: options.maxBytesPerFile
       }
@@ -100,36 +115,55 @@ export function renderExternalDocsProposalSummary(result: {
   packetDir: string;
   proposalRecord: RunRecord;
   applyCheck: string;
+  proposalOutcome: string;
+  versionInfo: RunForgeVersionInfo;
 }): string {
   const status = result.proposalRecord.artifacts;
-  const outcome = result.proposalRecord.summary.includes(":")
-    ? result.proposalRecord.summary.split(":")[0]
-    : result.proposalRecord.status;
   const humanDecisionRequired =
     ((result.proposalRecord.safety as { humanDecisionRequired?: boolean }).humanDecisionRequired ?? true) ? "yes" : "no";
-  return [
+  const lines = [
     "RunForge external docs proposal packet ready.",
+    `RunForge version: ${result.versionInfo.version}`,
+    `RunForge git SHA: ${result.versionInfo.gitSha}`,
     `Packet directory: ${result.packetDir}`,
-    `Final proposal outcome: ${outcome}`,
+    `Proposal outcome: ${result.proposalOutcome}`,
     `human-review.md: ${join(result.packetDir, "human-review.md")}`,
     `proposal-status.json: ${join(result.packetDir, "proposal-status.json")}`,
     `proposal.patch: ${join(result.packetDir, "proposal.patch")}`,
     `patch-summary.md: ${join(result.packetDir, "patch-summary.md")}`,
+    `context-pack.md: ${join(result.packetDir, "context-pack.md")}`,
     `Human decision required: ${humanDecisionRequired}`,
-    `Apply check: ${result.applyCheck}`,
+    `Suggested check: ${result.applyCheck}`,
     "Reminder: proposal.patch was not applied; no target repo writes, push, or merge were performed.",
     `Source run record: ${status.runRecord}`
-  ].join("\n");
+  ];
+  if ((result.versionInfo.behindBy ?? 0) > 0) {
+    lines.splice(3, 0, `Warning: this checkout is behind ${result.versionInfo.upstream ?? "upstream"} by ${result.versionInfo.behindBy} commit(s). Run git fetch origin && git pull --ff-only before external trials.`);
+  }
+  return lines.join("\n");
 }
 
-function validateCliOptions(options: ExternalDocsProposalOptions): void {
+async function resolveTextOptions(options: ExternalDocsProposalOptions): Promise<ResolvedExternalDocsTextInputs> {
+  return resolveExternalDocsTextInputs(options);
+}
+
+function validateResolvedCliOptions(options: ExternalDocsProposalOptions, resolved: ResolvedExternalDocsTextInputs): void {
   if (!options.repo) throw new Error("--repo is required.");
   if (!options.target) throw new Error("--target is required.");
-  if (!options.anchor) throw new Error("--anchor is required.");
-  if (!options.insert) throw new Error("--insert is required.");
+  if (!resolved.anchor) throw new Error("--anchor is required.");
+  if (!resolved.insert) throw new Error("--insert is required.");
   if (!options.evidence || options.evidence.length === 0) throw new Error("At least one --evidence file is required.");
   for (const [field, value] of [["--target", options.target], ...options.evidence.map((file) => ["--evidence", file] as const)] as const) {
     assertSafeRepoRelativePath(value, field);
+  }
+}
+
+function parseProposalOutcome(proposalStatus: string, record: RunRecord): string {
+  try {
+    const parsed = JSON.parse(proposalStatus) as { outcome?: string };
+    return parsed.outcome ?? record.status;
+  } catch {
+    return record.summary.includes(":") ? record.summary.split(":")[0] : record.status;
   }
 }
 
@@ -204,6 +238,10 @@ ${input.evidenceFiles.map((file) => `- ${file}`).join("\n")}
 \`\`\`json
 ${input.proposalStatus.trim()}
 \`\`\`
+
+The source run may still show internal status \`blocked\` because repository
+mutation is blocked by design. Use the proposal outcome above for the packet
+decision.
 
 ## Patch
 

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, cp, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, cp, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -30,9 +30,17 @@ describe("external docs-proposal CLI", () => {
     ]);
 
     expect(result.stdout).toContain("RunForge external docs proposal packet ready.");
+    expect(result.stdout).toContain("RunForge version: 0.1.0");
+    expect(result.stdout).toContain("RunForge git SHA:");
     expect(result.stdout).toContain(`Packet directory: ${join(outDir, "packet")}`);
-    expect(result.stdout).toContain("Final proposal outcome: proposal_ready");
+    expect(result.stdout).toContain("Proposal outcome: proposal_ready");
     expect(result.stdout).toContain("Human decision required: yes");
+    expect(result.stdout).toContain(`human-review.md: ${join(outDir, "packet", "human-review.md")}`);
+    expect(result.stdout).toContain(`proposal-status.json: ${join(outDir, "packet", "proposal-status.json")}`);
+    expect(result.stdout).toContain(`proposal.patch: ${join(outDir, "packet", "proposal.patch")}`);
+    expect(result.stdout).toContain(`patch-summary.md: ${join(outDir, "packet", "patch-summary.md")}`);
+    expect(result.stdout).toContain(`context-pack.md: ${join(outDir, "packet", "context-pack.md")}`);
+    expect(result.stdout).toContain("Suggested check: git apply --check");
     expect(result.stdout).toContain("proposal.patch was not applied");
     expect(result.stdout).not.toContain("RunForge blocked: proposal_ready");
 
@@ -87,6 +95,68 @@ describe("external docs-proposal CLI", () => {
     expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
   });
 
+  it("accepts anchor, insert, and rationale from files while preserving multiline insert text", async () => {
+    const externalRepo = await copyExternalDocsFixture();
+    const before = await externalDocsSnapshot(externalRepo);
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-external-docs-cli-files-out-"));
+    const inputDir = await mkdtemp(join(tmpdir(), "runforge-external-docs-cli-files-input-"));
+    const anchor = "npm run dev\n```";
+    const insert = "\n\nFor the stable frontend dev path, use the existing root command:\n\n```bash\nnpm run dev:stable\n```\n\nThis keeps day-to-day local runs on the documented stable path.\n";
+    const rationale = "`package.json` exposes a root `dev:stable` script.\n`docs/BUILD_STABILITY.md` documents it as stable.\n";
+    const anchorFile = join(inputDir, "anchor.txt");
+    const insertFile = join(inputDir, "insert.md");
+    const rationaleFile = join(inputDir, "rationale.md");
+    await writeFile(anchorFile, anchor, "utf8");
+    await writeFile(insertFile, insert, "utf8");
+    await writeFile(rationaleFile, rationale, "utf8");
+
+    const result = await runCli([
+      "external",
+      "docs-proposal",
+      "--repo", externalRepo,
+      "--target", "README.md",
+      "--evidence", "README.md",
+      "--evidence", "package.json",
+      "--evidence", "docs/BUILD_STABILITY.md",
+      "--anchor-file", anchorFile,
+      "--insert-file", insertFile,
+      "--rationale-file", rationaleFile,
+      "--out", outDir,
+      "--run-id", "external-docs-cli-file-test",
+      "--artifact-namespace", "tests"
+    ]);
+
+    expect(result.stdout).toContain("Proposal outcome: proposal_ready");
+
+    const packetDir = join(outDir, "packet");
+    const status = JSON.parse(await readFile(join(packetDir, "proposal-status.json"), "utf8")) as {
+      executionStatus: string;
+      proposalOutcome: string;
+      humanGate: string;
+      runStatus: string;
+      outcome: string;
+    };
+    expect(status).toMatchObject({
+      executionStatus: "completed",
+      proposalOutcome: "proposal_ready",
+      humanGate: "required",
+      runStatus: "blocked",
+      outcome: "proposal_ready"
+    });
+
+    const spec = JSON.parse(await readFile(join(packetDir, "run-spec.json"), "utf8")) as {
+      docsProposal?: { anchorText?: string; insertedText?: string; rationale?: string };
+    };
+    expect(spec.docsProposal?.anchorText).toBe(anchor);
+    expect(spec.docsProposal?.insertedText).toBe(insert);
+    expect(spec.docsProposal?.rationale).toBe(rationale);
+
+    const patch = await readFile(join(packetDir, "proposal.patch"), "utf8");
+    expect(patch).toContain("+This keeps day-to-day local runs on the documented stable path.");
+    await execFileAsync("git", ["apply", "--check", join(packetDir, "proposal.patch")], { cwd: externalRepo });
+    expect(await externalDocsSnapshot(externalRepo)).toEqual(before);
+  });
+
   it("fails with a useful error when a required flag is missing", async () => {
     const externalRepo = await copyExternalDocsFixture();
     await expect(runCli([
@@ -98,6 +168,42 @@ describe("external docs-proposal CLI", () => {
       "--insert", "\n\nDocument the stable dev command."
     ])).rejects.toMatchObject({
       stderr: expect.stringContaining("At least one --evidence file is required.")
+    });
+  });
+
+  it("rejects direct and file input for the same text field", async () => {
+    const externalRepo = await copyExternalDocsFixture();
+    const inputDir = await mkdtemp(join(tmpdir(), "runforge-external-docs-cli-conflict-"));
+    const anchorFile = join(inputDir, "anchor.txt");
+    await writeFile(anchorFile, "npm run dev\n```", "utf8");
+
+    await expect(runCli([
+      "external",
+      "docs-proposal",
+      "--repo", externalRepo,
+      "--target", "README.md",
+      "--evidence", "README.md",
+      "--anchor", "npm run dev\n```",
+      "--anchor-file", anchorFile,
+      "--insert", "\n\nDocument the stable dev command."
+    ])).rejects.toMatchObject({
+      stderr: expect.stringContaining("--anchor and --anchor-file are mutually exclusive.")
+    });
+  });
+
+  it("fails with a useful error when a file input is missing", async () => {
+    const externalRepo = await copyExternalDocsFixture();
+
+    await expect(runCli([
+      "external",
+      "docs-proposal",
+      "--repo", externalRepo,
+      "--target", "README.md",
+      "--evidence", "README.md",
+      "--anchor-file", join(tmpdir(), "runforge-missing-anchor.txt"),
+      "--insert", "\n\nDocument the stable dev command."
+    ])).rejects.toMatchObject({
+      stderr: expect.stringContaining("--anchor-file file does not exist:")
     });
   });
 

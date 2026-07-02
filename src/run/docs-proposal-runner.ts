@@ -93,6 +93,10 @@ async function finalizeDocsProposalRun(input: {
   await writeText(summaryPath, renderProposal(input.spec, input.files, fallback));
   await writeText(patchPath, fallback.patch);
   await writeJson(proposalStatusPath, {
+    executionStatus: "completed",
+    proposalOutcome: outcome,
+    humanGate: "required",
+    runStatus: "blocked",
     outcome,
     filesChanged: fallback.filesChanged,
     evidenceFiles: fallback.evidenceFiles ?? [],
