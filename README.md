@@ -10,6 +10,10 @@ RunForge is not a SaaS product, dashboard, remote compute system, queue, provide
 
 For a first local external-repo trial, read [docs/alpha-trial-guide.md](docs/alpha-trial-guide.md).
 
+## Alpha status
+
+RunForge alpha has passed external docs proposal validation on SmartSQL, PartKom B2C, and Factory with proposal-only packets, `git apply --check` success, and no target-repo mutation. See [docs/alpha-snapshot-2026-07-02.md](docs/alpha-snapshot-2026-07-02.md).
+
 Start with the fixture MVP:
 
 ```bash
