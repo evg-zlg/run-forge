@@ -6,16 +6,17 @@ RunForge is currently a local, deterministic agentic engineering harness. It can
 
 The current alpha includes:
 
-- Local CLI commands for `doctor`, `init --safe`, `triage`, and `run`.
+- Local CLI commands for `doctor`, `init --safe`, `triage`, `run`, and
+  `external docs-proposal`.
 - Rails task types for `failure-triage`, `command-check`, `repo-research`, `context-pack`, and `code-proposal`.
 - Context pack generation for selected repository files.
 - Deterministic command evidence capture under explicit safety profiles.
 - Gated `code-proposal` output that writes `proposal.patch` and `patch-summary.md`.
-- A validated external docs proposal wedge that writes complete proposal packets, checks patch applicability, and leaves external repositories unmodified.
+- A validated external docs proposal wedge that writes complete proposal packets, checks patch applicability, leaves external repositories unmodified, and can be run from flags without hand-writing RunSpec JSON.
 - Safety reports, trajectories, run records, and human review packets.
 - The end-to-end `pnpm demo:mvp` packet at `artifacts/mvp-demo/sample-js-fix/`.
 
-The alpha is useful for showing how a future agent run can be made inspectable: every important input, command, proposal, and safety decision is written as an artifact. The validated product wedge is external docs proposal, not generic autonomous engineering.
+The alpha is useful for showing how a future agent run can be made inspectable: every important input, command, proposal, and safety decision is written as an artifact. The validated product wedge is external docs proposal, not generic autonomous engineering. The CLI wedge removes the need to hand-write RunSpec JSON for that validated case while preserving read-only external repo behavior.
 
 See [alpha-snapshot-2026-07-02.md](alpha-snapshot-2026-07-02.md) for the current external validation summary.
 
