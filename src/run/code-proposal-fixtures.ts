@@ -7,7 +7,7 @@ export interface DeterministicCodeProposal {
   filesChanged: string[];
   rationale: string;
   patch: string;
-  outcome?: "proposal_ready" | "no_proposal_generated" | "evidence_missing";
+  outcome?: "proposal_ready" | "proposal_not_generated" | "no_proposal_generated" | "evidence_missing" | "proposal_failed" | "timeout" | "interrupted" | "invalid_spec";
   evidenceFiles?: string[];
   diagnostics?: string[];
 }
@@ -83,7 +83,7 @@ function noDocsPatch(
     filesChanged: [],
     rationale: `No patch generated: ${reason}`,
     patch: "",
-    outcome: overrides.outcome ?? "no_proposal_generated",
+    outcome: overrides.outcome ?? "proposal_not_generated",
     evidenceFiles: overrides.evidenceFiles ?? [],
     diagnostics: overrides.diagnostics ?? [reason]
   };

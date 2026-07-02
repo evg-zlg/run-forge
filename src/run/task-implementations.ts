@@ -9,9 +9,10 @@ import { runTriage } from "../triage/triage-runner.js";
 import { inspectRepo } from "../triage/repo-inspector.js";
 import { buildFixtureCodeProposal } from "./code-proposal-fixtures.js";
 import { renderProposal } from "./code-proposal-renderer.js";
-import { blockedByCodeProposalScope, collectCodeProposalFiles } from "./code-proposal-scope.js";
+import { blockedByCodeProposalScope } from "./code-proposal-scope.js";
 import { validateCommandSafety } from "./command-safety.js";
 import { buildContextPack } from "./context-pack.js";
+import { runDocsProposal } from "./docs-proposal-runner.js";
 import type { RunSafetyPolicy } from "./safety-policy.js";
 
 const execAsync = promisify(exec);
@@ -176,11 +177,12 @@ async function contextPack(spec: RunSpec, runDir: string, safety: RunSafetyPolic
 }
 
 async function codeProposal(spec: RunSpec, runDir: string, safety: RunSafetyPolicy): Promise<TaskResult> {
+  if (spec.docsProposal) return runDocsProposal(spec, runDir, safety);
+
   const summaryPath = join(runDir, "patch-summary.md");
   const patchPath = join(runDir, "proposal.patch");
   const proposalStatusPath = join(runDir, "proposal-status.json");
-  const contextResult = spec.docsProposal ? await buildDocsProposalContextPack(spec, runDir, safety) : null;
-  const files = spec.docsProposal ? await collectCodeProposalFiles(spec) : await listRepoFiles(spec.repoPath);
+  const files = await listRepoFiles(spec.repoPath);
   const proposal = blockedByCodeProposalScope(spec, files) ?? await buildFixtureCodeProposal(spec, files);
   await writeText(summaryPath, renderProposal(spec, files, proposal));
   await writeText(patchPath, proposal?.patch ?? "");
@@ -192,7 +194,6 @@ async function codeProposal(spec: RunSpec, runDir: string, safety: RunSafetyPoli
     patchBytes: proposal?.patch.length ?? 0
   });
   const artifacts = {
-    ...(contextResult?.artifacts ?? {}),
     patchSummary: summaryPath,
     proposalPatch: patchPath,
     proposalStatus: proposalStatusPath
@@ -209,31 +210,6 @@ async function codeProposal(spec: RunSpec, runDir: string, safety: RunSafetyPoli
     artifacts,
     summary: "proposal_ready: Code proposal prepared as gated artifacts only; human review is required before any write."
   };
-}
-
-async function buildDocsProposalContextPack(
-  spec: RunSpec,
-  runDir: string,
-  safety: RunSafetyPolicy
-): Promise<{ artifacts: Record<string, string> }> {
-  if (!spec.docsProposal) return { artifacts: {} };
-  const include = spec.docsProposal.include ?? [...new Set([spec.docsProposal.targetFile, ...spec.docsProposal.evidenceFiles])];
-  return buildContextPack({
-    spec: {
-      ...spec,
-      taskType: "context-pack",
-      contextPack: {
-        allowExternalRepo: spec.docsProposal.allowExternalRepo,
-        include,
-        exclude: spec.docsProposal.exclude ?? [],
-        maxBytesPerFile: 12_000,
-        maxTotalFiles: 80,
-        maxTotalBytes: 240_000
-      }
-    },
-    runDir,
-    safety
-  });
 }
 
 async function writeCommandResult(runDir: string, input: CommandResultInput): Promise<TaskResult> {

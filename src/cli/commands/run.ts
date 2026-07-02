@@ -21,9 +21,16 @@ export function runCommand(): Command {
     .action(async (opts) => {
       const spec = opts.spec ? await loadRunSpecFile(opts.spec) : buildCliRunSpec(opts);
       const record = await runRunForge(spec);
-      console.log(`RunForge ${record.status}: ${record.summary}`);
+      console.log(renderRunSummary(record));
       console.log(`Run record: ${record.artifacts.runRecord}`);
     });
+}
+
+function renderRunSummary(record: Awaited<ReturnType<typeof runRunForge>>): string {
+  if (record.summary.startsWith("proposal_ready:")) {
+    return `RunForge proposal ready: Human decision required. Repo not modified. ${record.summary.replace(/^proposal_ready:\s*/, "")}`;
+  }
+  return `RunForge ${record.status}: ${record.summary}`;
 }
 
 function buildCliRunSpec(opts: {
