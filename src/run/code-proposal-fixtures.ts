@@ -1,33 +1,49 @@
 import { readText } from "../core/artifact-store.js";
 import type { RunSpec } from "../core/types.js";
 import { isAbsolute, join, relative, resolve } from "node:path";
+import { buildEvidenceBasedCodeProposal } from "./code-proposal-deterministic-rules.js";
 
 export interface DeterministicCodeProposal {
   taskSummary: string;
   filesChanged: string[];
   rationale: string;
   patch: string;
+  strategy?: string;
   outcome?: "proposal_ready" | "proposal_not_generated" | "no_proposal_generated" | "evidence_missing" | "proposal_failed" | "timeout" | "interrupted" | "invalid_spec";
   evidenceFiles?: string[];
+  evidenceSummary?: string[];
   diagnostics?: string[];
 }
 
-export async function buildFixtureCodeProposal(spec: RunSpec, scopedFiles?: string[]): Promise<DeterministicCodeProposal | null> {
+export interface DeterministicCodeProposalEvidence {
+  failureCategory?: string;
+  evidenceText?: string;
+}
+
+export async function buildFixtureCodeProposal(
+  spec: RunSpec,
+  scopedFiles?: string[],
+  evidence?: DeterministicCodeProposalEvidence
+): Promise<DeterministicCodeProposal | null> {
   assertExternalCodeProposalAllowed(spec);
   const docsProposal = await buildDocsProposal(spec, scopedFiles);
   if (docsProposal) return docsProposal;
 
   const testPath = "tests/calculator.test.ts";
   const testText = await readOptionalRepoFile(spec.repoPath, testPath);
-  if (!testText) return null;
-  if (!testText.includes("expect(add(1, 1)).toBe(3);")) return null;
+  if (testText?.includes("expect(add(1, 1)).toBe(3);")) {
+    return {
+      taskSummary: spec.goal ?? "Fix the sample-js calculator assertion.",
+      filesChanged: [testPath],
+      rationale: "The fixture's add function returns the arithmetic sum, so the assertion should expect 2 for add(1, 1).",
+      patch: renderCalculatorAssertionPatch(),
+      strategy: "alpha3_calculator_assertion_fixture",
+      evidenceFiles: [testPath],
+      evidenceSummary: ["tests/calculator.test.ts contains the known fixture assertion expect(add(1, 1)).toBe(3)."]
+    };
+  }
 
-  return {
-    taskSummary: spec.goal ?? "Fix the sample-js calculator assertion.",
-    filesChanged: [testPath],
-    rationale: "The fixture's add function returns the arithmetic sum, so the assertion should expect 2 for add(1, 1).",
-    patch: renderCalculatorAssertionPatch()
-  };
+  return buildEvidenceBasedCodeProposal(spec, evidence);
 }
 
 async function buildDocsProposal(spec: RunSpec, scopedFiles?: string[]): Promise<DeterministicCodeProposal | null> {
@@ -59,6 +75,7 @@ async function buildDocsProposal(spec: RunSpec, scopedFiles?: string[]): Promise
     filesChanged: [spec.docsProposal.targetFile],
     rationale: spec.docsProposal.rationale,
     patch: renderUnifiedDiff(spec.docsProposal.targetFile, source, nextSource),
+    strategy: "docs_anchor_insert",
     outcome: "proposal_ready",
     evidenceFiles: evidenceState.included
   };
@@ -115,7 +132,7 @@ async function validateDocsProposalEvidence(spec: RunSpec, scopedFiles?: string[
   return { included, errors };
 }
 
-async function readOptionalRepoFile(repoPath: string, relativePath: string): Promise<string | null> {
+export async function readOptionalRepoFile(repoPath: string, relativePath: string): Promise<string | null> {
   try {
     const root = resolve(repoPath);
     const path = resolve(root, relativePath);
@@ -147,7 +164,7 @@ function normalizeInsertedText(text: string): string {
   return text.startsWith("\n") ? text : `\n${text}`;
 }
 
-function renderUnifiedDiff(filePath: string, before: string, after: string): string {
+export function renderUnifiedDiff(filePath: string, before: string, after: string): string {
   const beforeLines = splitLines(before);
   const afterLines = splitLines(after);
   const firstChanged = firstChangedLine(beforeLines, afterLines);
