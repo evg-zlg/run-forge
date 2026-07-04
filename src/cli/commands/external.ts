@@ -2,11 +2,15 @@ import { Command, InvalidArgumentError } from "commander";
 import { renderExternalFailureTriageCliSummary, runExternalFailureTriage } from "../../run/external-failure-triage.js";
 import { renderExternalCommandCheckCliSummary, runExternalCommandCheck } from "../../run/external-command-check.js";
 import { buildExternalDocsProposalSpec, renderExternalDocsProposalSummary, runExternalDocsProposalPacket } from "../../run/external-docs-proposal.js";
+import { renderExternalProposalReadinessCliSummary, runExternalProposalReadiness } from "../../run/external-proposal-readiness.js";
+import { renderExternalCodeProposalCliSummary, runExternalCodeProposal } from "../../run/external-code-proposal.js";
 
 export function externalCommand(): Command {
   const external = new Command("external").description("Run safe packet-producing workflows for explicitly declared external local repositories.");
   external.addCommand(checkCommand());
   external.addCommand(failureTriageCommand());
+  external.addCommand(proposalReadinessCommand());
+  external.addCommand(codeProposalCommand());
   external.addCommand(docsProposalCommand());
   return external;
 }
@@ -62,6 +66,62 @@ function failureTriageCommand(): Command {
           runId: opts.runId as string | undefined
         });
         console.log(renderExternalFailureTriageCliSummary(result));
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+function proposalReadinessCommand(): Command {
+  return new Command("proposal-readiness")
+    .description("Decide whether a failure triage packet is safe to advance to a proposal-only code patch.")
+    .option("--from-triage-packet <packet-dir>", "existing external failure triage packet directory")
+    .option("--repo <path>", "external local repository path; requires --command when --from-triage-packet is omitted")
+    .option("--command <command>", "command to run through check and triage before readiness; repeatable", collect, [])
+    .option("--out <artifact-dir>", "artifact output directory")
+    .option("--timeout-ms <ms>", "per-command timeout in milliseconds when running source commands", parsePositiveInteger)
+    .option("--max-log-bytes <bytes>", "maximum captured bytes per stdout/stderr log", parsePositiveInteger)
+    .option("--run-id <id>", "run id recorded in readiness packet metadata")
+    .action(async (opts) => {
+      try {
+        const result = await runExternalProposalReadiness({
+          fromTriagePacket: opts.fromTriagePacket as string | undefined,
+          repo: opts.repo as string | undefined,
+          commands: opts.command as string[] | undefined,
+          out: opts.out as string | undefined,
+          timeoutMs: opts.timeoutMs as number | undefined,
+          maxLogBytes: opts.maxLogBytes as number | undefined,
+          runId: opts.runId as string | undefined
+        });
+        console.log(renderExternalProposalReadinessCliSummary(result));
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+function codeProposalCommand(): Command {
+  return new Command("code-proposal")
+    .description("Create and verify a proposal-only patch in a disposable workspace when readiness allows it.")
+    .option("--from-readiness-packet <packet-dir>", "existing external proposal readiness packet directory")
+    .option("--repo <path>", "external local repository path; requires --command when --from-readiness-packet is omitted")
+    .option("--command <command>", "command to run through the combined flow and verification; repeatable", collect, [])
+    .option("--out <artifact-dir>", "artifact output directory")
+    .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger)
+    .option("--max-log-bytes <bytes>", "maximum captured bytes per stdout/stderr log", parsePositiveInteger)
+    .option("--run-id <id>", "run id recorded in code proposal packet metadata")
+    .action(async (opts) => {
+      try {
+        const result = await runExternalCodeProposal({
+          fromReadinessPacket: opts.fromReadinessPacket as string | undefined,
+          repo: opts.repo as string | undefined,
+          commands: opts.command as string[] | undefined,
+          out: opts.out as string | undefined,
+          timeoutMs: opts.timeoutMs as number | undefined,
+          maxLogBytes: opts.maxLogBytes as number | undefined,
+          runId: opts.runId as string | undefined
+        });
+        console.log(renderExternalCodeProposalCliSummary(result));
       } catch (error) {
         throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
       }

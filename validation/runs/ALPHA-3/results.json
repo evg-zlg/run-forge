@@ -1,0 +1,105 @@
+{
+  "schemaVersion": "alpha-3d",
+  "generatedAt": "2026-07-04T17:19:52.186Z",
+  "rawRoot": "/tmp/runforge-alpha3-ixoLhG",
+  "results": [
+    {
+      "name": "ready from test assertion failure",
+      "kind": "readiness",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/ready-from-test-assertion-failure/packet",
+      "expected": "ready_for_code_proposal",
+      "actual": "ready_for_code_proposal"
+    },
+    {
+      "name": "ready from typecheck-style evidence",
+      "kind": "readiness",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/ready-from-typecheck-style-evidence/packet",
+      "expected": "ready_for_code_proposal",
+      "actual": "ready_for_code_proposal"
+    },
+    {
+      "name": "needs_more_context from dependency_missing",
+      "kind": "readiness",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/needs-more-context-from-dependency-missing/packet",
+      "expected": "needs_more_context",
+      "actual": "needs_more_context"
+    },
+    {
+      "name": "needs_more_context from command_not_found",
+      "kind": "readiness",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/needs-more-context-from-command-not-found/packet",
+      "expected": "needs_more_context",
+      "actual": "needs_more_context"
+    },
+    {
+      "name": "research_only from timeout",
+      "kind": "readiness",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/research-only-from-timeout/packet",
+      "expected": "research_only",
+      "actual": "research_only"
+    },
+    {
+      "name": "no_failure_observed from passed packet",
+      "kind": "readiness",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/no-failure-observed-from-passed-packet/packet",
+      "expected": "no_failure_observed",
+      "actual": "no_failure_observed"
+    },
+    {
+      "name": "blocked_by_safety synthetic case",
+      "kind": "readiness",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/readiness-blocked-by-safety/packet",
+      "expected": "blocked_by_safety",
+      "actual": "blocked_by_safety"
+    },
+    {
+      "name": "verified fixture after command passes",
+      "kind": "code-proposal",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/code-proposal-verified/packet",
+      "expected": "proposal_ready_verified",
+      "actual": "proposal_ready_verified",
+      "details": "original repo unchanged"
+    },
+    {
+      "name": "ready fixture proposal patch generated",
+      "kind": "code-proposal",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/code-proposal-ready-patch/packet",
+      "expected": "patchBytes > 0",
+      "actual": "321",
+      "details": "proposal_ready_verified"
+    },
+    {
+      "name": "not-ready readiness packet no patch generated",
+      "kind": "code-proposal",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/code-proposal-not-ready/packet",
+      "expected": "not_ready",
+      "actual": "not_ready"
+    },
+    {
+      "name": "ambiguous failure no_safe_proposal",
+      "kind": "code-proposal",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/code-proposal-no-safe/packet",
+      "expected": "no_safe_proposal",
+      "actual": "no_safe_proposal"
+    },
+    {
+      "name": "verification failure honest verification_failed",
+      "kind": "code-proposal",
+      "status": "passed",
+      "packetDir": "/tmp/runforge-alpha3-ixoLhG/code-proposal-verification-failed/packet",
+      "expected": "verification_failed",
+      "actual": "verification_failed"
+    }
+  ]
+}

@@ -9,5 +9,7 @@ validation/runs/*
 !validation/runs/*/
 validation/runs/*/*
 !validation/runs/*/score.json
+!validation/runs/ALPHA-3/summary.md
+!validation/runs/ALPHA-3/results.json
 .DS_Store
 *.log.local
