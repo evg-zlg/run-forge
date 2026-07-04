@@ -1,11 +1,13 @@
 import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { validatePacket, type PacketValidationResult } from "./packet-validator.js";
 
 export type PacketInspectFormat = "text" | "json" | "mermaid";
 
 export interface PacketInspectOptions {
   packet: string;
   format?: PacketInspectFormat;
+  validate?: boolean;
 }
 
 interface RunJson {
@@ -36,6 +38,7 @@ export interface PacketInspection {
   strategy: string | null;
   route: string[];
   artifacts: Array<{ path: string; type?: string; sizeBytes?: number }>;
+  validation?: PacketValidationResult;
 }
 
 export async function inspectPacket(options: PacketInspectOptions): Promise<PacketInspection> {
@@ -46,7 +49,7 @@ export async function inspectPacket(options: PacketInspectOptions): Promise<Pack
   const events = await readEvents(join(packetDir, "events.jsonl"));
   const route = routeFromEvents(events);
 
-  return {
+  const inspection: PacketInspection = {
     packetDir,
     runId: run.runId ?? "unknown",
     packetType: normalizePacketType(run.taskType),
@@ -59,6 +62,8 @@ export async function inspectPacket(options: PacketInspectOptions): Promise<Pack
       sizeBytes: artifact.sizeBytes
     }] : [])
   };
+  if (options.validate) inspection.validation = await validatePacket(packetDir);
+  return inspection;
 }
 
 export function renderPacketInspection(inspection: PacketInspection, format: PacketInspectFormat = "text"): string {
@@ -73,6 +78,11 @@ function renderText(inspection: PacketInspection): string {
     `Packet type: ${inspection.packetType}`,
     `Status: ${inspection.status}`,
     `Strategy: ${inspection.strategy ?? "none"}`,
+    ...(inspection.validation ? [
+      "",
+      `Validation: ${inspection.validation.passed ? "passed" : "failed"}`,
+      ...inspection.validation.errors.map((error) => `- ${error}`)
+    ] : []),
     "",
     "Route:",
     inspection.route.length > 0 ? inspection.route.join("\n-> ") : "(no events route found)",

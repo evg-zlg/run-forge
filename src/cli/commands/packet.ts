@@ -12,11 +12,13 @@ function inspectCommand(): Command {
     .description("Print a concise packet route, status, and artifact view.")
     .requiredOption("--packet <packet-dir>", "packet directory to inspect")
     .option("--format <format>", "output format: text, json, or mermaid (default: text)", parseFormat)
+    .option("--validate", "validate required packet artifacts and key JSON fields")
     .action(async (opts) => {
       try {
         const inspection = await inspectPacket({
           packet: opts.packet as string,
-          format: opts.format as PacketInspectFormat | undefined
+          format: opts.format as PacketInspectFormat | undefined,
+          validate: Boolean(opts.validate)
         });
         console.log(renderPacketInspection(inspection, opts.format as PacketInspectFormat | undefined));
       } catch (error) {

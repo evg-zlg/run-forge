@@ -10,6 +10,7 @@ import {
 } from "./external-code-proposal-renderer.js";
 import type { CommandResult, GitSnapshot } from "./external-command-check-types.js";
 import type { ReviewerDecision, WorkerNote } from "./external-code-proposal-workers.js";
+import type { ProviderProposalResult } from "./external-code-proposal-provider.js";
 
 export interface CodeProposalPacketInput {
   schemaVersion: string;
@@ -39,6 +40,11 @@ export interface CodeProposalPacketInput {
   durationMs: number;
   workerNotes: WorkerNote[];
   review: { decision: ReviewerDecision; reason: string };
+  provider: {
+    enabled: boolean;
+    backend: "cli" | null;
+    result: ProviderProposalResult | null;
+  };
   markArtifact: (path: string, artifactType?: string) => Promise<void>;
   runWorker: <T>(workerRole: string, body: (workerId: string) => Promise<{ status: string; lines: string[]; output: T }>) => Promise<T>;
 }
@@ -80,6 +86,14 @@ export async function writeCodeProposalPacket(input: CodeProposalPacketInput): P
   await input.markArtifact("metrics.json");
   await writeJson(join(input.packetDir, "safety-report.json"), safetyJson(input));
   await input.markArtifact("safety-report.json");
+  if (input.provider.result) {
+    await writeText(join(input.packetDir, "provider-input-summary.md"), input.provider.result.inputSummary);
+    await input.markArtifact("provider-input-summary.md");
+    await writeText(join(input.packetDir, "provider-output-summary.md"), input.provider.result.outputSummary);
+    await input.markArtifact("provider-output-summary.md");
+    await writeJson(join(input.packetDir, "provider-safety-report.json"), input.provider.result.safetyReport);
+    await input.markArtifact("provider-safety-report.json");
+  }
   await input.runWorker("packet_writer", async () => ({
     status: "packet_written",
     lines: [
@@ -110,6 +124,10 @@ function proposalStatus(input: CodeProposalPacketInput) {
     workspacePath: input.workspacePath,
     applyStatus: input.applyStatus,
     strategy: input.proposal?.strategy ?? null,
+    strategySource: input.proposal?.strategy === "provider_cli" ? "provider" : input.proposal?.strategy ? "deterministic" : "none",
+    providerEnabled: input.provider.enabled,
+    providerBackend: input.provider.backend,
+    providerStatus: input.provider.result?.status ?? (input.provider.enabled ? "not_run" : "disabled"),
     reviewerDecision: input.reviewerDecision,
     reviewerReason: input.reviewerReason,
     filesChanged: input.proposal?.filesChanged ?? [],
@@ -150,10 +168,18 @@ function metricsJson(input: CodeProposalPacketInput) {
     outcome: input.outcome,
     patchBytes: Buffer.byteLength(input.patch, "utf8"),
     strategy: input.proposal?.strategy ?? null,
+    strategySource: input.proposal?.strategy === "provider_cli" ? "provider" : input.proposal?.strategy ? "deterministic" : "none",
     reviewerDecision: input.reviewerDecision,
     verificationCommandsRun: input.verificationResults.length,
     verificationCommandsPassed: input.verificationResults.filter((result) => result.status === "passed").length,
     originalRepoMutationVerdict: input.originalRepoMutationVerdict,
+    providerEnabled: input.provider.enabled,
+    providerBackend: input.provider.backend,
+    providerDurationMs: input.provider.result?.durationMs ?? 0,
+    providerOutputBytes: input.provider.result?.outputBytes ?? 0,
+    providerAccepted: input.provider.result?.status === "accepted",
+    providerStatus: input.provider.result?.status ?? (input.provider.enabled ? "not_run" : "disabled"),
+    verificationStatus: input.verificationPassed ? "passed" : input.verificationResults.length > 0 ? "failed" : "not_run",
     humanGateRequired: true
   };
 }
@@ -174,7 +200,13 @@ function safetyJson(input: CodeProposalPacketInput) {
     noDeployAttempted: true,
     noApplyToOriginalRepoAttempted: true,
     humanGateRequired: true,
-    blockedBySafety: input.outcome === "blocked_by_safety"
+    blockedBySafety: input.outcome === "blocked_by_safety",
+    providerProposal: {
+      enabled: input.provider.enabled,
+      backend: input.provider.backend,
+      status: input.provider.result?.status ?? (input.provider.enabled ? "not_run" : "disabled"),
+      safetyReportArtifact: input.provider.result ? "provider-safety-report.json" : null
+    }
   };
 }
 
@@ -188,6 +220,7 @@ function trajectoryJson(input: CodeProposalPacketInput) {
       ...input.workerNotes.map((note) => ({ type: "worker", workerId: note.workerId, workerRole: note.workerRole, status: note.status, outputArtifactPaths: [note.artifactPath] })),
       { type: "workspace_prepared", status: input.workspacePath ? "finished" : "skipped" },
       { type: "proposal_generated", status: input.proposal?.patch ? "finished" : "skipped", strategy: input.proposal?.strategy ?? null },
+      { type: "provider_proposal", status: input.provider.result?.status ?? (input.provider.enabled ? "not_run" : "disabled"), backend: input.provider.backend },
       { type: "verification", status: input.verificationResults.length > 0 ? "finished" : "skipped", passed: input.verificationPassed },
       { type: "review", status: input.review.decision, reason: input.review.reason },
       { type: "summary", status: "written" }

@@ -1,5 +1,3 @@
-import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { ensureDir } from "../core/artifact-store.js";
 import { createRunId } from "../core/trajectory.js";
@@ -7,8 +5,9 @@ import type { RunSpec } from "../core/types.js";
 import { buildFixtureCodeProposal, type DeterministicCodeProposal } from "./code-proposal-fixtures.js";
 import { validateCommandSafety } from "./command-safety.js";
 import { gitSnapshot, mutationVerdictFor, prepareWorkspace } from "./external-command-check-git.js";
-import { artifactTypeFor, writePacketManifest, type ArtifactRecord } from "./external-command-check-packet.js";
+import { writePacketManifest } from "./external-command-check-packet.js";
 import type { CommandResult } from "./external-command-check-types.js";
+import { createCodeProposalArtifactTracker } from "./external-code-proposal-artifacts.js";
 import {
   createSourceReadinessPacket,
   defaultOutDir,
@@ -18,6 +17,7 @@ import {
 } from "./external-code-proposal-inputs.js";
 import { renderExternalCodeProposalCliSummary } from "./external-code-proposal-renderer.js";
 import { writeCodeProposalPacket, writeEvents } from "./external-code-proposal-packet.js";
+import { runProviderProposalWorkers, validateProviderOptions, type ProviderProposalOptions, type ProviderProposalResult } from "./external-code-proposal-provider.js";
 import {
   createWorkerRunner,
   readFailureEvidenceText,
@@ -34,7 +34,9 @@ export type CodeProposalOutcome =
   | "no_safe_proposal"
   | "not_ready"
   | "verification_failed"
-  | "blocked_by_safety";
+  | "blocked_by_safety"
+  | "provider_rejected"
+  | "provider_failed";
 
 export interface ExternalCodeProposalOptions {
   fromReadinessPacket?: string;
@@ -44,6 +46,9 @@ export interface ExternalCodeProposalOptions {
   timeoutMs?: number;
   maxLogBytes?: number;
   runId?: string;
+  enableProviderProposal?: boolean;
+  provider?: "cli";
+  providerCommand?: string;
 }
 
 export interface ExternalCodeProposalResult {
@@ -63,6 +68,11 @@ interface CheckRun {
 
 export async function runExternalCodeProposal(options: ExternalCodeProposalOptions): Promise<ExternalCodeProposalResult> {
   validateOptions(options);
+  validateProviderOptions({
+    enabled: options.enableProviderProposal,
+    provider: options.provider,
+    providerCommand: options.providerCommand
+  });
   const runId = options.runId ?? createRunId();
   const startedAt = new Date().toISOString();
   const outRoot = resolve(options.out ?? defaultOutDir());
@@ -72,37 +82,11 @@ export async function runExternalCodeProposal(options: ExternalCodeProposalOptio
   await ensureDir(logsDir);
   await ensureDir(workerNotesDir);
 
-  const events: Array<Record<string, unknown>> = [];
-  const artifacts = new Map<string, ArtifactRecord>();
-  let eventCounter = 0;
-  const emit = (type: string, data: object = {}) => {
-    eventCounter += 1;
-    const event = {
-      schemaVersion: externalCodeProposalSchemaVersion,
-      eventId: `${runId}:event:${String(eventCounter).padStart(4, "0")}`,
-      runId,
-      type,
-      time: new Date().toISOString(),
-      ...data
-    };
-    events.push(event);
-    return event.eventId;
-  };
-  const markArtifact = async (artifactPath: string, artifactType = artifactTypeFor(artifactPath)) => {
-    const fullPath = join(packetDir, artifactPath);
-    const info = await stat(fullPath);
-    const hash = createHash("sha256").update(await readFile(fullPath)).digest("hex");
-    const record: ArtifactRecord = {
-      artifactId: `${runId}:artifact:${artifactPath}`,
-      artifactPath,
-      artifactType,
-      artifactBytes: info.size,
-      hash,
-      createdAt: new Date().toISOString()
-    };
-    artifacts.set(artifactPath, record);
-    emit("artifact_written", record);
-  };
+  const { events, artifacts, emit, markArtifact } = createCodeProposalArtifactTracker({
+    runId,
+    packetDir,
+    schemaVersion: externalCodeProposalSchemaVersion
+  });
   const workerNotes: WorkerNote[] = [];
   const runWorker = createWorkerRunner({ runId, packetDir, emit, markArtifact, workerNotes });
 
@@ -168,6 +152,12 @@ export async function runExternalCodeProposal(options: ExternalCodeProposalOptio
   const diagnostics: string[] = [];
   let reviewerDecision: ReviewerDecision = "rejected_insufficient_evidence";
   let reviewerReason = "Reviewer did not run.";
+  let providerResult: ProviderProposalResult | null = null;
+  const providerOptions: ProviderProposalOptions = {
+    enabled: options.enableProviderProposal,
+    provider: options.provider,
+    providerCommand: options.providerCommand
+  };
 
   if (!contract.canAttemptCodeProposal) {
     outcome = "not_ready";
@@ -206,9 +196,29 @@ export async function runExternalCodeProposal(options: ExternalCodeProposalOptio
           output: planned
         };
       });
+      if ((!proposal || proposal.patch.length === 0) && providerOptions.enabled) {
+        providerResult = await runProviderProposalWorkers({
+          runWorker,
+          providerCommand: options.providerCommand!,
+          packetDir,
+          repoPath: repoPath!,
+          failureEvidence,
+          verificationCommands,
+          failureCategory: contract.failureCategory,
+          provider: providerOptions.provider
+        });
+        if (providerResult.status === "accepted" && providerResult.proposal) {
+          proposal = providerResult.proposal;
+        } else {
+          outcome = providerResult.status === "failed" ? "provider_failed" : "provider_rejected";
+          diagnostics.push(...providerResult.errors);
+        }
+      }
       if (!proposal || proposal.patch.length === 0) {
-        outcome = "no_safe_proposal";
-        diagnostics.push(proposal?.rationale ?? "No deterministic code proposal rule matched the failure evidence.");
+        if (outcome !== "provider_failed" && outcome !== "provider_rejected") {
+          outcome = "no_safe_proposal";
+          diagnostics.push(proposal?.rationale ?? "No deterministic code proposal rule matched the failure evidence.");
+        }
       } else {
         await runWorker("patch_writer", async () => {
           emit("proposal_generated", { filesChanged: proposal!.filesChanged, strategy: proposal!.strategy ?? "unknown" });
@@ -305,6 +315,11 @@ export async function runExternalCodeProposal(options: ExternalCodeProposalOptio
     durationMs,
     workerNotes,
     review,
+    provider: {
+      enabled: Boolean(providerOptions.enabled),
+      backend: providerOptions.provider ?? null,
+      result: providerResult
+    },
     markArtifact,
     runWorker
   });
