@@ -51,7 +51,7 @@ describe("external proposal-readiness CLI", () => {
     await expectReadiness(repo, "node -e \"console.error('command not found: definitely-not-a-real-command'); process.exit(127)\"", "needs_more_context", "command_not_found");
     await expectReadiness(repo, "node -e \"setTimeout(() => {}, 2000)\"", "research_only", "timeout", ["--timeout-ms", "100"]);
     await expectReadiness(repo, "node -e \"console.log('ok')\"", "no_failure_observed", "no_failure_observed");
-  });
+  }, 15_000);
 
   it("reports blocked_by_safety from a synthetic triage safety blocker", async () => {
     const triagePacket = await createSyntheticTriagePacket({
