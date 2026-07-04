@@ -51,7 +51,7 @@ async function readinessCases(rawRoot: string): Promise<void> {
   await recordReadiness("ready from test assertion failure", repo, assertionCommand(), "ready_for_code_proposal", rawRoot);
   await recordReadiness("ready from typecheck-style evidence", repo, "node -e \"console.error('TS2322: Type string is not assignable to type number'); process.exit(1)\"", "ready_for_code_proposal", rawRoot);
   await recordReadiness("needs_more_context from dependency_missing", repo, "node -e \"console.error('Cannot find module lodash'); process.exit(1)\"", "needs_more_context", rawRoot);
-  await recordReadiness("needs_more_context from command_not_found", repo, "definitely-not-a-real-command", "needs_more_context", rawRoot);
+  await recordReadiness("needs_more_context from command_not_found", repo, "node -e \"console.error('command not found: definitely-not-a-real-command'); process.exit(127)\"", "needs_more_context", rawRoot);
   await recordReadiness("research_only from timeout", repo, "node -e \"setTimeout(() => {}, 2000)\"", "research_only", rawRoot, ["--timeout-ms", "100"]);
   await recordReadiness("no_failure_observed from passed packet", repo, "node -e \"console.log('ok')\"", "no_failure_observed", rawRoot);
 

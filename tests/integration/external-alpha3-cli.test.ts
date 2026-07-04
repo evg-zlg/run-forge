@@ -48,7 +48,7 @@ describe("external proposal-readiness CLI", () => {
   it("maps deterministic non-ready categories conservatively", async () => {
     const repo = await createSampleGitRepo();
     await expectReadiness(repo, "node -e \"console.error('Cannot find module lodash'); process.exit(1)\"", "needs_more_context", "dependency_missing");
-    await expectReadiness(repo, "definitely-not-a-real-command", "needs_more_context", "command_not_found");
+    await expectReadiness(repo, "node -e \"console.error('command not found: definitely-not-a-real-command'); process.exit(127)\"", "needs_more_context", "command_not_found");
     await expectReadiness(repo, "node -e \"setTimeout(() => {}, 2000)\"", "research_only", "timeout", ["--timeout-ms", "100"]);
     await expectReadiness(repo, "node -e \"console.log('ok')\"", "no_failure_observed", "no_failure_observed");
   });
