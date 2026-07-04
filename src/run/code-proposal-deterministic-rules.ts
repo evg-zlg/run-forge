@@ -1,5 +1,5 @@
 import { readdir } from "node:fs/promises";
-import { extname, join, resolve } from "node:path";
+import { dirname, extname, join, normalize, relative, resolve } from "node:path";
 import type { RunSpec } from "../core/types.js";
 import type { DeterministicCodeProposal, DeterministicCodeProposalEvidence } from "./code-proposal-fixtures.js";
 import { readOptionalRepoFile, renderUnifiedDiff } from "./code-proposal-fixtures.js";
@@ -10,6 +10,8 @@ export async function buildEvidenceBasedCodeProposal(
 ): Promise<DeterministicCodeProposal | null> {
   return await buildLiteralMismatchProposal(spec, evidence)
     ?? await buildMissingExportAliasProposal(spec, evidence)
+    ?? await buildImportPathRewriteProposal(spec, evidence)
+    ?? await buildConfigLiteralMismatchProposal(spec, evidence)
     ?? await buildPackageScriptAliasProposal(spec, evidence);
 }
 
@@ -52,6 +54,50 @@ async function buildMissingExportAliasProposal(spec: RunSpec, evidence?: Determi
     strategy: "typescript_missing_export_alias",
     evidenceFiles: [sourceFile],
     evidenceSummary: [`Missing export diagnostic: ${parsed.missing}; suggested export: ${parsed.actual}; module: ${parsed.modulePath}.`]
+  };
+}
+
+async function buildImportPathRewriteProposal(spec: RunSpec, evidence?: DeterministicCodeProposalEvidence): Promise<DeterministicCodeProposal | null> {
+  if (evidence?.failureCategory && !["typecheck_error", "build_error"].includes(evidence.failureCategory)) return null;
+  const parsed = parseMissingImportPath(evidence?.evidenceText ?? "");
+  if (!parsed) return null;
+  const sourceFile = normalizeRepoPath(parsed.sourceFile);
+  if (!sourceFile) return null;
+  const before = await readOptionalRepoFile(spec.repoPath, sourceFile);
+  if (!before || countOccurrences(before, parsed.importPath) !== 1) return null;
+
+  const replacement = await findSingleImportReplacement(spec.repoPath, sourceFile, parsed.importPath);
+  if (!replacement) return null;
+  const after = before.replace(parsed.importPath, replacement);
+  return {
+    taskSummary: spec.goal ?? "Rewrite a narrow TypeScript import path.",
+    filesChanged: [sourceFile],
+    rationale: `TypeScript reported that ${sourceFile} could not resolve ${parsed.importPath}. Exactly one sibling module matched as ${replacement}, so the proposal rewrites only that import path.`,
+    patch: renderUnifiedDiff(sourceFile, before, after),
+    strategy: "typescript_import_path_rewrite",
+    evidenceFiles: [sourceFile],
+    evidenceSummary: [`Missing import diagnostic: ${sourceFile} imports ${parsed.importPath}; replacement path: ${replacement}.`]
+  };
+}
+
+async function buildConfigLiteralMismatchProposal(spec: RunSpec, evidence?: DeterministicCodeProposalEvidence): Promise<DeterministicCodeProposal | null> {
+  if (evidence?.failureCategory && !["test_assertion_failure", "build_error", "lint_error"].includes(evidence.failureCategory)) return null;
+  const mismatch = parseConfigExpectedReceived(evidence?.evidenceText ?? "");
+  if (!mismatch) return null;
+  const files = await listRepoFiles(spec.repoPath, (file) => /(^|\/)(config|configs|\.config)(\/|$)/i.test(file) || /\.config\.[cm]?[jt]s$/.test(file) || /\.json$/.test(file));
+  const mentioned = files.filter((file) => (evidence?.evidenceText ?? "").includes(file));
+  const searchFiles = mentioned.length === 1 ? mentioned : files;
+  const replacement = await findSingleLiteralReplacement(spec.repoPath, searchFiles, mismatch.received, mismatch.expected);
+  if (!replacement) return null;
+
+  return {
+    taskSummary: spec.goal ?? "Fix a narrow config literal mismatch.",
+    filesChanged: [replacement.file],
+    rationale: `The failure evidence reports config key ${mismatch.key ?? "unknown"} expected ${JSON.stringify(mismatch.expected)} but received ${JSON.stringify(mismatch.received)}. Exactly one config literal matched the received value, so the proposal updates only that literal.`,
+    patch: renderUnifiedDiff(replacement.file, replacement.before, replacement.after),
+    strategy: "config_literal_mismatch",
+    evidenceFiles: [replacement.file],
+    evidenceSummary: [`Config mismatch evidence: ${mismatch.key ?? "literal"} ${JSON.stringify(mismatch.received)} -> ${JSON.stringify(mismatch.expected)}.`]
   };
 }
 
@@ -114,12 +160,51 @@ function parseMissingExport(text: string): { modulePath: string; missing: string
   return match ? { modulePath: match[1]!, missing: match[2]!, actual: match[3]! } : null;
 }
 
+function parseMissingImportPath(text: string): { sourceFile: string; importPath: string } | null {
+  const normalized = text.replace(/\\"/g, '"');
+  const match = normalized.match(/([A-Za-z0-9_./-]+\.[cm]?[jt]sx?)\(\d+,\d+\):\s+error\s+TS2307:\s+Cannot find module\s+['"]([^'"]+)['"]/i)
+    ?? normalized.match(/([A-Za-z0-9_./-]+\.[cm]?[jt]sx?).*Cannot resolve import\s+['"]([^'"]+)['"]/i);
+  return match ? { sourceFile: match[1]!, importPath: match[2]! } : null;
+}
+
+function parseConfigExpectedReceived(text: string): { key?: string; expected: string; received: string } | null {
+  const normalized = text.replace(/\\"/g, '"');
+  const keyed = normalized.match(/config(?:\s+key)?\s+([A-Za-z0-9_.-]+).*Expected:\s*("?[^"\n]+"?|'[^'\n]+'|[^\n]+)\s+Received:\s*("?[^"\n]+"?|'[^'\n]+'|[^\n]+)/is);
+  if (keyed) return { key: keyed[1]!, expected: stripLiteral(keyed[2]!), received: stripLiteral(keyed[3]!) };
+  const plain = normalized.match(/config(?:uration)?\s+literal\s+mismatch.*Expected:\s*("?[^"\n]+"?|'[^'\n]+'|[^\n]+)\s+Received:\s*("?[^"\n]+"?|'[^'\n]+'|[^\n]+)/is);
+  return plain ? { expected: stripLiteral(plain[1]!), received: stripLiteral(plain[2]!) } : null;
+}
+
 async function findSingleModuleFile(repoPath: string, modulePath: string): Promise<string | null> {
   const normalized = modulePath.replace(/\\/g, "/").replace(/^\.\.?\//, "");
   const suffixes = [`${normalized}.ts`, `${normalized}.tsx`, `${normalized}/index.ts`, `${normalized}/index.tsx`, `src/${normalized}.ts`, `src/${normalized}.tsx`];
   const files = await listRepoFiles(repoPath, (file) => [".ts", ".tsx"].includes(extname(file)) && !file.endsWith(".d.ts"));
   const matches = files.filter((file) => suffixes.some((suffix) => file.endsWith(suffix)));
   return matches.length === 1 ? matches[0]! : null;
+}
+
+async function findSingleImportReplacement(repoPath: string, sourceFile: string, importPath: string): Promise<string | null> {
+  if (!importPath.startsWith(".")) return null;
+  const sourceDir = dirname(sourceFile);
+  const requestedBase = importPath.split("/").at(-1) ?? importPath;
+  const files = await listRepoFiles(repoPath, (file) => [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts"].includes(extname(file)) && !file.endsWith(".d.ts"));
+  const sameDirFiles = files.filter((file) => dirname(file) === sourceDir);
+  const candidates = sameDirFiles
+    .map((file) => file.slice(0, -extname(file).length))
+    .filter((file) => levenshtein(file.split("/").at(-1) ?? file, requestedBase) <= 2)
+    .map((file) => normalizeRelativeImport(sourceDir, file));
+  const unique = [...new Set(candidates)].filter((candidate) => candidate !== importPath);
+  return unique.length === 1 ? unique[0]! : null;
+}
+
+function normalizeRelativeImport(fromDir: string, targetWithoutExtension: string): string {
+  const rel = normalize(relative(fromDir || ".", targetWithoutExtension)).replace(/\\/g, "/");
+  return rel.startsWith(".") ? rel : `./${rel}`;
+}
+
+function normalizeRepoPath(path: string): string | null {
+  const normalized = path.replace(/\\/g, "/").replace(/^\.\//, "");
+  return normalized.startsWith("../") || normalized.startsWith("/") ? null : normalized;
 }
 
 function hasNamedExport(source: string, name: string): boolean {
@@ -159,4 +244,20 @@ function countOccurrences(text: string, needle: string): number {
     index += needle.length;
   }
   return count;
+}
+
+function levenshtein(left: string, right: string): number {
+  const table = Array.from({ length: left.length + 1 }, (_, row) => [row, ...Array(right.length).fill(0)]);
+  for (let column = 1; column <= right.length; column += 1) table[0]![column] = column;
+  for (let row = 1; row <= left.length; row += 1) {
+    for (let column = 1; column <= right.length; column += 1) {
+      const cost = left[row - 1] === right[column - 1] ? 0 : 1;
+      table[row]![column] = Math.min(
+        table[row - 1]![column]! + 1,
+        table[row]![column - 1]! + 1,
+        table[row - 1]![column - 1]! + cost
+      );
+    }
+  }
+  return table[left.length]![right.length]!;
 }

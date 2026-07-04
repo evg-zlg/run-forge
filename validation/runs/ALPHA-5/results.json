@@ -1,0 +1,79 @@
+{
+  "schemaVersion": "alpha-5-validation",
+  "date": "2026-07-04",
+  "commands": [
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm exec vitest run tests/integration/external-alpha3-cli.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm test",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm build",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm demo:external-check",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm demo:external-failure-triage",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm demo:external-proposal-readiness",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm demo:external-code-proposal",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm demo:packet-inspect",
+      "status": "passed"
+    }
+  ],
+  "blackBox": {
+    "rawPacketRoots": [
+      "/tmp/runforge-alpha5-import-packet/packet",
+      "/tmp/runforge-alpha5-config-packet/packet",
+      "/tmp/runforge-alpha5-ambiguous-packet/packet"
+    ],
+    "importPathRewrite": {
+      "outcome": "proposal_ready_verified",
+      "strategy": "typescript_import_path_rewrite",
+      "verificationPassed": true,
+      "filesChanged": [
+        "src/app.js"
+      ],
+      "originalRepoStatusPath": "/tmp/runforge-alpha5-import-repo-status.txt"
+    },
+    "configLiteralMismatch": {
+      "outcome": "proposal_ready_verified",
+      "strategy": "config_literal_mismatch",
+      "verificationPassed": true,
+      "filesChanged": [
+        "config/app.json"
+      ],
+      "originalRepoStatusPath": "/tmp/runforge-alpha5-config-repo-status.txt"
+    },
+    "ambiguousImportPath": {
+      "outcome": "no_safe_proposal",
+      "strategy": null,
+      "patchBytes": 0,
+      "originalRepoStatusPath": "/tmp/runforge-alpha5-ambiguous-repo-status.txt"
+    },
+    "packetInspectorEvidence": [
+      "/tmp/runforge-alpha5-import-packet/inspect.mmd",
+      "/tmp/runforge-alpha5-check-inspect.txt",
+      "/tmp/runforge-alpha5-triage-inspect.txt",
+      "/tmp/runforge-alpha5-readiness-inspect.txt"
+    ]
+  }
+}
