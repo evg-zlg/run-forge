@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { access, cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -102,15 +102,89 @@ describe("external code-proposal CLI", () => {
       verificationPassed: boolean;
       filesChanged: string[];
       patchBytes: number;
+      strategy: string;
+      reviewerDecision: string;
     };
     expect(status).toMatchObject({
       outcome: "proposal_ready_verified",
       verificationPassed: true,
-      filesChanged: ["tests/calculator.test.ts"]
+      filesChanged: ["tests/calculator.test.ts"],
+      strategy: "alpha3_calculator_assertion_fixture",
+      reviewerDecision: "accepted_for_human_review"
     });
     expect(status.patchBytes).toBeGreaterThan(0);
     expect(await readFile(join(packetDir, "proposal.patch"), "utf8")).toContain("+    expect(add(1, 1)).toBe(2);");
     expect(await readFile(join(repo, "tests/calculator.test.ts"), "utf8")).toBe(beforeTest);
+    expect(await gitStatus(repo)).toEqual(beforeStatus);
+  });
+
+  it("generates and verifies a literal assertion mismatch proposal with worker trace metadata", async () => {
+    const repo = await createLiteralMismatchGitRepo();
+    const beforeStatus = await gitStatus(repo);
+    const beforeTest = await readFile(join(repo, "tests/message.test.ts"), "utf8");
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha4-code-literal-"));
+
+    await runCli([
+      "external", "code-proposal",
+      "--repo", repo,
+      "--command", literalMismatchCommand(),
+      "--out", outDir,
+      "--run-id", "alpha4-code-literal"
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    const status = JSON.parse(await readFile(join(packetDir, "proposal-status.json"), "utf8")) as {
+      outcome: string;
+      verificationPassed: boolean;
+      filesChanged: string[];
+      strategy: string;
+      reviewerDecision: string;
+    };
+    expect(status).toMatchObject({
+      outcome: "proposal_ready_verified",
+      verificationPassed: true,
+      filesChanged: ["tests/message.test.ts"],
+      strategy: "test_assertion_literal_mismatch",
+      reviewerDecision: "accepted_for_human_review"
+    });
+    expect(await readFile(join(packetDir, "proposal.patch"), "utf8")).toContain('+expect(value()).toBe("bar");');
+    await expectWorkerTrace(packetDir);
+    expect(await readFile(join(repo, "tests/message.test.ts"), "utf8")).toBe(beforeTest);
+    expect(await gitStatus(repo)).toEqual(beforeStatus);
+  });
+
+  it("generates and verifies a narrow TypeScript missing export alias proposal", async () => {
+    const repo = await createMissingExportGitRepo();
+    const beforeStatus = await gitStatus(repo);
+    const beforeSource = await readFile(join(repo, "src/math.ts"), "utf8");
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha4-code-export-"));
+
+    await runCli([
+      "external", "code-proposal",
+      "--repo", repo,
+      "--command", missingExportCommand(),
+      "--out", outDir,
+      "--run-id", "alpha4-code-export"
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    const status = JSON.parse(await readFile(join(packetDir, "proposal-status.json"), "utf8")) as {
+      outcome: string;
+      verificationPassed: boolean;
+      filesChanged: string[];
+      strategy: string;
+      reviewerDecision: string;
+    };
+    expect(status).toMatchObject({
+      outcome: "proposal_ready_verified",
+      verificationPassed: true,
+      filesChanged: ["src/math.ts"],
+      strategy: "typescript_missing_export_alias",
+      reviewerDecision: "accepted_for_human_review"
+    });
+    expect(await readFile(join(packetDir, "proposal.patch"), "utf8")).toContain("+export { total as sum };");
+    await expectWorkerTrace(packetDir);
+    expect(await readFile(join(repo, "src/math.ts"), "utf8")).toBe(beforeSource);
     expect(await gitStatus(repo)).toEqual(beforeStatus);
   });
 
@@ -125,9 +199,11 @@ describe("external code-proposal CLI", () => {
     const status = JSON.parse(await readFile(join(codeOut, "packet", "proposal-status.json"), "utf8")) as {
       outcome: string;
       patchBytes: number;
+      reviewerDecision: string;
     };
     expect(status.outcome).toBe("not_ready");
     expect(status.patchBytes).toBe(0);
+    expect(status.reviewerDecision).toBe("rejected_no_safe_proposal");
   });
 
   it("returns no_safe_proposal when the ready failure has no deterministic patch rule", async () => {
@@ -144,9 +220,11 @@ describe("external code-proposal CLI", () => {
     const status = JSON.parse(await readFile(join(outDir, "packet", "proposal-status.json"), "utf8")) as {
       outcome: string;
       patchBytes: number;
+      reviewerDecision: string;
     };
     expect(status.outcome).toBe("no_safe_proposal");
     expect(status.patchBytes).toBe(0);
+    expect(status.reviewerDecision).toBe("rejected_no_safe_proposal");
   });
 
   it("reports verification_failed honestly when the patch does not satisfy the verification command", async () => {
@@ -164,10 +242,12 @@ describe("external code-proposal CLI", () => {
       outcome: string;
       verificationPassed: boolean;
       patchBytes: number;
+      reviewerDecision: string;
     };
     expect(status.outcome).toBe("verification_failed");
     expect(status.verificationPassed).toBe(false);
     expect(status.patchBytes).toBeGreaterThan(0);
+    expect(status.reviewerDecision).toBe("rejected_verification_failed");
   });
 });
 
@@ -193,6 +273,14 @@ const requiredCodeProposalFiles = [
   "patch-summary.md",
   "proposal-status.json",
   "verification-results.json",
+  "worker-notes/readiness-loader.md",
+  "worker-notes/context-scout.md",
+  "worker-notes/failure-analyst.md",
+  "worker-notes/proposal-planner.md",
+  "worker-notes/patch-writer.md",
+  "worker-notes/verifier.md",
+  "worker-notes/proposal-reviewer.md",
+  "worker-notes/packet-writer.md",
   "before-command-results.json",
   "after-command-results.json",
   "run.json",
@@ -227,6 +315,14 @@ function assertionCommand(): string {
   return "node -e \"const fs=require('fs'); const text=fs.readFileSync('tests/calculator.test.ts','utf8'); if (text.includes('toBe(2)')) process.exit(0); console.error('AssertionError: expected add(1, 1) assertion to expect 2'); process.exit(1);\"";
 }
 
+function literalMismatchCommand(): string {
+  return "node -e \"const fs=require('fs'); const text=fs.readFileSync('tests/message.test.ts','utf8'); if (text.includes('toBe(\\\"bar\\\")')) process.exit(0); console.error('FAIL tests/message.test.ts'); console.error('Expected: \\\"foo\\\"'); console.error('Received: \\\"bar\\\"'); process.exit(1);\"";
+}
+
+function missingExportCommand(): string {
+  return "node -e \"const fs=require('fs'); const text=fs.readFileSync('src/math.ts','utf8'); if (text.includes('export { total as sum };')) process.exit(0); console.error(\\\"src/app.ts(1,10): error TS2305: Module './src/math' has no exported member 'sum'. Did you mean 'total'?\\\"); process.exit(1);\"";
+}
+
 async function createSampleGitRepo(): Promise<string> {
   const repo = await mkdtemp(join(tmpdir(), "runforge-alpha3-sample-repo-"));
   await cp(resolve("fixtures/repos/sample-js"), repo, { recursive: true });
@@ -239,6 +335,59 @@ async function createPlainGitRepo(): Promise<string> {
   await writeFile(join(repo, "README.md"), "# Plain\n", "utf8");
   await initGitRepo(repo);
   return repo;
+}
+
+async function createLiteralMismatchGitRepo(): Promise<string> {
+  const repo = await mkdtemp(join(tmpdir(), "runforge-alpha4-literal-repo-"));
+  await mkdir(join(repo, "tests"), { recursive: true });
+  await writeFile(join(repo, "tests/message.test.ts"), [
+    'function value() { return "bar"; }',
+    'expect(value()).toBe("foo");',
+    ""
+  ].join("\n"), "utf8");
+  await initGitRepo(repo);
+  return repo;
+}
+
+async function createMissingExportGitRepo(): Promise<string> {
+  const repo = await mkdtemp(join(tmpdir(), "runforge-alpha4-export-repo-"));
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(join(repo, "src/math.ts"), [
+    "export function total(left: number, right: number): number {",
+    "  return left + right;",
+    "}",
+    ""
+  ].join("\n"), "utf8");
+  await writeFile(join(repo, "src/app.ts"), [
+    'import { sum } from "./math";',
+    "console.log(sum(1, 2));",
+    ""
+  ].join("\n"), "utf8");
+  await initGitRepo(repo);
+  return repo;
+}
+
+async function expectWorkerTrace(packetDir: string): Promise<void> {
+  for (const file of requiredCodeProposalFiles) await access(join(packetDir, file));
+  const events = (await readFile(join(packetDir, "events.jsonl"), "utf8"))
+    .trim()
+    .split("\n")
+    .map((line) => JSON.parse(line) as { type: string; workerId?: string; workerRole?: string; outputArtifactPaths?: string[] });
+  const finishedRoles = events.filter((event) => event.type === "worker_finished").map((event) => event.workerRole);
+  expect(finishedRoles).toEqual(expect.arrayContaining([
+    "readiness_loader",
+    "context_scout",
+    "failure_analyst",
+    "proposal_planner",
+    "patch_writer",
+    "verifier",
+    "proposal_reviewer",
+    "packet_writer"
+  ]));
+  expect(events.filter((event) => event.type === "worker_started").every((event) => event.workerId && event.workerRole)).toBe(true);
+  expect(events.filter((event) => event.type === "worker_finished").every((event) => event.workerId && event.workerRole && event.outputArtifactPaths?.length)).toBe(true);
+  const trajectory = JSON.parse(await readFile(join(packetDir, "trajectory.json"), "utf8")) as { steps: Array<{ workerRole?: string }> };
+  expect(trajectory.steps.map((step) => step.workerRole)).toEqual(expect.arrayContaining(["proposal_reviewer", "packet_writer"]));
 }
 
 async function initGitRepo(repo: string): Promise<void> {

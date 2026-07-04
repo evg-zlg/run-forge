@@ -1,0 +1,89 @@
+{
+  "run": "ALPHA-4",
+  "branch": "codex/runforge-alpha4-proposal-trace",
+  "localValidation": {
+    "pnpm typecheck": "passed",
+    "pnpm test": "passed: 9 files, 80 tests",
+    "pnpm build": "passed",
+    "pnpm demo:external-check": "passed",
+    "pnpm demo:external-failure-triage": "passed",
+    "pnpm demo:external-proposal-readiness": "passed",
+    "pnpm demo:external-code-proposal": "passed"
+  },
+  "blackBoxValidation": {
+    "cwd": "/tmp",
+    "rawPacketPrefix": "/tmp/runforge-alpha4-*",
+    "scratchRoot": "/tmp/runforge-alpha4-blackbox",
+    "cases": {
+      "existing": {
+        "packet": "/tmp/runforge-alpha4-existing/packet",
+        "outcome": "proposal_ready_verified",
+        "strategy": "alpha3_calculator_assertion_fixture",
+        "reviewerDecision": "accepted_for_human_review",
+        "verificationPassed": true,
+        "patchBytes": 321,
+        "workerNotesPresent": true
+      },
+      "literal": {
+        "packet": "/tmp/runforge-alpha4-literal/packet",
+        "outcome": "proposal_ready_verified",
+        "strategy": "test_assertion_literal_mismatch",
+        "reviewerDecision": "accepted_for_human_review",
+        "verificationPassed": true,
+        "patchBytes": 227,
+        "workerNotesPresent": true
+      },
+      "export": {
+        "packet": "/tmp/runforge-alpha4-export/packet",
+        "outcome": "proposal_ready_verified",
+        "strategy": "typescript_missing_export_alias",
+        "reviewerDecision": "accepted_for_human_review",
+        "verificationPassed": true,
+        "patchBytes": 206,
+        "workerNotesPresent": true
+      },
+      "ambiguous": {
+        "packet": "/tmp/runforge-alpha4-ambiguous/packet",
+        "outcome": "no_safe_proposal",
+        "strategy": null,
+        "reviewerDecision": "rejected_no_safe_proposal",
+        "verificationPassed": false,
+        "patchBytes": 0,
+        "workerNotesPresent": true
+      },
+      "notReady": {
+        "packet": "/tmp/runforge-alpha4-not-ready/packet",
+        "outcome": "not_ready",
+        "strategy": null,
+        "reviewerDecision": "rejected_no_safe_proposal",
+        "verificationPassed": false,
+        "patchBytes": 0,
+        "workerNotesPresent": true
+      },
+      "verificationFailed": {
+        "packet": "/tmp/runforge-alpha4-verification-failed/packet",
+        "outcome": "verification_failed",
+        "strategy": "alpha3_calculator_assertion_fixture",
+        "reviewerDecision": "rejected_verification_failed",
+        "verificationPassed": false,
+        "patchBytes": 321,
+        "workerNotesPresent": true
+      }
+    },
+    "originalRepoStatus": {
+      "sample": "unchanged",
+      "literal": "unchanged",
+      "export": "unchanged"
+    },
+    "workerRolesObserved": [
+      "readiness_loader",
+      "context_scout",
+      "failure_analyst",
+      "proposal_planner",
+      "patch_writer",
+      "verifier",
+      "proposal_reviewer",
+      "packet_writer"
+    ]
+  }
+}
