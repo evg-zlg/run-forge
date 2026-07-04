@@ -36,6 +36,85 @@ Then run the docs-only external proposal flow:
 pnpm demo:external-docs-proposal
 ```
 
+Run explicit checks against an external local repository in an isolated
+workspace:
+
+```bash
+pnpm dev external check \
+  --repo /path/to/target-repo \
+  --command "pnpm build" \
+  --command "pnpm test" \
+  --exit-policy packet \
+  --out ./artifacts/runs/external-check
+```
+
+`external check` runs user-provided commands in a disposable copied workspace,
+not in the original repository. It records original repo `HEAD` and
+`git status --short` before and after the run; original repo mutation is not
+allowed. Defaults are `--timeout-ms 120000` and
+`--max-log-bytes 1000000`.
+
+The copied workspace is intentionally not treated as a Git repository. RunForge
+captures a filesystem snapshot before and after commands and records added,
+modified, and deleted files in `workspace.changeSummary` using
+`method: "filesystem_snapshot"`. If the snapshot diff cannot be computed, the
+packet records `status: "unknown"` and an error instead of silently claiming a
+clean workspace.
+
+Multi-command checks currently continue after a failed command. The final
+packet status becomes `failed` when any command fails, `timed_out` when any
+command times out, and otherwise follows blocked/error/passed status. This is
+recorded in `commandPolicy` in `run.json` and repeated in `summary.md`.
+
+CLI exit behavior is explicit. The default `--exit-policy packet` exits `0`
+when RunForge successfully produces a complete packet, even if the command
+status is `failed` or `timed_out`; RunForge internal errors still exit non-zero.
+Use `--exit-policy command-status` for automation that should exit non-zero when
+the final packet status is `failed`, `timed_out`, `blocked`, or `error`.
+
+The disposable copy excludes dependency/build cache directories such as
+`node_modules`. Commands requiring installed dependencies should include
+setup/install steps or use a future workspace policy that supplies dependencies.
+Such failures are evidence in the packet, not mutation of the original repo.
+
+Each run writes `packet/summary.md`, `packet/run.json`,
+`packet/events.jsonl`, `packet/metrics.json`,
+`packet/command-results.json`, `packet/safety-report.json`,
+`packet/trajectory.json`, `packet/packet-manifest.json`, and per-command logs
+under `packet/logs/`. Start with `summary.md` for the human verdict, then
+inspect failed command logs. `events.jsonl` is the future UI route/worker trace
+with stable event, worker, command, and artifact IDs. `metrics.json` captures
+run comparison fields including timing, command counts, log bytes, truncation
+counts, workspace change counts, original repo baseline/mutation verdict, and
+per-command summaries.
+
+Analyze a failed external check packet without applying changes:
+
+```bash
+pnpm dev external failure-triage \
+  --from-check-packet ./artifacts/runs/external-check/packet \
+  --out ./artifacts/runs/external-failure-triage
+```
+
+Or have failure triage create the source check packet first:
+
+```bash
+pnpm dev external failure-triage \
+  --repo /path/to/target-repo \
+  --command "pnpm test" \
+  --out ./artifacts/runs/external-failure-triage
+```
+
+`external failure-triage` writes `packet/summary.md`,
+`packet/human-review.md`, `packet/failure-triage.md`,
+`packet/root-cause.json`, `packet/evidence-excerpts.md`,
+`packet/safe-next-action.md`, `packet/run.json`, `packet/events.jsonl`,
+`packet/metrics.json`, `packet/safety-report.json`, and
+`packet/trajectory.json`. It classifies practical failure categories such as
+dependency setup, typecheck errors, test assertion failures, build failures,
+timeouts, command-not-found errors, and unknown failures. If the source packet
+passed, it records `no_failure_observed` instead of inventing a root cause.
+
 Or create a proposal-only packet directly from flags, without hand-writing
 RunSpec JSON:
 
@@ -152,6 +231,23 @@ runforge run --task code-proposal --repo . --goal "Propose a fix" --out ./runfor
 runforge run --task command-check --repo . --command "pnpm test" --safety-profile trusted-local --out ./runforge-artifacts
 runforge run --spec ./examples/runspecs/command-check-typecheck.json
 ```
+
+For external command checks:
+
+```bash
+runforge external check \
+  --repo /path/to/target-repo \
+  --command "pnpm build" \
+  --command "pnpm test" \
+  --exit-policy command-status \
+  --out ./runforge-artifacts/external-check
+```
+
+This produces a reviewable packet without applying fixes, pushing, merging, or
+deploying. The original repo is audited before and after the disposable
+workspace run. Use `--exit-policy packet` when packet production success should
+exit `0`; use `--exit-policy command-status` when failed/timed-out command
+evidence should make automation fail.
 
 For external docs proposals:
 

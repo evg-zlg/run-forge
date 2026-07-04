@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import type { Confidence, FailureCategory, SafetyReport } from "./types.js";
 
 export interface TrajectoryStep {
@@ -7,7 +8,8 @@ export interface TrajectoryStep {
 }
 
 export function createRunId(): string {
-  return new Date().toISOString().replaceAll(":", "-").replace(/\.\d{3}Z$/, "Z");
+  const timestamp = new Date().toISOString().replaceAll(":", "-").replace(/\.\d{3}Z$/, "Z");
+  return `${timestamp}-${randomBytes(4).toString("hex")}`;
 }
 
 export function buildTrajectory(input: {

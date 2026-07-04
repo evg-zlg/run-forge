@@ -1,10 +1,71 @@
 import { Command, InvalidArgumentError } from "commander";
+import { renderExternalFailureTriageCliSummary, runExternalFailureTriage } from "../../run/external-failure-triage.js";
+import { renderExternalCommandCheckCliSummary, runExternalCommandCheck } from "../../run/external-command-check.js";
 import { buildExternalDocsProposalSpec, renderExternalDocsProposalSummary, runExternalDocsProposalPacket } from "../../run/external-docs-proposal.js";
 
 export function externalCommand(): Command {
-  const external = new Command("external").description("Create proposal-only packets for explicitly declared external local repositories.");
+  const external = new Command("external").description("Run safe packet-producing workflows for explicitly declared external local repositories.");
+  external.addCommand(checkCommand());
+  external.addCommand(failureTriageCommand());
   external.addCommand(docsProposalCommand());
   return external;
+}
+
+function checkCommand(): Command {
+  return new Command("check")
+    .description("Run explicit local commands in a disposable external-repo workspace and write a trace packet.")
+    .requiredOption("--repo <path>", "external local repository path")
+    .requiredOption("--command <command>", "command to run in the disposable workspace; repeatable", collect, [])
+    .option("--out <artifact-dir>", "artifact output directory")
+    .option("--timeout-ms <ms>", "per-command timeout in milliseconds (default: 120000)", parsePositiveInteger)
+    .option("--max-log-bytes <bytes>", "maximum captured bytes per stdout/stderr log (default: 1000000)", parsePositiveInteger)
+    .option("--run-id <id>", "run id recorded in packet metadata")
+    .option("--exit-policy <policy>", "CLI exit semantics: packet exits 0 when a packet is produced; command-status exits non-zero for failed, timed_out, blocked, or error packets (default: packet)", parseExitPolicy)
+    .action(async (opts) => {
+      try {
+        const result = await runExternalCommandCheck({
+          repo: opts.repo as string,
+          commands: opts.command as string[],
+          out: opts.out as string | undefined,
+          timeoutMs: opts.timeoutMs as number | undefined,
+          maxLogBytes: opts.maxLogBytes as number | undefined,
+          runId: opts.runId as string | undefined,
+          exitPolicy: opts.exitPolicy as "packet" | "command-status" | undefined
+        });
+        console.log(renderExternalCommandCheckCliSummary(result));
+        process.exitCode = result.cliExitCode;
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+function failureTriageCommand(): Command {
+  return new Command("failure-triage")
+    .description("Analyze an external check packet or command failure and write a human-readable triage packet.")
+    .option("--from-check-packet <packet-dir>", "existing external check packet directory")
+    .option("--repo <path>", "external local repository path; requires --command when --from-check-packet is omitted")
+    .option("--command <command>", "command to run through external check before triage; repeatable", collect, [])
+    .option("--out <artifact-dir>", "artifact output directory")
+    .option("--timeout-ms <ms>", "per-command timeout in milliseconds when running a source check", parsePositiveInteger)
+    .option("--max-log-bytes <bytes>", "maximum captured bytes per stdout/stderr log when running a source check", parsePositiveInteger)
+    .option("--run-id <id>", "run id recorded in triage packet metadata")
+    .action(async (opts) => {
+      try {
+        const result = await runExternalFailureTriage({
+          fromCheckPacket: opts.fromCheckPacket as string | undefined,
+          repo: opts.repo as string | undefined,
+          commands: opts.command as string[] | undefined,
+          out: opts.out as string | undefined,
+          timeoutMs: opts.timeoutMs as number | undefined,
+          maxLogBytes: opts.maxLogBytes as number | undefined,
+          runId: opts.runId as string | undefined
+        });
+        console.log(renderExternalFailureTriageCliSummary(result));
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
 }
 
 function docsProposalCommand(): Command {
@@ -61,5 +122,10 @@ function collect(value: string, previous: string[] | undefined): string[] {
 function parsePositiveInteger(value: string): number {
   const parsed = Number(value);
   if (Number.isInteger(parsed) && parsed > 0) return parsed;
-  throw new InvalidArgumentError("--max-bytes-per-file must be a positive integer.");
+  throw new InvalidArgumentError("value must be a positive integer.");
+}
+
+function parseExitPolicy(value: string): "packet" | "command-status" {
+  if (value === "packet" || value === "command-status") return value;
+  throw new InvalidArgumentError("--exit-policy must be packet or command-status.");
 }
