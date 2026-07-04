@@ -188,6 +188,124 @@ describe("external code-proposal CLI", () => {
     expect(await gitStatus(repo)).toEqual(beforeStatus);
   });
 
+  it("generates and verifies a narrow TypeScript import path rewrite proposal", async () => {
+    const repo = await createImportPathGitRepo();
+    const beforeStatus = await gitStatus(repo);
+    const beforeSource = await readFile(join(repo, "src/app.ts"), "utf8");
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha5-code-import-"));
+
+    await runCli([
+      "external", "code-proposal",
+      "--repo", repo,
+      "--command", missingImportCommand(),
+      "--out", outDir,
+      "--run-id", "alpha5-code-import"
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    const status = JSON.parse(await readFile(join(packetDir, "proposal-status.json"), "utf8")) as {
+      outcome: string;
+      verificationPassed: boolean;
+      filesChanged: string[];
+      strategy: string;
+    };
+    expect(status).toMatchObject({
+      outcome: "proposal_ready_verified",
+      verificationPassed: true,
+      filesChanged: ["src/app.ts"],
+      strategy: "typescript_import_path_rewrite"
+    });
+    expect(await readFile(join(packetDir, "proposal.patch"), "utf8")).toContain('-import { total } from "./maths";');
+    expect(await readFile(join(packetDir, "proposal.patch"), "utf8")).toContain('+import { total } from "./math";');
+    expect(await readFile(join(repo, "src/app.ts"), "utf8")).toBe(beforeSource);
+    expect(await gitStatus(repo)).toEqual(beforeStatus);
+  });
+
+  it("generates and verifies a config literal mismatch proposal", async () => {
+    const repo = await createConfigMismatchGitRepo();
+    const beforeStatus = await gitStatus(repo);
+    const beforeConfig = await readFile(join(repo, "config/app.json"), "utf8");
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha5-code-config-"));
+
+    await runCli([
+      "external", "code-proposal",
+      "--repo", repo,
+      "--command", configMismatchCommand(),
+      "--out", outDir,
+      "--run-id", "alpha5-code-config"
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    const status = JSON.parse(await readFile(join(packetDir, "proposal-status.json"), "utf8")) as {
+      outcome: string;
+      verificationPassed: boolean;
+      filesChanged: string[];
+      strategy: string;
+    };
+    expect(status).toMatchObject({
+      outcome: "proposal_ready_verified",
+      verificationPassed: true,
+      filesChanged: ["config/app.json"],
+      strategy: "config_literal_mismatch"
+    });
+    expect(await readFile(join(packetDir, "proposal.patch"), "utf8")).toContain('-  "apiBaseUrl": "http://localhost:3001"');
+    expect(await readFile(join(packetDir, "proposal.patch"), "utf8")).toContain('+  "apiBaseUrl": "http://localhost:3000"');
+    expect(await readFile(join(repo, "config/app.json"), "utf8")).toBe(beforeConfig);
+    expect(await gitStatus(repo)).toEqual(beforeStatus);
+  });
+
+  it("returns no_safe_proposal when import path evidence has multiple likely replacements", async () => {
+    const repo = await createAmbiguousImportPathGitRepo();
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha5-code-import-ambiguous-"));
+
+    await runCli([
+      "external", "code-proposal",
+      "--repo", repo,
+      "--command", missingImportCommand(),
+      "--out", outDir
+    ]);
+
+    const status = JSON.parse(await readFile(join(outDir, "packet", "proposal-status.json"), "utf8")) as {
+      outcome: string;
+      patchBytes: number;
+      strategy: string | null;
+    };
+    expect(status.outcome).toBe("no_safe_proposal");
+    expect(status.patchBytes).toBe(0);
+    expect(status.strategy).toBeNull();
+  });
+
+  it("inspects a code proposal packet as text, json, and mermaid", async () => {
+    const repo = await createLiteralMismatchGitRepo();
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha5-inspect-"));
+    await runCli([
+      "external", "code-proposal",
+      "--repo", repo,
+      "--command", literalMismatchCommand(),
+      "--out", outDir,
+      "--run-id", "alpha5-inspect"
+    ]);
+    const packetDir = join(outDir, "packet");
+
+    const text = await runCli(["packet", "inspect", "--packet", packetDir]);
+    expect(text.stdout).toContain("Packet type: code_proposal");
+    expect(text.stdout).toContain("Strategy: test_assertion_literal_mismatch");
+    expect(text.stdout).toContain("proposal_planner");
+    expect(text.stdout).toContain("- human-review.md");
+
+    const json = await runCli(["packet", "inspect", "--packet", packetDir, "--format", "json"]);
+    expect(JSON.parse(json.stdout)).toMatchObject({
+      runId: "alpha5-inspect",
+      packetType: "code_proposal",
+      status: "proposal_ready_verified",
+      strategy: "test_assertion_literal_mismatch"
+    });
+
+    const mermaid = await runCli(["packet", "inspect", "--packet", packetDir, "--format", "mermaid"]);
+    expect(mermaid.stdout).toContain("flowchart TD");
+    expect(mermaid.stdout).toContain('["proposal_planner"]');
+  });
+
   it("does not generate a patch for not-ready readiness", async () => {
     const triagePacket = await createSyntheticTriagePacket({ category: "dependency_missing" });
     const readinessOut = await mkdtemp(join(tmpdir(), "runforge-alpha3-code-not-ready-source-"));
@@ -323,6 +441,14 @@ function missingExportCommand(): string {
   return "node -e \"const fs=require('fs'); const text=fs.readFileSync('src/math.ts','utf8'); if (text.includes('export { total as sum };')) process.exit(0); console.error(\\\"src/app.ts(1,10): error TS2305: Module './src/math' has no exported member 'sum'. Did you mean 'total'?\\\"); process.exit(1);\"";
 }
 
+function missingImportCommand(): string {
+  return "node -e \"const fs=require('fs'); const text=fs.readFileSync('src/app.ts','utf8'); if (text.includes('from \\\"./math\\\"')) process.exit(0); console.error(\\\"src/app.ts(1,23): error TS2307: Cannot find module './maths' or its corresponding type declarations.\\\"); process.exit(1);\"";
+}
+
+function configMismatchCommand(): string {
+  return "node -e \"const fs=require('fs'); const config=JSON.parse(fs.readFileSync('config/app.json','utf8')); if (config.apiBaseUrl === 'http://localhost:3000') process.exit(0); console.error('FAIL tests/config.test.ts'); console.error('Config apiBaseUrl mismatch'); console.error('Expected: \\\"http://localhost:3000\\\"'); console.error('Received: \\\"http://localhost:3001\\\"'); process.exit(1);\"";
+}
+
 async function createSampleGitRepo(): Promise<string> {
   const repo = await mkdtemp(join(tmpdir(), "runforge-alpha3-sample-repo-"));
   await cp(resolve("fixtures/repos/sample-js"), repo, { recursive: true });
@@ -361,6 +487,45 @@ async function createMissingExportGitRepo(): Promise<string> {
   await writeFile(join(repo, "src/app.ts"), [
     'import { sum } from "./math";',
     "console.log(sum(1, 2));",
+    ""
+  ].join("\n"), "utf8");
+  await initGitRepo(repo);
+  return repo;
+}
+
+async function createImportPathGitRepo(): Promise<string> {
+  const repo = await mkdtemp(join(tmpdir(), "runforge-alpha5-import-repo-"));
+  await mkdir(join(repo, "src"), { recursive: true });
+  await writeFile(join(repo, "src/math.ts"), [
+    "export function total(left: number, right: number): number {",
+    "  return left + right;",
+    "}",
+    ""
+  ].join("\n"), "utf8");
+  await writeFile(join(repo, "src/app.ts"), [
+    'import { total } from "./maths";',
+    "console.log(total(1, 2));",
+    ""
+  ].join("\n"), "utf8");
+  await initGitRepo(repo);
+  return repo;
+}
+
+async function createAmbiguousImportPathGitRepo(): Promise<string> {
+  const repo = await createImportPathGitRepo();
+  await writeFile(join(repo, "src/maths2.ts"), "export const other = 1;\n", "utf8");
+  await execFileAsync("git", ["add", "."], { cwd: repo });
+  await execFileAsync("git", ["-c", "user.name=RunForge Test", "-c", "user.email=runforge@example.test", "commit", "-m", "ambiguous import candidate"], { cwd: repo });
+  return repo;
+}
+
+async function createConfigMismatchGitRepo(): Promise<string> {
+  const repo = await mkdtemp(join(tmpdir(), "runforge-alpha5-config-repo-"));
+  await mkdir(join(repo, "config"), { recursive: true });
+  await writeFile(join(repo, "config/app.json"), [
+    "{",
+    '  "apiBaseUrl": "http://localhost:3001"',
+    "}",
     ""
   ].join("\n"), "utf8");
   await initGitRepo(repo);

@@ -65,20 +65,20 @@ const classificationRules: Array<{
     readyForCodeProposal: false
   },
   {
-    category: "dependency_missing",
-    confidence: "high",
-    pattern: /(Cannot find module|Module not found|ERR_MODULE_NOT_FOUND|Cannot find package|missing dependency|pnpm: command not found|npm: command not found)/i,
-    rootCause: "The command failed because a dependency, package, or package manager was missing in the disposable workspace environment.",
-    nextAction: "Run an explicit dependency setup command in the check flow or verify dependency declarations before proposing code changes.",
-    readyForCodeProposal: false
-  },
-  {
     category: "typecheck_error",
     confidence: "high",
     pattern: /(TS\d{4}:|Type '.*' is not assignable|Property .* does not exist|tsc\b|TypeScript)/i,
     rootCause: "The logs contain TypeScript/typecheck diagnostics.",
     nextAction: "Inspect the referenced type errors and prepare a narrow code proposal only if the diagnostics identify repo source files.",
     readyForCodeProposal: true
+  },
+  {
+    category: "dependency_missing",
+    confidence: "high",
+    pattern: /(Cannot find module|Module not found|ERR_MODULE_NOT_FOUND|Cannot find package|missing dependency|pnpm: command not found|npm: command not found)/i,
+    rootCause: "The command failed because a dependency, package, or package manager was missing in the disposable workspace environment.",
+    nextAction: "Run an explicit dependency setup command in the check flow or verify dependency declarations before proposing code changes.",
+    readyForCodeProposal: false
   },
   {
     category: "test_assertion_failure",
