@@ -110,6 +110,9 @@ function codeProposalCommand(): Command {
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger)
     .option("--max-log-bytes <bytes>", "maximum captured bytes per stdout/stderr log", parsePositiveInteger)
     .option("--run-id <id>", "run id recorded in code proposal packet metadata")
+    .option("--enable-provider-proposal", "explicitly allow provider-backed proposal after deterministic strategies do not match")
+    .option("--provider <provider>", "provider backend for explicitly enabled proposal mode: cli", parseProvider)
+    .option("--provider-command <command>", "CLI command to run in the bounded provider input directory")
     .action(async (opts) => {
       try {
         const result = await runExternalCodeProposal({
@@ -119,7 +122,10 @@ function codeProposalCommand(): Command {
           out: opts.out as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,
           maxLogBytes: opts.maxLogBytes as number | undefined,
-          runId: opts.runId as string | undefined
+          runId: opts.runId as string | undefined,
+          enableProviderProposal: Boolean(opts.enableProviderProposal),
+          provider: opts.provider as "cli" | undefined,
+          providerCommand: opts.providerCommand as string | undefined
         });
         console.log(renderExternalCodeProposalCliSummary(result));
       } catch (error) {
@@ -188,4 +194,9 @@ function parsePositiveInteger(value: string): number {
 function parseExitPolicy(value: string): "packet" | "command-status" {
   if (value === "packet" || value === "command-status") return value;
   throw new InvalidArgumentError("--exit-policy must be packet or command-status.");
+}
+
+function parseProvider(value: string): "cli" {
+  if (value === "cli") return value;
+  throw new InvalidArgumentError("--provider must be cli.");
 }

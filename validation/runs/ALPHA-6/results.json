@@ -1,0 +1,71 @@
+{
+  "schemaVersion": "alpha-6",
+  "generatedAt": "2026-07-04T19:06:05.031Z",
+  "rawPacketPrefix": "/tmp/runforge-alpha6-*",
+  "providerOriginalState": "bad\n",
+  "results": [
+    {
+      "name": "deterministic proposal still works",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 490,
+      "outDir": "/tmp/runforge-alpha6-deterministic",
+      "stdout": "RunForge external code proposal\n\nRun ID: 2026-07-04T19-06-02Z-9efb4691\nOutcome: proposal_ready_verified\nVerification passed: true\nSource readiness packet: /tmp/runforge-alpha6-deterministic/readiness-source/packet\nPacket: /tmp/runforge-alpha6-deterministic/packet\nProposal patch bytes: 321\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /Users/evgeny/Documents/projects/RunForge/fixtures/repos/sample-js --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); const text=fs.readFileSync('\"'\"'tests/calculator.test.ts'\"'\"','\"'\"'utf8'\"'\"'); if (text.includes('\"'\"'toBe(2)'\"'\"')) process.exit(0); console.error('\"'\"'AssertionError: expected add(1, 1) assertion to expect 2'\"'\"'); process.exit(1);\"' --out /tmp/runforge-alpha6-deterministic\n"
+    },
+    {
+      "name": "packet inspector schema validation",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 319,
+      "outDir": "/tmp/runforge-alpha6-deterministic",
+      "stdout": "Run ID: 2026-07-04T19-06-02Z-9efb4691\nPacket type: code_proposal\nStatus: proposal_ready_verified\nStrategy: alpha3_calculator_assertion_fixture\n\nValidation: passed\n\nRoute:\ntask_received\n-> readiness_loader\n-> context_scout\n-> failure_analyst\n-> proposal_planner\n-> patch_writer\n-> verifier\n-> proposal_reviewer\n-> packet_writer\n-> run_finished\n\nArtifacts:\n- after-command-results.json\n- before-command-results.json\n- events.jsonl\n- human-review.md\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- metrics.json\n- patch-summary.md\n- proposal-status.json\n- proposal.patch\n- run.json\n- safety-report.json\n- summary.md\n- trajectory.json\n- verification-results.json\n- worker-notes/context-scout.md\n- worker-notes/failure-analyst.md\n- worker-notes/packet-writer.md\n- worker-notes/patch-writer.md\n- worker-notes/proposal-planner.md\n- worker-notes/proposal-reviewer.md\n- worker-notes/readiness-loader.md\n- worker-notes/verifier.md\n",
+      "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha6-deterministic/packet --validate\n"
+    },
+    {
+      "name": "provider disabled by default",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 447,
+      "outDir": "/tmp/runforge-alpha6-provider-disabled",
+      "stdout": "RunForge external code proposal\n\nRun ID: 2026-07-04T19-06-03Z-26ffb62f\nOutcome: no_safe_proposal\nVerification passed: false\nSource readiness packet: /tmp/runforge-alpha6-provider-disabled/readiness-source/packet\nPacket: /tmp/runforge-alpha6-provider-disabled/packet\nProposal patch bytes: 0\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /tmp/runforge-alpha6-provider-repo --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --out /tmp/runforge-alpha6-provider-disabled\n"
+    },
+    {
+      "name": "provider requires explicit flag",
+      "ok": true,
+      "exitCode": 1,
+      "durationMs": 337,
+      "outDir": "/tmp/runforge-alpha6-provider-requires-flag",
+      "stdout": "[ELIFECYCLE] Command failed with exit code 1.\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /tmp/runforge-alpha6-provider-repo --command 'node -e \"process.exit(1)\"' --provider cli --provider-command 'node -e '\"'\"'console.log(1)'\"'\" --out /tmp/runforge-alpha6-provider-requires-flag\n/Users/evgeny/Documents/projects/RunForge/src/cli/commands/external.ts:132\n        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));\n              ^\n\nInvalidArgumentError: --provider and --provider-command require --enable-provider-proposal.\n    at Command.<anonymous> (/Users/evgeny/Documents/projects/RunForge/src/cli/commands/external.ts:132:15)\n    at async Command.parseAsync (/Users/evgeny/Documents/projects/RunForge/node_modules/.pnpm/commander@14.0.3/node_modules/commander/lib/command.js:1122:5)\n    at async <anonymous> (/Users/evgeny/Documents/projects/RunForge/src/cli/index.ts:25:1) {\n  code: 'commander.invalidArgument',\n  exitCode: 1,\n  nestedError: undefined\n}\n\nNode.js v24.15.0\n"
+    },
+    {
+      "name": "unsafe provider patch is rejected",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 468,
+      "outDir": "/tmp/runforge-alpha6-provider-unsafe",
+      "stdout": "RunForge external code proposal\n\nRun ID: 2026-07-04T19-06-04Z-532a05a8\nOutcome: provider_rejected\nVerification passed: false\nSource readiness packet: /tmp/runforge-alpha6-provider-unsafe/readiness-source/packet\nPacket: /tmp/runforge-alpha6-provider-unsafe/packet\nProposal patch bytes: 0\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /tmp/runforge-alpha6-provider-repo --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --enable-provider-proposal --provider cli --provider-command 'node -e '\"'\"'require(\"fs\").writeFileSync(\"provider-output.patch\", \"diff --git a/.env b/.env\\n--- a/.env\\n+++ b/.env\\n@@ -1 +1 @@\\n-old\\n+secret\\n\")'\"'\" --out /tmp/runforge-alpha6-provider-unsafe\n"
+    },
+    {
+      "name": "valid provider patch verifies in disposable workspace",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 503,
+      "outDir": "/tmp/runforge-alpha6-provider-valid",
+      "stdout": "RunForge external code proposal\n\nRun ID: 2026-07-04T19-06-04Z-0b4fc645\nOutcome: proposal_ready_verified\nVerification passed: true\nSource readiness packet: /tmp/runforge-alpha6-provider-valid/readiness-source/packet\nPacket: /tmp/runforge-alpha6-provider-valid/packet\nProposal patch bytes: 90\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /tmp/runforge-alpha6-provider-repo --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --enable-provider-proposal --provider cli --provider-command 'node -e '\"'\"'require(\"fs\").writeFileSync(\"provider-output.patch\", \"diff --git a/state.txt b/state.txt\\n--- a/state.txt\\n+++ b/state.txt\\n@@ -1 +1 @@\\n-bad\\n+good\\n\")'\"'\" --out /tmp/runforge-alpha6-provider-valid\n"
+    },
+    {
+      "name": "provider packet validation json",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 318,
+      "outDir": "/tmp/runforge-alpha6-provider-valid",
+      "stdout": "{\n  \"packetDir\": \"/tmp/runforge-alpha6-provider-valid/packet\",\n  \"runId\": \"2026-07-04T19-06-04Z-0b4fc645\",\n  \"packetType\": \"code_proposal\",\n  \"status\": \"proposal_ready_verified\",\n  \"strategy\": \"provider_cli\",\n  \"route\": [\n    \"task_received\",\n    \"readiness_loader\",\n    \"context_scout\",\n    \"failure_analyst\",\n    \"proposal_planner\",\n    \"provider_input_builder\",\n    \"provider_runner\",\n    \"provider_patch_validator\",\n    \"provider_safety_reviewer\",\n    \"patch_writer\",\n    \"verifier\",\n    \"proposal_reviewer\",\n    \"packet_writer\",\n    \"run_finished\"\n  ],\n  \"artifacts\": [\n    {\n      \"path\": \"after-command-results.json\",\n      \"type\": \"json\",\n      \"sizeBytes\": 1073\n    },\n    {\n      \"path\": \"before-command-results.json\",\n      \"type\": \"json\",\n      \"sizeBytes\": 834\n    },\n    {\n      \"path\": \"events.jsonl\",\n      \"type\": \"jsonl\",\n      \"sizeBytes\": 25376\n    },\n    {\n      \"path\": \"human-review.md\",\n      \"type\": \"summary\",\n      \"sizeBytes\": 598\n    },\n    {\n      \"path\": \"logs/command-001.stderr.log\",\n      \"type\": \"log\",\n      \"sizeBytes\": 0\n    },\n    {\n      \"path\": \"logs/command-001.stdout.log\",\n      \"type\": \"log\",\n      \"sizeBytes\": 0\n    },\n    {\n      \"path\": \"metrics.json\",\n      \"type\": \"json\",\n      \"sizeBytes\": 620\n    },\n    {\n      \"path\": \"patch-summary.md\",\n      \"type\": \"summary\",\n      \"sizeBytes\": 403\n    },\n    {\n      \"path\": \"proposal-status.json\",\n      \"type\": \"json\",\n      \"sizeBytes\": 1042\n    },\n    {\n      \"path\": \"proposal.patch\",\n      \"type\": \"patch\",\n      \"sizeBytes\": 90\n    },\n    {\n      \"path\": \"provider-input-summary.md\",\n      \"type\": \"summary\",\n      \"sizeBytes\": 322\n    },\n    {\n      \"path\": \"provider-output-summary.md\",\n      \"type\": \"summary\",\n      \"sizeBytes\": 106\n    },\n    {\n      \"path\": \"provider-safety-report.json\",\n      \"type\": \"json\",\n      \"sizeBytes\": 271\n    },\n    {\n      \"path\": \"run.json\",\n      \"type\": \"json\",\n      \"sizeBytes\": 831\n    },\n    {\n      \"path\": \"safety-report.json\",\n      \"type\": \"json\",\n      \"sizeBytes\": 976\n    },\n    {\n      \"path\": \"summary.md\",\n      \"type\": \"summary\",\n      \"sizeBytes\": 1155\n    },\n    {\n      \"path\": \"trajectory.json\",\n      \"type\": \"json\",\n      \"sizeBytes\": 4099\n    },\n    {\n      \"path\": \"verification-results.json\",\n      \"type\": \"json\",\n      \"sizeBytes\": 1202\n    },\n    {\n      \"path\": \"worker-notes/context-scout.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 412\n    },\n    {\n      \"path\": \"worker-notes/failure-analyst.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 136\n    },\n    {\n      \"path\": \"worker-notes/packet-writer.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 279\n    },\n    {\n      \"path\": \"worker-notes/patch-writer.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 228\n    },\n    {\n      \"path\": \"worker-notes/proposal-planner.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 210\n    },\n    {\n      \"path\": \"worker-notes/proposal-reviewer.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 278\n    },\n    {\n      \"path\": \"worker-notes/provider-input-builder.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 259\n    },\n    {\n      \"path\": \"worker-notes/provider-patch-validator.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 100\n    },\n    {\n      \"path\": \"worker-notes/provider-runner.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 139\n    },\n    {\n      \"path\": \"worker-notes/provider-safety-reviewer.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 187\n    },\n    {\n      \"path\": \"worker-notes/readiness-loader.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 162\n    },\n    {\n      \"path\": \"worker-notes/verifier.md\",\n      \"type\": \"note\",\n      \"sizeBytes\": 269\n    }\n  ],\n  \"validation\": {\n    \"checked\": true,\n    \"passed\": true,\n    \"packetDir\": \"/tmp/runforge-alpha6-provider-valid/packet\",\n    \"packetType\": \"external_code_proposal\",\n    \"errors\": []\n  }\n}\n\n",
+      "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha6-provider-valid/packet --validate --format json\n"
+    }
+  ]
+}

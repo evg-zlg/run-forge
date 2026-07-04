@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runforge.local/schemas/proposal-readiness-packet.schema.json",
+  "title": "RunForge proposal readiness packet",
+  "type": "object",
+  "required": ["run", "events", "metrics", "safetyReport", "packetManifest", "proposalContract"],
+  "properties": {
+    "run": {
+      "type": "object",
+      "required": ["schemaVersion", "runId", "taskType", "status"],
+      "properties": {
+        "schemaVersion": { "type": "string" },
+        "runId": { "type": "string" },
+        "taskType": { "const": "external_proposal_readiness" },
+        "status": { "type": "string" }
+      }
+    },
+    "events": { "type": "array", "minItems": 1 },
+    "metrics": { "$ref": "#/$defs/runScopedObject" },
+    "safetyReport": { "$ref": "#/$defs/runScopedObject" },
+    "packetManifest": {
+      "type": "object",
+      "required": ["artifacts"],
+      "properties": { "artifacts": { "type": "array", "minItems": 1 } }
+    },
+    "proposalContract": {
+      "type": "object",
+      "required": ["readinessOutcome", "canAttemptCodeProposal"],
+      "properties": {
+        "readinessOutcome": { "type": "string" },
+        "canAttemptCodeProposal": { "type": "boolean" }
+      }
+    }
+  },
+  "$defs": {
+    "runScopedObject": {
+      "type": "object",
+      "required": ["schemaVersion", "runId"],
+      "properties": {
+        "schemaVersion": { "type": "string" },
+        "runId": { "type": "string" }
+      }
+    }
+  }
+}

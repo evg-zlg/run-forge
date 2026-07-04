@@ -1,6 +1,24 @@
 # RunForge Packet Schema Contract
 
-RunForge packets are filesystem artifact directories produced by external workflows. They are intended to be stable enough for local inspectors, future UI surfaces, and API adapters. This document describes the Alpha-5 contract; it is a compatibility reference, not a complete JSON Schema.
+RunForge packets are filesystem artifact directories produced by external workflows. They are intended to be stable enough for local inspectors, future UI surfaces, and API adapters. This document describes the Alpha-6 contract and its lightweight machine-checkable validation layer.
+
+## Machine Validation
+
+Alpha-6 adds JSON Schema reference files under `schemas/`:
+
+- `schemas/check-packet.schema.json`
+- `schemas/failure-triage-packet.schema.json`
+- `schemas/proposal-readiness-packet.schema.json`
+- `schemas/code-proposal-packet.schema.json`
+
+The local packet inspector also supports runtime validation:
+
+```bash
+pnpm dev packet inspect --packet /path/to/packet --validate
+pnpm dev packet inspect --packet /path/to/packet --validate --format json
+```
+
+The runtime validator is intentionally lightweight. It checks required packet artifacts, `run.json` identity/type/status fields, event presence, metrics/safety/manifest presence, and key packet-specific JSON fields. It is useful for local CI and future UI/API adapters, but it is not a full JSON Schema engine yet.
 
 ## Common Contract
 
@@ -85,8 +103,9 @@ Required artifacts:
 - `root-cause.json`
 - `summary.md`
 - `human-review.md`
-- `triage-report.md`
-- `recommended-next-action.md`
+- `failure-triage.md`
+- `evidence-excerpts.md`
+- `safe-next-action.md`
 - `events.jsonl`
 - `metrics.json`
 - `safety-report.json`
@@ -135,7 +154,7 @@ Important fields:
 
 ## Code Proposal Packet
 
-Purpose: generate a deterministic proposal patch, apply it only in a disposable workspace, verify when commands are available, and package it for human review.
+Purpose: generate a deterministic or explicitly gated provider-backed proposal patch, apply it only in a disposable workspace, verify when commands are available, and package it for human review.
 
 Required artifacts:
 
@@ -160,18 +179,25 @@ Important fields:
 - `run.json.taskType`: `external_code_proposal`
 - `run.json.status`: code proposal outcome
 - `proposal-status.json.outcome`: `proposal_ready_verified`, `proposal_ready_unverified`, `no_safe_proposal`, `not_ready`, `verification_failed`, or `blocked_by_safety`
-- `proposal-status.json.strategy`: deterministic strategy name, or `null`
+- `proposal-status.json.outcome`: provider mode can also report `provider_rejected` or `provider_failed`
+- `proposal-status.json.strategy`: deterministic strategy name, `provider_cli`, or `null`
+- `proposal-status.json.strategySource`: `deterministic`, `provider`, or `none`
+- `proposal-status.json.providerEnabled`: true only when `--enable-provider-proposal` was used
+- `proposal-status.json.providerStatus`: `disabled`, `not_run`, `accepted`, `rejected`, or `failed`
 - `proposal-status.json.filesChanged`: proposed file paths
 - `proposal-status.json.applyStatus`: disposable workspace patch apply status
 - `proposal-status.json.reviewerDecision`: deterministic reviewer decision
 - `proposal-status.json.verificationPassed`: true only when after-command verification ran and passed
 - `metrics.json.strategy`: mirrors the selected strategy for dashboards
+- `metrics.json.providerEnabled`, `providerBackend`, `providerDurationMs`, `providerOutputBytes`, `providerAccepted`, and `verificationStatus`: provider and verification telemetry
 - `safety-report.json.patchAppliedOnlyInDisposableWorkspace`: true only when workspace application succeeded
+- Provider-backed packets include `provider-input-summary.md`, `provider-output-summary.md`, and `provider-safety-report.json` when provider mode runs.
 
 Worker trace fields:
 
 - `worker-notes/` contains one note per worker role.
-- Expected code proposal worker roles are `readiness_loader`, `context_scout`, `failure_analyst`, `proposal_planner`, `patch_writer`, `verifier`, `proposal_reviewer`, and `packet_writer`.
+- Expected deterministic code proposal worker roles are `readiness_loader`, `context_scout`, `failure_analyst`, `proposal_planner`, `patch_writer`, `verifier`, `proposal_reviewer`, and `packet_writer`.
+- Provider-backed packets also emit `provider_input_builder`, `provider_runner`, `provider_patch_validator`, and `provider_safety_reviewer`.
 - `events.jsonl` emits `worker_started` and `worker_finished` for worker graph reconstruction.
 - `trajectory.json.steps[]` includes worker steps and proposal/review/verification milestones.
 
@@ -184,4 +210,4 @@ Deterministic strategy names currently include:
 - `config_literal_mismatch`
 - `package_script_alias`
 - `docs_anchor_insert`
-
+- `provider_cli` is reserved for explicitly enabled generic CLI provider proposals after deterministic strategies do not match.
