@@ -1,0 +1,83 @@
+{
+  "schemaVersion": "alpha-3a-validation",
+  "runId": "ALPHA-3A",
+  "date": "2026-07-04",
+  "milestone": "Stable external execution harness + independent validation + first failure-triage capability",
+  "status": "passed",
+  "validation": {
+    "projectCommands": [
+      {
+        "command": "pnpm typecheck",
+        "status": "passed"
+      },
+      {
+        "command": "pnpm test",
+        "status": "passed",
+        "evidence": "8 test files passed, 71 tests passed"
+      },
+      {
+        "command": "pnpm build",
+        "status": "passed"
+      },
+      {
+        "command": "pnpm demo:external-check",
+        "status": "passed"
+      },
+      {
+        "command": "pnpm demo:external-failure-triage",
+        "status": "passed"
+      }
+    ],
+    "blackBox": {
+      "mode": "built CLI executed from /tmp against a temporary external git repository",
+      "artifactRoot": "/tmp/runforge-alpha3a-blackbox-9lPdNH",
+      "status": "passed",
+      "checks": [
+        {
+          "name": "command success",
+          "status": "passed"
+        },
+        {
+          "name": "command failure",
+          "status": "passed"
+        },
+        {
+          "name": "timeout",
+          "status": "passed"
+        },
+        {
+          "name": "huge log / truncation",
+          "status": "passed"
+        },
+        {
+          "name": "workspace mutation",
+          "status": "passed"
+        },
+        {
+          "name": "multi-command failure",
+          "status": "passed"
+        },
+        {
+          "name": "failure-triage from failed packet",
+          "status": "passed",
+          "observedCategory": "test_assertion_failure"
+        },
+        {
+          "name": "failure-triage from timeout packet",
+          "status": "passed",
+          "observedCategory": "timeout"
+        },
+        {
+          "name": "no-failure-observed from passed packet",
+          "status": "passed",
+          "observedCategory": "no_failure_observed"
+        }
+      ]
+    }
+  },
+  "notes": [
+    "External check packet exits use explicit packet vs command-status policy.",
+    "Failure triage is evidence-backed and does not apply patches, push, merge, or deploy.",
+    "Generated packet artifacts are intentionally not tracked; this score file records the black-box evidence location."
+  ]
+}
