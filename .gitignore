@@ -27,6 +27,9 @@ validation/runs/*/*
 !validation/runs/ALPHA-9/external-dogfood/*/
 !validation/runs/ALPHA-9/external-dogfood/*/*.md
 !validation/runs/ALPHA-9/external-dogfood/*/*.patch
+!validation/runs/ALPHA-11/
+!validation/runs/ALPHA-11/summary.md
+!validation/runs/ALPHA-11/results.json
 !validation/runs/PACKET-VALIDATION/summary.md
 !validation/runs/PACKET-VALIDATION/results.json
 .DS_Store

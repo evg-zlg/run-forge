@@ -30,6 +30,8 @@
     "demo:packet-inspect": "tsx src/cli/index.ts packet inspect --packet ./artifacts/runs/external-code-proposal-demo/packet",
     "demo:packet-validate": "tsx src/cli/index.ts packet inspect --packet ./artifacts/runs/external-code-proposal-demo/packet --validate",
     "demo:packet-view": "tsx src/cli/index.ts packet view --packet ./artifacts/runs/external-code-proposal-demo/packet --out ./artifacts/runs/external-code-proposal-demo/viewer",
+    "demo:packet-query": "tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-demo-packet-query-index && tsx src/cli/index.ts packet query --index /tmp/runforge-demo-packet-query-index/index.json --out /tmp/runforge-demo-packet-query --outcome provider_rejected",
+    "demo:latest-dogfood": "tsx src/cli/index.ts packet report latest --root ./validation/runs --out /tmp/runforge-demo-latest-dogfood",
     "demo:external-provider-proposal": "tsx scripts/alpha6-provider-demo.ts",
     "demo:external-docs-cli": "tsx src/cli/index.ts external docs-proposal --repo ./tests/fixtures/external-docs-repo --target README.md --evidence README.md --evidence package.json --evidence docs/BUILD_STABILITY.md --anchor \"npm run dev\n\\`\\`\\`\" --insert \"\n\nFor the stable frontend dev path, use the existing root command:\n\n\\`\\`\\`bash\nnpm run dev:stable\n\\`\\`\\`\" --rationale \"package.json exposes dev:stable, and docs/BUILD_STABILITY.md documents it.\" --out ./artifacts/runs/external-docs-cli-demo",
     "demo:external-docs-cli:files": "tsx src/cli/index.ts external docs-proposal --repo ./tests/fixtures/external-docs-repo --target README.md --evidence README.md --evidence package.json --evidence docs/BUILD_STABILITY.md --anchor-file ./examples/external-docs-proposal-inputs/anchor.txt --insert-file ./examples/external-docs-proposal-inputs/insert.md --rationale-file ./examples/external-docs-proposal-inputs/rationale.md --out ./artifacts/runs/external-docs-cli-files-demo",
@@ -48,7 +50,8 @@
     "validation:alpha6": "tsx scripts/alpha6-validation.ts",
     "validation:alpha7": "tsx scripts/alpha7-validation.ts",
     "validation:alpha9": "tsx scripts/alpha9-validation.ts",
-    "validation:alpha10": "tsx scripts/alpha10-validation.ts"
+    "validation:alpha10": "tsx scripts/alpha10-validation.ts",
+    "validation:alpha11": "tsx scripts/alpha11-validation.ts"
   },
   "keywords": [
     "agentic",
