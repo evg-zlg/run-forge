@@ -1,10 +1,12 @@
 import { Command, InvalidArgumentError } from "commander";
+import { buildPacketIndex, renderPacketIndexText } from "../../run/packet-indexer.js";
 import { inspectPacket, renderPacketInspection, type PacketInspectFormat } from "../../run/packet-inspector.js";
 import { exportPacketViewer } from "../../run/packet-viewer.js";
 
 export function packetCommand(): Command {
   const packet = new Command("packet").description("Inspect RunForge packet artifacts.");
   packet.addCommand(inspectCommand());
+  packet.addCommand(indexCommand());
   packet.addCommand(viewCommand());
   return packet;
 }
@@ -26,6 +28,24 @@ function inspectCommand(): Command {
         if (inspection.validation && !inspection.validation.passed) {
           process.exitCode = 1;
         }
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+function indexCommand(): Command {
+  return new Command("index")
+    .description("Build a compact index across validation runs and packet directories.")
+    .requiredOption("--root <root-dir>", "validation run root to scan")
+    .option("--out <out-dir>", "directory for index.md and index.json")
+    .action(async (opts) => {
+      try {
+        const result = await buildPacketIndex({
+          root: opts.root as string,
+          out: opts.out as string | undefined
+        });
+        console.log(renderPacketIndexText(result));
       } catch (error) {
         throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
       }

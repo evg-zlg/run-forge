@@ -56,7 +56,8 @@ export async function writeCodeProposalPacket(input: CodeProposalPacketInput): P
     reviewerReason: input.reviewerReason,
     filesChanged: input.proposal?.filesChanged ?? [],
     verificationCommands: input.verificationCommands,
-    originalRepoMutationVerdict: input.originalRepoMutationVerdict
+    originalRepoMutationVerdict: input.originalRepoMutationVerdict,
+    diagnostics: input.diagnostics
   };
   await writeText(join(input.packetDir, "summary.md"), renderCodeProposalSummary({ ...input, packetOverview: overview }));
   await input.markArtifact("summary.md");

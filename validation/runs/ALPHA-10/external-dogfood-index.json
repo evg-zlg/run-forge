@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "alpha-10-external-dogfood-index",
+  "generatedAt": "2026-07-05T15:30:00.000Z",
+  "entries": [
+    {
+      "repo": "/Users/evgeny/Documents/projects/smartsql",
+      "scenario": "smartsql-readme-provider-proposal",
+      "outcome": "proposal_ready_verified",
+      "providerStatus": "accepted",
+      "patchTouchedFiles": ["README.md"],
+      "packetPath": "/tmp/runforge-alpha9-smartsql-readme/code/packet",
+      "viewerPath": "/tmp/runforge-alpha9-smartsql-readme/viewer/index.html",
+      "externalRepoHeadBefore": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+      "externalRepoHeadAfter": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+      "externalRepoMutationVerdict": "unchanged",
+      "decision": "accepted",
+      "notes": "Delivered Alpha-9 provider-backed README proposal. Packet was accepted and verified, but no generated patch was applied to the original SmartSQL repo."
+    },
+    {
+      "repo": "/Users/evgeny/Documents/projects/smartsql",
+      "scenario": "smartsql-env-provider-rejection",
+      "outcome": "provider_rejected",
+      "providerStatus": "rejected",
+      "patchTouchedFiles": [],
+      "packetPath": "/tmp/runforge-alpha9-smartsql-provider-reject/code/packet",
+      "viewerPath": "/tmp/runforge-alpha9-smartsql-provider-reject/viewer/index.html",
+      "externalRepoHeadBefore": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+      "externalRepoHeadAfter": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+      "externalRepoMutationVerdict": "unchanged",
+      "decision": "rejected",
+      "notes": "Delivered Alpha-9 unsafe .env provider patch rejection. Rejection reason: patch touches forbidden path: .env."
+    },
+    {
+      "repo": "/Users/evgeny/Documents/projects/smartsql",
+      "scenario": "smartsql-merge-intervals-real-code-proposal",
+      "outcome": "proposal_ready_verified",
+      "providerStatus": "accepted",
+      "patchTouchedFiles": ["factory-lab/smoke-task-repo/src/intervals.py"],
+      "packetPath": "/tmp/runforge-alpha9-smartsql-merge-intervals/code/packet",
+      "viewerPath": "/tmp/runforge-alpha9-smartsql-merge-intervals/viewer/index.html",
+      "externalRepoHeadBefore": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+      "externalRepoHeadAfter": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+      "externalRepoMutationVerdict": "unchanged",
+      "decision": "no_apply",
+      "notes": "Stopped-session comparison evidence from a real external code proposal. First provider diff had a bad hunk length and ended verification_failed; corrected provider patch reached proposal_ready_verified. No manual apply occurred."
+    },
+    {
+      "repo": "/Users/evgeny/Documents/projects/factory",
+      "scenario": "factory-readme-provider-rejection-dry-run-apply",
+      "outcome": "provider_rejected",
+      "providerStatus": "rejected",
+      "patchTouchedFiles": [],
+      "packetPath": "/tmp/runforge-alpha9-external-dogfood/factory-readme-proposal/code/packet",
+      "viewerPath": "/tmp/runforge-alpha9-external-dogfood/factory-readme-proposal/viewer/index.html",
+      "externalRepoHeadBefore": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "externalRepoHeadAfter": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "externalRepoMutationVerdict": "unchanged",
+      "decision": "comparison_only",
+      "notes": "Stopped-session comparison evidence only. Provider patch failed dry-run apply; local decision text was inconsistent and must not be counted as delivered accepted evidence."
+    }
+  ]
+}
