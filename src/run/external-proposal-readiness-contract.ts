@@ -39,6 +39,10 @@ export function buildProposalContract(input: {
       "print secrets"
     ],
     suggestedVerificationCommands: ["original failing command"],
+    allowedPaths: [],
+    forbiddenPaths: [".env", ".env.*", "**/secrets/**", "deploy/**", "infra/**"],
+    maxFilesChanged: 3,
+    maxPatchBytes: 50_000,
     humanGate: "required"
   };
 }

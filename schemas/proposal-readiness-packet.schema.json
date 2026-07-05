@@ -28,7 +28,11 @@
       "required": ["readinessOutcome", "canAttemptCodeProposal"],
       "properties": {
         "readinessOutcome": { "type": "string" },
-        "canAttemptCodeProposal": { "type": "boolean" }
+        "canAttemptCodeProposal": { "type": "boolean" },
+        "allowedPaths": { "type": "array", "items": { "type": "string" } },
+        "forbiddenPaths": { "type": "array", "items": { "type": "string" } },
+        "maxFilesChanged": { "type": "number" },
+        "maxPatchBytes": { "type": "number" }
       }
     }
   },
