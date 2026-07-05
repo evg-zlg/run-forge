@@ -23,4 +23,5 @@ jobs:
       - run: pnpm check:structure
       - run: pnpm typecheck
       - run: pnpm test
+      - run: pnpm validation:packets
       - run: pnpm build

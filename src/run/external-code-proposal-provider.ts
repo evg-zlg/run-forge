@@ -1,8 +1,9 @@
 import { exec } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, normalize } from "node:path";
+import { join } from "node:path";
 import { promisify } from "node:util";
 import type { DeterministicCodeProposal } from "./code-proposal-fixtures.js";
+import { validateProviderPatch, type ProviderPatchContract, type ProviderPatchValidationResult } from "./provider-patch-validator.js";
 
 const execAsync = promisify(exec);
 
@@ -46,18 +47,23 @@ export async function runCliProviderProposal(input: {
   failureEvidence: string;
   verificationCommands: string[];
   failureCategory?: string;
+  contract?: ProviderPatchContract | null;
 }): Promise<ProviderProposalResult> {
   const started = Date.now();
   const providerInputDir = join(input.packetDir, "provider-input");
   await mkdir(providerInputDir, { recursive: true });
   await writeFile(join(providerInputDir, "task.md"), renderTask(input), "utf8");
-  await writeFile(join(providerInputDir, "proposal-contract.json"), JSON.stringify({
+  const proposalContract = {
     patchFormat: "unified_diff_or_json_patch_field",
     mustOnlyEditRepoRelativeFiles: true,
-    forbiddenPaths: [".env", "secrets", "deploy", "infra", "lockfiles"],
+    allowedPaths: input.contract?.allowedPaths ?? [],
+    forbiddenPaths: input.contract?.forbiddenPaths ?? [".env", ".env.*", "**/secrets/**", "deploy/**", "infra/**"],
+    maxFilesChanged: input.contract?.maxFilesChanged ?? 3,
+    maxPatchBytes: input.contract?.maxPatchBytes ?? 50_000,
     humanGateRequired: true,
     applyOriginalRepo: false
-  }, null, 2), "utf8");
+  };
+  await writeFile(join(providerInputDir, "proposal-contract.json"), JSON.stringify(proposalContract, null, 2), "utf8");
   await writeFile(join(providerInputDir, "evidence-excerpts.md"), bounded(input.failureEvidence, 8000), "utf8");
   await writeFile(join(providerInputDir, "instructions.md"), [
     "Return a unified diff on stdout or write provider-output.patch.",
@@ -73,14 +79,11 @@ export async function runCliProviderProposal(input: {
     });
     const rawOutput = await providerOutput(providerInputDir, result.stdout);
     const patch = extractPatch(rawOutput);
-    const validation = validatePatchScope(patch);
+    const validation = await validateProviderPatch({ patch, repoPath: input.repoPath, contract: input.contract });
     const durationMs = Date.now() - started;
     const outputBytes = Buffer.byteLength(rawOutput, "utf8");
-    if (!patch.trim()) {
-      return providerResult("rejected", "", durationMs, outputBytes, ["provider output did not contain a patch"], [], input);
-    }
-    if (validation.errors.length > 0) {
-      return providerResult("rejected", patch, durationMs, outputBytes, validation.errors, validation.filesChanged, input);
+    if (!validation.accepted) {
+      return providerResult("rejected", patch, durationMs, outputBytes, validation.errors, validation.filesChanged, input, validation);
     }
     return {
       status: "accepted",
@@ -98,12 +101,12 @@ export async function runCliProviderProposal(input: {
       errors: [],
       filesChanged: validation.filesChanged,
       inputSummary: renderInputSummary(input),
-      outputSummary: renderOutputSummary("accepted", outputBytes, validation.filesChanged, []),
-      safetyReport: renderSafetyReport("accepted", validation.filesChanged, [])
+      outputSummary: renderOutputSummary("accepted", outputBytes, validation.filesChanged, [], validation, input),
+      safetyReport: renderSafetyReport("accepted", validation.filesChanged, [], validation, input)
     };
   } catch (error) {
     const durationMs = Date.now() - started;
-    return providerResult("failed", "", durationMs, 0, [error instanceof Error ? error.message : String(error)], [], input);
+    return providerResult("failed", "", durationMs, 0, [error instanceof Error ? error.message : String(error)], [], input, null);
   }
 }
 
@@ -116,6 +119,7 @@ export async function runProviderProposalWorkers(input: {
   verificationCommands: string[];
   failureCategory?: string;
   provider?: "cli";
+  contract?: ProviderPatchContract | null;
 }): Promise<ProviderProposalResult> {
   await input.runWorker("provider_input_builder", async () => ({
     status: "provider_input_prepared",
@@ -132,6 +136,7 @@ export async function runProviderProposalWorkers(input: {
       status: result.status,
       lines: [
         `Backend: ${input.provider}.`,
+        `Provider command: ${input.providerCommand}.`,
         `Provider output bytes: ${result.outputBytes}.`,
         `Provider status: ${result.status}.`,
         `Files changed: ${result.filesChanged.length ? result.filesChanged.join(", ") : "none"}.`,
@@ -145,6 +150,8 @@ export async function runProviderProposalWorkers(input: {
     lines: [
       `Patch bytes: ${Buffer.byteLength(providerResult.patch, "utf8")}.`,
       `Files changed: ${providerResult.filesChanged.length ? providerResult.filesChanged.join(", ") : "none"}.`,
+      `Allowlist result: ${String((providerResult.safetyReport.allowlistResult as string | undefined) ?? "unknown")}.`,
+      `Dry-run apply result: ${String((providerResult.safetyReport.dryRunApplyResult as string | undefined) ?? "unknown")}.`,
       ...providerResult.errors.map((error) => `Validation error: ${error}`)
     ],
     output: null
@@ -168,7 +175,8 @@ function providerResult(
   outputBytes: number,
   errors: string[],
   filesChanged: string[],
-  input: Parameters<typeof runCliProviderProposal>[0]
+  input: Parameters<typeof runCliProviderProposal>[0],
+  validation: ProviderPatchValidationResult | null
 ): ProviderProposalResult {
   return {
     status,
@@ -179,8 +187,8 @@ function providerResult(
     errors,
     filesChanged,
     inputSummary: renderInputSummary(input),
-    outputSummary: renderOutputSummary(status, outputBytes, filesChanged, errors),
-    safetyReport: renderSafetyReport(status, filesChanged, errors)
+    outputSummary: renderOutputSummary(status, outputBytes, filesChanged, errors, validation, input),
+    safetyReport: renderSafetyReport(status, filesChanged, errors, validation, input)
   };
 }
 
@@ -207,37 +215,6 @@ function extractPatch(output: string): string {
   return output;
 }
 
-function validatePatchScope(patch: string): { filesChanged: string[]; errors: string[] } {
-  const files = new Set<string>();
-  const errors: string[] = [];
-  for (const line of patch.split("\n")) {
-    const match = /^diff --git a\/(.+) b\/(.+)$/.exec(line);
-    if (!match) continue;
-    for (const file of [match[1]!, match[2]!]) {
-      const normalized = normalize(file);
-      if (normalized.startsWith("..") || normalized.startsWith("/") || normalized.includes("\0")) errors.push(`patch touches path outside repo scope: ${file}`);
-      if (isForbiddenPath(normalized)) errors.push(`patch touches forbidden path: ${file}`);
-      files.add(normalized);
-    }
-  }
-  if (!patch.includes("diff --git")) errors.push("patch is not a parseable git unified diff");
-  return { filesChanged: [...files].sort(), errors };
-}
-
-function isForbiddenPath(path: string): boolean {
-  return path === ".env"
-    || path.startsWith(".env.")
-    || path.includes("secret")
-    || path.startsWith("secrets/")
-    || path.startsWith("deploy/")
-    || path.startsWith("infra/")
-    || path.endsWith("lock")
-    || path.endsWith("-lock.json")
-    || path === "pnpm-lock.yaml"
-    || path === "yarn.lock"
-    || path === "bun.lockb";
-}
-
 function renderTask(input: Parameters<typeof runCliProviderProposal>[0]): string {
   return `# Provider Proposal Task
 
@@ -255,6 +232,8 @@ function renderInputSummary(input: Parameters<typeof runCliProviderProposal>[0])
 
 Backend: cli
 
+Provider command: ${input.providerCommand}
+
 Failure category: ${input.failureCategory ?? "unknown"}
 
 Evidence bytes included: ${Buffer.byteLength(bounded(input.failureEvidence, 8000), "utf8")}
@@ -264,8 +243,21 @@ ${input.verificationCommands.map((command) => `- ${command}`).join("\n") || "- n
 `;
 }
 
-function renderOutputSummary(status: string, outputBytes: number, filesChanged: string[], errors: string[]): string {
+function renderOutputSummary(
+  status: string,
+  outputBytes: number,
+  filesChanged: string[],
+  errors: string[],
+  validation: ProviderPatchValidationResult | null,
+  input: Parameters<typeof runCliProviderProposal>[0]
+): string {
   return `# Provider Output Summary
+
+Provider enabled: true
+
+Backend: cli
+
+Provider command: ${input.providerCommand}
 
 Status: ${status}
 
@@ -276,18 +268,43 @@ ${filesChanged.length > 0 ? filesChanged.map((file) => `- ${file}`).join("\n") :
 
 Errors:
 ${errors.length > 0 ? errors.map((error) => `- ${error}`).join("\n") : "- none"}
+
+Safety checks:
+- Patch accepted: ${status === "accepted" ? "yes" : "no"}
+- Allowlist result: ${validation ? (validation.checks.allowedPaths ? "passed" : "failed") : "not_run"}
+- Forbidden path result: ${validation ? (validation.checks.forbiddenPaths ? "failed" : "passed") : "not_run"}
+- Dry-run apply result: ${validation?.checks.dryRunApply ?? "not_run"}
+- Verification result: handled by RunForge verifier after patch acceptance
 `;
 }
 
-function renderSafetyReport(status: string, filesChanged: string[], errors: string[]): Record<string, unknown> {
+function renderSafetyReport(
+  status: string,
+  filesChanged: string[],
+  errors: string[],
+  validation: ProviderPatchValidationResult | null,
+  input: Parameters<typeof runCliProviderProposal>[0]
+): Record<string, unknown> {
   return {
+    providerEnabled: true,
     backend: "cli",
+    providerCommand: input.providerCommand,
     providerExplicitlyEnabled: true,
     status,
+    patchAccepted: status === "accepted",
     filesChanged,
     errors,
-    patchParseable: errors.every((error) => !error.includes("parseable")),
-    forbiddenPathsRejected: errors.some((error) => error.includes("forbidden path")),
+    rejectionReason: status === "accepted" ? null : errors.join("; "),
+    patchBytes: validation?.patchBytes ?? 0,
+    maxPatchBytes: validation?.maxPatchBytes ?? input.contract?.maxPatchBytes ?? 50_000,
+    maxFilesChanged: validation?.maxFilesChanged ?? input.contract?.maxFilesChanged ?? 3,
+    allowedPaths: validation?.allowedPaths ?? input.contract?.allowedPaths ?? [],
+    forbiddenPaths: validation?.forbiddenPaths ?? input.contract?.forbiddenPaths ?? [],
+    allowlistResult: validation ? (validation.checks.allowedPaths ? "passed" : "failed") : "not_run",
+    forbiddenPathResult: validation ? (validation.checks.forbiddenPaths ? "failed" : "passed") : "not_run",
+    dryRunApplyResult: validation?.checks.dryRunApply ?? "not_run",
+    verificationResult: "deferred_to_runforge_verifier",
+    checks: validation?.checks ?? null,
     originalRepoMutationAllowed: false,
     humanGateRequired: true
   };

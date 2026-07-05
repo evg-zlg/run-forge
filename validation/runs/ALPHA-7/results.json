@@ -1,0 +1,259 @@
+{
+  "schemaVersion": "alpha-7",
+  "generatedAt": "2026-07-05T07:13:56.155Z",
+  "rawRoot": "/tmp/runforge-alpha7-blackbox",
+  "viewerOut": "/tmp/runforge-alpha7-blackbox/viewer-code-proposal",
+  "originalStates": {
+    "valid": "bad\n",
+    "forbidden": "bad\n",
+    "malformed": "bad\n",
+    "traversal": "bad\n",
+    "allowlist": "bad\n"
+  },
+  "results": [
+    {
+      "name": "packet validation sweep",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 4340,
+      "outDir": "/tmp/runforge-alpha7-blackbox/packet-validation",
+      "stdout": "# RunForge Packet Validation\n\nGenerated at: 2026-07-05T07:13:53.020Z\n\nRaw outputs:\n- /tmp/runforge-alpha7-packet-validation\n- Viewer: /tmp/runforge-alpha7-packet-validation/viewer-code-proposal/index.html\n\nValidated packet types:\n- external check\n- failure triage\n- proposal readiness\n- code proposal\n- provider proposal\n\nResults:\n- PASS generate external check packet (exit 0)\n- PASS generate failure triage packet (exit 0)\n- PASS generate proposal readiness packet (exit 0)\n- PASS generate code proposal packet (exit 0)\n- PASS generate provider proposal packet (exit 0)\n- PASS validate external check packet (exit 0)\n- PASS validate failure triage packet (exit 0)\n- PASS validate proposal readiness packet (exit 0)\n- PASS validate code proposal packet (exit 0)\n- PASS validate provider proposal packet (exit 0)\n- PASS broken packet validation fails (exit 1)\n- PASS generate static packet viewer (exit 0)\n- PASS viewer contains graph/status/artifact information (exit 0)\n\nNegative validation:\n- A deliberately broken packet without runId failed packet inspector validation.\n\nOriginal repo mutation check:\n- Provider repo: /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-provider-repo-buGKkL\n- state.txt after provider run: \"bad\\n\"\n\nViewer:\n- Static HTML viewer was generated and checked for graph/status/artifact information.\n\n",
+      "stderr": "$ tsx scripts/packet-validation.ts\n"
+    },
+    {
+      "name": "provider valid fixture patch accepted",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 484,
+      "outDir": "/tmp/runforge-alpha7-blackbox/provider-valid",
+      "stdout": "RunForge external code proposal\n\nRun ID: alpha7-provider-valid\nOutcome: proposal_ready_verified\nVerification passed: true\nSource readiness packet: /tmp/runforge-alpha7-blackbox/provider-valid/readiness-source/packet\nPacket: /tmp/runforge-alpha7-blackbox/provider-valid/packet\nProposal patch bytes: 90\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-valid-repo-OhoWp6 --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --enable-provider-proposal --provider cli --provider-command 'node -e '\"'\"'require(\"fs\").writeFileSync(\"provider-output.patch\", \"diff --git a/state.txt b/state.txt\\n--- a/state.txt\\n+++ b/state.txt\\n@@ -1 +1 @@\\n-bad\\n+good\\n\")'\"'\" --out /tmp/runforge-alpha7-blackbox/provider-valid --run-id alpha7-provider-valid\n"
+    },
+    {
+      "name": "assert /tmp/runforge-alpha7-blackbox/provider-valid status",
+      "ok": true,
+      "exitCode": 0,
+      "observed": {
+        "schemaVersion": "alpha-3c",
+        "runId": "alpha7-provider-valid",
+        "outcome": "proposal_ready_verified",
+        "humanGate": "required",
+        "sourceReadinessPacket": "/tmp/runforge-alpha7-blackbox/provider-valid/readiness-source/packet",
+        "sourceTriagePacket": "/tmp/runforge-alpha7-blackbox/provider-valid/readiness-source/triage-source/packet",
+        "sourceCheckPacket": "/tmp/runforge-alpha7-blackbox/provider-valid/readiness-source/triage-source/check-source/packet",
+        "workspacePath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-e6SBhR/runforge-alpha7-valid-repo-OhoWp6",
+        "applyStatus": "applied",
+        "strategy": "provider_cli",
+        "strategySource": "provider",
+        "providerEnabled": true,
+        "providerBackend": "cli",
+        "providerStatus": "accepted",
+        "reviewerDecision": "accepted_for_human_review",
+        "reviewerReason": "Patch is narrow, evidence-backed, verified in a disposable workspace, and still requires human review.",
+        "filesChanged": [
+          "state.txt"
+        ],
+        "patchBytes": 90,
+        "verificationPassed": true,
+        "diagnostics": []
+      },
+      "expected": {
+        "outcome": "proposal_ready_verified",
+        "providerStatus": "accepted"
+      }
+    },
+    {
+      "name": "provider forbidden .env patch rejected",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 446,
+      "outDir": "/tmp/runforge-alpha7-blackbox/provider-forbidden-env",
+      "stdout": "RunForge external code proposal\n\nRun ID: alpha7-provider-forbidden-env\nOutcome: provider_rejected\nVerification passed: false\nSource readiness packet: /tmp/runforge-alpha7-blackbox/provider-forbidden-env/readiness-source/packet\nPacket: /tmp/runforge-alpha7-blackbox/provider-forbidden-env/packet\nProposal patch bytes: 0\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-forbidden-env-repo-a9HyX4 --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --enable-provider-proposal --provider cli --provider-command 'node -e '\"'\"'require(\"fs\").writeFileSync(\"provider-output.patch\", \"diff --git a/.env b/.env\\n--- a/.env\\n+++ b/.env\\n@@ -1 +1 @@\\n-bad\\n+good\\n\")'\"'\" --out /tmp/runforge-alpha7-blackbox/provider-forbidden-env --run-id alpha7-provider-forbidden-env\n"
+    },
+    {
+      "name": "assert /tmp/runforge-alpha7-blackbox/provider-forbidden-env status",
+      "ok": true,
+      "exitCode": 0,
+      "observed": {
+        "schemaVersion": "alpha-3c",
+        "runId": "alpha7-provider-forbidden-env",
+        "outcome": "provider_rejected",
+        "humanGate": "required",
+        "sourceReadinessPacket": "/tmp/runforge-alpha7-blackbox/provider-forbidden-env/readiness-source/packet",
+        "sourceTriagePacket": "/tmp/runforge-alpha7-blackbox/provider-forbidden-env/readiness-source/triage-source/packet",
+        "sourceCheckPacket": "/tmp/runforge-alpha7-blackbox/provider-forbidden-env/readiness-source/triage-source/check-source/packet",
+        "workspacePath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-V6jUWq/runforge-alpha7-forbidden-env-repo-a9HyX4",
+        "applyStatus": "not_run",
+        "strategy": null,
+        "strategySource": "none",
+        "providerEnabled": true,
+        "providerBackend": "cli",
+        "providerStatus": "rejected",
+        "reviewerDecision": "rejected_no_safe_proposal",
+        "reviewerReason": "No proposal patch was generated for this packet.",
+        "filesChanged": [],
+        "patchBytes": 0,
+        "verificationPassed": false,
+        "diagnostics": [
+          "patch touches forbidden path: .env"
+        ]
+      },
+      "expected": {
+        "outcome": "provider_rejected",
+        "providerStatus": "rejected"
+      }
+    },
+    {
+      "name": "provider malformed diff rejected",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 440,
+      "outDir": "/tmp/runforge-alpha7-blackbox/provider-malformed",
+      "stdout": "RunForge external code proposal\n\nRun ID: alpha7-provider-malformed\nOutcome: provider_rejected\nVerification passed: false\nSource readiness packet: /tmp/runforge-alpha7-blackbox/provider-malformed/readiness-source/packet\nPacket: /tmp/runforge-alpha7-blackbox/provider-malformed/packet\nProposal patch bytes: 0\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-malformed-repo-Kadj0N --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --enable-provider-proposal --provider cli --provider-command 'node -e '\"'\"'require(\"fs\").writeFileSync(\"provider-output.patch\", \"diff --git a/state.txt b/state.txt\\n--- a/state.txt\\n\")'\"'\" --out /tmp/runforge-alpha7-blackbox/provider-malformed --run-id alpha7-provider-malformed\n"
+    },
+    {
+      "name": "assert /tmp/runforge-alpha7-blackbox/provider-malformed status",
+      "ok": true,
+      "exitCode": 0,
+      "observed": {
+        "schemaVersion": "alpha-3c",
+        "runId": "alpha7-provider-malformed",
+        "outcome": "provider_rejected",
+        "humanGate": "required",
+        "sourceReadinessPacket": "/tmp/runforge-alpha7-blackbox/provider-malformed/readiness-source/packet",
+        "sourceTriagePacket": "/tmp/runforge-alpha7-blackbox/provider-malformed/readiness-source/triage-source/packet",
+        "sourceCheckPacket": "/tmp/runforge-alpha7-blackbox/provider-malformed/readiness-source/triage-source/check-source/packet",
+        "workspacePath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-G0idV2/runforge-alpha7-malformed-repo-Kadj0N",
+        "applyStatus": "not_run",
+        "strategy": null,
+        "strategySource": "none",
+        "providerEnabled": true,
+        "providerBackend": "cli",
+        "providerStatus": "rejected",
+        "reviewerDecision": "rejected_no_safe_proposal",
+        "reviewerReason": "No proposal patch was generated for this packet.",
+        "filesChanged": [],
+        "patchBytes": 0,
+        "verificationPassed": false,
+        "diagnostics": [
+          "malformed diff for state.txt",
+          "patch contains no file changes"
+        ]
+      },
+      "expected": {
+        "outcome": "provider_rejected",
+        "providerStatus": "rejected"
+      }
+    },
+    {
+      "name": "provider path traversal rejected",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 474,
+      "outDir": "/tmp/runforge-alpha7-blackbox/provider-path-traversal",
+      "stdout": "RunForge external code proposal\n\nRun ID: alpha7-provider-path-traversal\nOutcome: provider_rejected\nVerification passed: false\nSource readiness packet: /tmp/runforge-alpha7-blackbox/provider-path-traversal/readiness-source/packet\nPacket: /tmp/runforge-alpha7-blackbox/provider-path-traversal/packet\nProposal patch bytes: 0\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-path-traversal-repo-SkMuhk --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --enable-provider-proposal --provider cli --provider-command 'node -e '\"'\"'require(\"fs\").writeFileSync(\"provider-output.patch\", \"diff --git a/../escape.txt b/../escape.txt\\n--- a/../escape.txt\\n+++ b/../escape.txt\\n@@ -1 +1 @@\\n-bad\\n+good\\n\")'\"'\" --out /tmp/runforge-alpha7-blackbox/provider-path-traversal --run-id alpha7-provider-path-traversal\n"
+    },
+    {
+      "name": "assert /tmp/runforge-alpha7-blackbox/provider-path-traversal status",
+      "ok": true,
+      "exitCode": 0,
+      "observed": {
+        "schemaVersion": "alpha-3c",
+        "runId": "alpha7-provider-path-traversal",
+        "outcome": "provider_rejected",
+        "humanGate": "required",
+        "sourceReadinessPacket": "/tmp/runforge-alpha7-blackbox/provider-path-traversal/readiness-source/packet",
+        "sourceTriagePacket": "/tmp/runforge-alpha7-blackbox/provider-path-traversal/readiness-source/triage-source/packet",
+        "sourceCheckPacket": "/tmp/runforge-alpha7-blackbox/provider-path-traversal/readiness-source/triage-source/check-source/packet",
+        "workspacePath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-NkCjtU/runforge-alpha7-path-traversal-repo-SkMuhk",
+        "applyStatus": "not_run",
+        "strategy": null,
+        "strategySource": "none",
+        "providerEnabled": true,
+        "providerBackend": "cli",
+        "providerStatus": "rejected",
+        "reviewerDecision": "rejected_no_safe_proposal",
+        "reviewerReason": "No proposal patch was generated for this packet.",
+        "filesChanged": [],
+        "patchBytes": 0,
+        "verificationPassed": false,
+        "diagnostics": [
+          "patch touches path outside repo scope: ../escape.txt"
+        ]
+      },
+      "expected": {
+        "outcome": "provider_rejected",
+        "providerStatus": "rejected"
+      }
+    },
+    {
+      "name": "create allowlist readiness source",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 397,
+      "outDir": "/tmp/runforge-alpha7-blackbox/allowlist-readiness",
+      "stdout": "RunForge external proposal readiness\n\nRun ID: alpha7-allowlist-readiness\nOutcome: ready_for_code_proposal\nCan attempt code proposal: true\nCategory: test_assertion_failure\nConfidence: high\nSource triage packet: /tmp/runforge-alpha7-blackbox/allowlist-readiness/triage-source/packet\nPacket: /tmp/runforge-alpha7-blackbox/allowlist-readiness/packet\n\nRecommended next action: Create a proposal patch in a disposable workspace and verify it there; human review remains required.\n\nKey artifacts:\n- summary.md\n- proposal-readiness.md\n- proposal-contract.json\n- missing-context.md\n- recommended-next-action.md\n",
+      "stderr": "$ tsx src/cli/index.ts external proposal-readiness --repo /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-allowlist-repo-JpKddj --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --out /tmp/runforge-alpha7-blackbox/allowlist-readiness --run-id alpha7-allowlist-readiness\n"
+    },
+    {
+      "name": "provider allowlist violation rejected",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 395,
+      "outDir": "/tmp/runforge-alpha7-blackbox/provider-allowlist",
+      "stdout": "RunForge external code proposal\n\nRun ID: alpha7-provider-allowlist\nOutcome: provider_rejected\nVerification passed: false\nSource readiness packet: /tmp/runforge-alpha7-blackbox/allowlist-readiness/packet\nPacket: /tmp/runforge-alpha7-blackbox/provider-allowlist/packet\nProposal patch bytes: 0\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --from-readiness-packet /tmp/runforge-alpha7-blackbox/allowlist-readiness/packet --enable-provider-proposal --provider cli --provider-command 'node -e '\"'\"'require(\"fs\").writeFileSync(\"provider-output.patch\", \"diff --git a/state.txt b/state.txt\\n--- a/state.txt\\n+++ b/state.txt\\n@@ -1 +1 @@\\n-bad\\n+good\\n\")'\"'\" --out /tmp/runforge-alpha7-blackbox/provider-allowlist --run-id alpha7-provider-allowlist\n"
+    },
+    {
+      "name": "assert /tmp/runforge-alpha7-blackbox/provider-allowlist status",
+      "ok": true,
+      "exitCode": 0,
+      "observed": {
+        "schemaVersion": "alpha-3c",
+        "runId": "alpha7-provider-allowlist",
+        "outcome": "provider_rejected",
+        "humanGate": "required",
+        "sourceReadinessPacket": "/tmp/runforge-alpha7-blackbox/allowlist-readiness/packet",
+        "sourceTriagePacket": "/tmp/runforge-alpha7-blackbox/allowlist-readiness/triage-source/packet",
+        "sourceCheckPacket": "/tmp/runforge-alpha7-blackbox/allowlist-readiness/triage-source/check-source/packet",
+        "workspacePath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-LVU9eB/runforge-alpha7-allowlist-repo-JpKddj",
+        "applyStatus": "not_run",
+        "strategy": null,
+        "strategySource": "none",
+        "providerEnabled": true,
+        "providerBackend": "cli",
+        "providerStatus": "rejected",
+        "reviewerDecision": "rejected_no_safe_proposal",
+        "reviewerReason": "No proposal patch was generated for this packet.",
+        "filesChanged": [],
+        "patchBytes": 0,
+        "verificationPassed": false,
+        "diagnostics": [
+          "patch touches path outside allowedPaths: state.txt"
+        ]
+      },
+      "expected": {
+        "outcome": "provider_rejected",
+        "providerStatus": "rejected"
+      }
+    },
+    {
+      "name": "static packet viewer generated",
+      "ok": true,
+      "exitCode": 0,
+      "durationMs": 296,
+      "outDir": "/tmp/runforge-alpha7-blackbox/viewer-code-proposal",
+      "stdout": "Packet viewer written: /tmp/runforge-alpha7-blackbox/viewer-code-proposal/index.html\n",
+      "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha7-packet-validation/code-proposal/packet --out /tmp/runforge-alpha7-blackbox/viewer-code-proposal\n"
+    },
+    {
+      "name": "viewer output contains graph/worker/status/artifact information",
+      "ok": true,
+      "exitCode": 0,
+      "outDir": "/tmp/runforge-alpha7-blackbox/viewer-code-proposal"
+    }
+  ]
+}

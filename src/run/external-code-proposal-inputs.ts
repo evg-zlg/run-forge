@@ -10,6 +10,10 @@ export interface ReadinessContract {
   sourceCheckPacket?: string | null;
   failureCategory?: string;
   suggestedVerificationCommands?: string[];
+  allowedPaths?: string[];
+  forbiddenPaths?: string[];
+  maxFilesChanged?: number;
+  maxPatchBytes?: number;
 }
 
 export function validateOptions(options: ExternalCodeProposalOptions): void {

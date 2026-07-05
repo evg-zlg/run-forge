@@ -205,7 +205,8 @@ export async function runExternalCodeProposal(options: ExternalCodeProposalOptio
           failureEvidence,
           verificationCommands,
           failureCategory: contract.failureCategory,
-          provider: providerOptions.provider
+          provider: providerOptions.provider,
+          contract
         });
         if (providerResult.status === "accepted" && providerResult.proposal) {
           proposal = providerResult.proposal;
