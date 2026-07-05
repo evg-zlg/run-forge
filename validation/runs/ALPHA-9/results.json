@@ -1,0 +1,74 @@
+{
+  "schemaVersion": "alpha-9-results",
+  "generatedAt": "2026-07-05T11:45:00.000Z",
+  "externalRepo": {
+    "path": "/Users/evgeny/Documents/projects/smartsql",
+    "beforeHead": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+    "afterHead": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+    "beforeStatusShort": "?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? tmp/",
+    "afterStatusShort": "?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? tmp/",
+    "mutationVerdict": "unchanged"
+  },
+  "attempts": [
+    {
+      "id": "smartsql-readme-proposal",
+      "repo": "/Users/evgeny/Documents/projects/smartsql",
+      "decision": "accepted_packet_not_applied",
+      "providerBacked": true,
+      "packet": "/tmp/runforge-alpha9-smartsql-readme/code/packet",
+      "viewer": "/tmp/runforge-alpha9-smartsql-readme/viewer/index.html",
+      "inspectValidate": "passed",
+      "inspectMermaid": "/tmp/runforge-alpha9-smartsql-readme/code/packet-route.mmd",
+      "outcome": "proposal_ready_verified",
+      "providerStatus": "accepted",
+      "filesChanged": [
+        "README.md"
+      ],
+      "manualApply": false
+    },
+    {
+      "id": "smartsql-provider-reject",
+      "repo": "/Users/evgeny/Documents/projects/smartsql",
+      "decision": "provider_rejected",
+      "providerBacked": true,
+      "packet": "/tmp/runforge-alpha9-smartsql-provider-reject/code/packet",
+      "viewer": "/tmp/runforge-alpha9-smartsql-provider-reject/viewer/index.html",
+      "inspectValidate": "passed",
+      "inspectMermaid": "/tmp/runforge-alpha9-smartsql-provider-reject/code/packet-route.mmd",
+      "outcome": "provider_rejected",
+      "providerStatus": "rejected",
+      "rejectionReason": "patch touches forbidden path: .env",
+      "filesChanged": [],
+      "manualApply": false
+    }
+  ],
+  "validation": [
+    {
+      "command": "pnpm validation:alpha9",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm test",
+      "status": "passed",
+      "notes": "101 tests"
+    },
+    {
+      "command": "pnpm validation:packets",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm build",
+      "status": "passed"
+    }
+  ],
+  "node20Annotation": {
+    "action": "pnpm/action-setup@v4",
+    "decision": "fixed",
+    "newAction": "pnpm/action-setup@v6",
+    "source": "https://github.com/pnpm/action-setup"
+  }
+}

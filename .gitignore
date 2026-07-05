@@ -20,6 +20,13 @@ validation/runs/*/*
 !validation/runs/ALPHA-8/dogfood/*/
 !validation/runs/ALPHA-8/dogfood/*/*.md
 !validation/runs/ALPHA-8/dogfood/*/*.patch
+!validation/runs/ALPHA-9/
+!validation/runs/ALPHA-9/summary.md
+!validation/runs/ALPHA-9/results.json
+!validation/runs/ALPHA-9/external-dogfood/
+!validation/runs/ALPHA-9/external-dogfood/*/
+!validation/runs/ALPHA-9/external-dogfood/*/*.md
+!validation/runs/ALPHA-9/external-dogfood/*/*.patch
 !validation/runs/PACKET-VALIDATION/summary.md
 !validation/runs/PACKET-VALIDATION/results.json
 .DS_Store

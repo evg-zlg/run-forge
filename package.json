@@ -46,7 +46,8 @@
     "validation:packets": "tsx scripts/packet-validation.ts",
     "validation:alpha3": "tsx scripts/alpha3-validation.ts",
     "validation:alpha6": "tsx scripts/alpha6-validation.ts",
-    "validation:alpha7": "tsx scripts/alpha7-validation.ts"
+    "validation:alpha7": "tsx scripts/alpha7-validation.ts",
+    "validation:alpha9": "tsx scripts/alpha9-validation.ts"
   },
   "keywords": [
     "agentic",
