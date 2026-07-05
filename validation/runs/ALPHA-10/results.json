@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "alpha-10-results",
+  "generatedAt": "2026-07-05T15:30:00.000Z",
+  "scope": {
+    "focus": [
+      "external code proposal dogfood evidence",
+      "run/dogfood index",
+      "rejected and failed proposal UX"
+    ],
+    "rawPacketPolicy": "Do not copy large raw /tmp packet trees into the repo; retain compact evidence paths and verdicts."
+  },
+  "externalDogfoodIndex": "validation/runs/ALPHA-10/external-dogfood-index.json",
+  "entries": [
+    {
+      "scenario": "smartsql-readme-provider-proposal",
+      "deliveredEvidence": true,
+      "outcome": "proposal_ready_verified",
+      "providerStatus": "accepted",
+      "decision": "accepted",
+      "externalRepoMutationVerdict": "unchanged"
+    },
+    {
+      "scenario": "smartsql-env-provider-rejection",
+      "deliveredEvidence": true,
+      "outcome": "provider_rejected",
+      "providerStatus": "rejected",
+      "decision": "rejected",
+      "externalRepoMutationVerdict": "unchanged"
+    },
+    {
+      "scenario": "smartsql-merge-intervals-real-code-proposal",
+      "deliveredEvidence": false,
+      "outcome": "proposal_ready_verified",
+      "providerStatus": "accepted",
+      "decision": "no_apply",
+      "externalRepoMutationVerdict": "unchanged"
+    },
+    {
+      "scenario": "factory-readme-provider-rejection-dry-run-apply",
+      "deliveredEvidence": false,
+      "outcome": "provider_rejected",
+      "providerStatus": "rejected",
+      "decision": "comparison_only",
+      "externalRepoMutationVerdict": "unchanged"
+    }
+  ],
+  "implementation": {
+    "indexCommand": "pnpm dev packet index --root validation/runs --out /tmp/runforge-index",
+    "outputs": [
+      "/tmp/runforge-index/index.md",
+      "/tmp/runforge-index/index.json"
+    ],
+    "rejectedFailedUx": [
+      "summary.md includes Operator verdict, Failure class, Reason, and Next action",
+      "human-review.md says Do not apply proposal.patch for rejected/failed outcomes",
+      "patch-summary.md classifies malformed diff, dry-run apply failure, forbidden path, verification_failed, not_ready, and no_safe_proposal"
+    ]
+  },
+  "validation": [
+    {
+      "command": "pnpm validation:alpha10",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm dev packet index --root validation/runs --out /tmp/runforge-index",
+      "status": "passed"
+    }
+  ]
+}
