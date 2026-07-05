@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "alpha-11-results",
+  "generatedAt": "2026-07-05T17:12:38.532Z",
+  "outputs": {
+    "index": "/tmp/runforge-alpha11-index",
+    "queryReady": "/tmp/runforge-alpha11-query-ready",
+    "queryRejected": "/tmp/runforge-alpha11-query-rejected",
+    "queryRepo": "/tmp/runforge-alpha11-query-repo",
+    "queryMutation": "/tmp/runforge-alpha11-query-mutation",
+    "queryEmpty": "/tmp/runforge-alpha11-query-empty",
+    "latest": "/tmp/runforge-alpha11-latest-report",
+    "seed": "/tmp/runforge-alpha11-dashboard-seed"
+  },
+  "checks": {
+    "alpha9And10Ready": 3,
+    "alpha9And10Rejected": 3,
+    "alpha9And10Smartsql": 5,
+    "alpha9And10Unchanged": 6,
+    "emptyMatches": 0,
+    "invalidIndexExitCode": 1,
+    "latestAlpha": "ALPHA-10",
+    "latestDogfoodCaseCount": 6,
+    "seedRecords": 6
+  },
+  "commands": [
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet index --root /Users/evgeny/Documents/projects/RunForge/validation/runs --out /tmp/runforge-alpha11-index",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet query --index /tmp/runforge-alpha11-index/index.json --out /tmp/runforge-alpha11-query-ready --outcome proposal_ready_verified",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet query --index /tmp/runforge-alpha11-index/index.json --out /tmp/runforge-alpha11-query-rejected --outcome provider_rejected",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet query --index /tmp/runforge-alpha11-index/index.json --out /tmp/runforge-alpha11-query-repo --repo smartsql",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet query --index /tmp/runforge-alpha11-index/index.json --out /tmp/runforge-alpha11-query-mutation --mutation-verdict unchanged",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet query --index /tmp/runforge-alpha11-index/index.json --out /tmp/runforge-alpha11-query-empty --scenario does-not-exist",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet report latest --root /Users/evgeny/Documents/projects/RunForge/validation/runs --out /tmp/runforge-alpha11-latest-report",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet index --root /Users/evgeny/Documents/projects/RunForge/validation/runs --out /tmp/runforge-alpha11-dashboard-seed --dashboard-seed",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet query --index /tmp/runforge-alpha11-missing-index.json",
+      "status": "passed",
+      "exitCode": 1
+    }
+  ],
+  "errors": []
+}
