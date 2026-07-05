@@ -78,6 +78,7 @@ function renderText(inspection: PacketInspection): string {
     `Packet type: ${inspection.packetType}`,
     `Status: ${inspection.status}`,
     `Strategy: ${inspection.strategy ?? "none"}`,
+    `Artifact count: ${inspection.artifacts.length}`,
     ...(inspection.validation ? [
       "",
       `Validation: ${inspection.validation.passed ? "passed" : "failed"}`,

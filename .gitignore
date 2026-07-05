@@ -13,6 +13,13 @@ validation/runs/*/*
 !validation/runs/ALPHA-3/results.json
 !validation/runs/ALPHA-7/summary.md
 !validation/runs/ALPHA-7/results.json
+!validation/runs/ALPHA-8/
+!validation/runs/ALPHA-8/summary.md
+!validation/runs/ALPHA-8/results.json
+!validation/runs/ALPHA-8/dogfood/
+!validation/runs/ALPHA-8/dogfood/*/
+!validation/runs/ALPHA-8/dogfood/*/*.md
+!validation/runs/ALPHA-8/dogfood/*/*.patch
 !validation/runs/PACKET-VALIDATION/summary.md
 !validation/runs/PACKET-VALIDATION/results.json
 .DS_Store

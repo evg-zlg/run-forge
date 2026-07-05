@@ -1,0 +1,38 @@
+diff --git a/docs/packet-schema.md b/docs/packet-schema.md
+--- a/docs/packet-schema.md
++++ b/docs/packet-schema.md
+@@ -1,6 +1,6 @@
+ # RunForge Packet Schema Contract
+ 
+-RunForge packets are filesystem artifact directories produced by external workflows. They are intended to be stable enough for local inspectors, future UI surfaces, and API adapters. This document describes the Alpha-6 contract and its lightweight machine-checkable validation layer.
++RunForge packets are filesystem artifact directories produced by external workflows. They are intended to be stable enough for local inspectors, future UI surfaces, and API adapters. This document describes the Alpha-8 contract and its machine-checkable validation layer.
+@@ -18,7 +18,7 @@ pnpm dev packet inspect --packet /path/to/packet --validate
+ pnpm dev packet inspect --packet /path/to/packet --validate --format json
+ ```
+ 
+-The runtime validator is intentionally lightweight. It checks required packet artifacts, `run.json` identity/type/status fields, event presence, metrics/safety/manifest presence, and key packet-specific JSON fields. It is useful for local CI and future UI/API adapters, but it is not a full JSON Schema engine yet.
++The runtime validator checks required packet artifacts, required JSON fields, core field types, status/outcome enums, event structure, metrics and safety report identity fields, provider audit metadata, and manifest references to existing files. It is useful for local CI and future UI/API adapters while remaining small enough to run without a separate schema engine.
+@@ -189,10 +189,24 @@ Important fields:
+ - `proposal-status.json.reviewerDecision`: deterministic reviewer decision
+ - `proposal-status.json.verificationPassed`: true only when after-command verification ran and passed
+ - `metrics.json.strategy`: mirrors the selected strategy for dashboards
+-- `metrics.json.providerEnabled`, `providerBackend`, `providerDurationMs`, `providerOutputBytes`, `providerAccepted`, and `verificationStatus`: provider and verification telemetry
++- `metrics.json.providerEnabled`, `providerBackend`, `providerDurationMs`, `providerInputBytes`, `providerOutputBytes`, `providerAccepted`, and `verificationStatus`: provider and verification telemetry
+ - `safety-report.json.patchAppliedOnlyInDisposableWorkspace`: true only when workspace application succeeded
+ - Provider-backed packets include `provider-input-summary.md`, `provider-output-summary.md`, and `provider-safety-report.json` when provider mode runs.
+ 
++Provider audit fields:
++
++- `providerAudit.enabled`: true for provider-backed runs.
++- `providerAudit.backend`: currently `cli`.
++- `providerAudit.commandHash`: SHA-256 hash of the provider command; raw provider commands should not be used as the audit key.
++- `providerAudit.startedAt`, `finishedAt`, and `durationMs`: provider execution timing.
++- `providerAudit.inputBytes`, `outputBytes`, and `patchBytes`: bounded accounting counters for comparing provider runs.
++- `providerAudit.accepted` and `providerAudit.rejected`: safety gate outcome flags.
++- `providerAudit.rejectionReason`: string reason for rejected/failed runs, otherwise `null`.
++- `providerAudit.tokenUsage`: currently `null` until real token accounting exists.
++- `providerAudit.estimatedCost`: currently `null` until real cost accounting exists.
++
++Provider-backed packets must include `providerAudit` in `proposal-status.json`, `metrics.json`, and `provider-safety-report.json`.
++
+ Worker trace fields:

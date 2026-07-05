@@ -112,6 +112,11 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
     </section>
 
     <section>
+      <h2>Validation Errors</h2>
+      ${renderValidationErrors(inspection.validation?.errors ?? [])}
+    </section>
+
+    <section>
       <h2>Worker Graph</h2>
       <div class="graph">${renderGraph(inspection.route)}</div>
     </section>
@@ -149,6 +154,11 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
 </body>
 </html>
 `;
+}
+
+function renderValidationErrors(errors: string[]): string {
+  if (errors.length === 0) return '<div class="meta">No validation errors.</div>';
+  return `<ul>${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>`;
 }
 
 function renderGraph(route: string[]): string {

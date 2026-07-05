@@ -1,0 +1,27 @@
+diff --git a/src/run/packet-viewer.ts b/src/run/packet-viewer.ts
+--- a/src/run/packet-viewer.ts
++++ b/src/run/packet-viewer.ts
+@@ -111,6 +111,11 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
+       </div>
+     </section>
+ 
++    <section>
++      <h2>Validation Errors</h2>
++      ${renderValidationErrors(inspection.validation?.errors ?? [])}
++    </section>
++
+     <section>
+       <h2>Worker Graph</h2>
+       <div class="graph">${renderGraph(inspection.route)}</div>
+@@ -151,6 +156,11 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
+ `;
+ }
+ 
++function renderValidationErrors(errors: string[]): string {
++  if (errors.length === 0) return '<div class="meta">No validation errors.</div>';
++  return `<ul>${errors.map((error) => `<li>${escapeHtml(error)}</li>`).join("")}</ul>`;
++}
++
+ function renderGraph(route: string[]): string {
+   const nodes = route.length > 0 ? route : ["packet"];
+   return nodes.map((node, index) => `${index > 0 ? '<span class="arrow">&rarr;</span>' : ""}<span class="node">${escapeHtml(node)}</span>`).join("");

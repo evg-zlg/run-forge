@@ -46,6 +46,12 @@ describe("Alpha-6 packet validation", () => {
     delete run.runId;
     await writeFile(join(missingField, "run.json"), JSON.stringify(run, null, 2), "utf8");
     await expect(validatePacket(missingField)).resolves.toMatchObject({ passed: false, errors: expect.arrayContaining(["run.json missing runId"]) });
+
+    const wrongType = await copyPacket(packetDir);
+    const wrongTypeRun = JSON.parse(await readFile(join(wrongType, "run.json"), "utf8")) as Record<string, unknown>;
+    wrongTypeRun.durationMs = "soon";
+    await writeFile(join(wrongType, "run.json"), JSON.stringify(wrongTypeRun, null, 2), "utf8");
+    await expect(validatePacket(wrongType)).resolves.toMatchObject({ passed: false, errors: expect.arrayContaining(["run.json durationMs must be a finite number"]) });
   });
 });
 
@@ -117,7 +123,54 @@ describe("Alpha-6 gated provider proposal", () => {
     });
     expect(await readFile(join(repo, "state.txt"), "utf8")).toBe("bad\n");
     await expect(validatePacket(packetDir)).resolves.toMatchObject({ passed: true });
-    expect(await readFile(join(packetDir, "provider-safety-report.json"), "utf8")).toContain("\"status\": \"accepted\"");
+    const providerSafety = JSON.parse(await readFile(join(packetDir, "provider-safety-report.json"), "utf8")) as {
+      status: string;
+      providerAudit: { backend: string; commandHash: string; inputBytes: number; outputBytes: number; accepted: boolean; tokenUsage: null; estimatedCost: null };
+    };
+    expect(providerSafety.status).toBe("accepted");
+    expect(providerSafety.providerAudit).toMatchObject({
+      backend: "cli",
+      accepted: true,
+      tokenUsage: null,
+      estimatedCost: null
+    });
+    expect(providerSafety.providerAudit.commandHash).toMatch(/^[a-f0-9]{64}$/);
+    expect(providerSafety.providerAudit.inputBytes).toBeGreaterThan(0);
+    expect(providerSafety.providerAudit.outputBytes).toBeGreaterThan(0);
+  });
+
+  it("rejects schema-invalid code proposal packets", async () => {
+    const repo = await createProviderGitRepo();
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha8-schema-provider-"));
+    await runCli([
+      "external", "code-proposal",
+      "--repo", repo,
+      "--command", providerVerificationCommand(),
+      "--enable-provider-proposal",
+      "--provider", "cli",
+      "--provider-command", providerPatchCommand("state.txt", "bad", "good"),
+      "--out", outDir,
+      "--run-id", "alpha8-schema-provider"
+    ]);
+    const packetDir = join(outDir, "packet");
+
+    const invalidOutcome = await copyPacket(packetDir);
+    const status = JSON.parse(await readFile(join(invalidOutcome, "proposal-status.json"), "utf8")) as Record<string, unknown>;
+    status.outcome = "maybe_later";
+    await writeFile(join(invalidOutcome, "proposal-status.json"), JSON.stringify(status, null, 2), "utf8");
+    await expect(validatePacket(invalidOutcome)).resolves.toMatchObject({ passed: false, errors: expect.arrayContaining(["proposal-status.json invalid outcome maybe_later"]) });
+
+    const missingManifestReference = await copyPacket(packetDir);
+    const manifest = JSON.parse(await readFile(join(missingManifestReference, "packet-manifest.json"), "utf8")) as { artifacts: Array<Record<string, unknown>> };
+    manifest.artifacts.push({ path: "ghost.json", type: "json", sizeBytes: 1, hash: "abc", createdAt: new Date().toISOString() });
+    await writeFile(join(missingManifestReference, "packet-manifest.json"), JSON.stringify(manifest, null, 2), "utf8");
+    await expect(validatePacket(missingManifestReference)).resolves.toMatchObject({ passed: false, errors: expect.arrayContaining(["missing ghost.json"]) });
+
+    const missingProviderAudit = await copyPacket(packetDir);
+    const providerStatus = JSON.parse(await readFile(join(missingProviderAudit, "proposal-status.json"), "utf8")) as Record<string, unknown>;
+    delete providerStatus.providerAudit;
+    await writeFile(join(missingProviderAudit, "proposal-status.json"), JSON.stringify(providerStatus, null, 2), "utf8");
+    await expect(validatePacket(missingProviderAudit)).resolves.toMatchObject({ passed: false, errors: expect.arrayContaining(["proposal-status.json providerAudit missing providerAudit"]) });
   });
 });
 

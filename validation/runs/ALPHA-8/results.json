@@ -1,0 +1,66 @@
+{
+  "schemaVersion": "alpha-8-results",
+  "generatedAt": "2026-07-05T10:53:36.739Z",
+  "dogfood": [
+    {
+      "id": "viewer-validation-errors",
+      "accepted": true,
+      "manualApply": true,
+      "providerBacked": true,
+      "packet": "/tmp/runforge-alpha8-dogfood/viewer-validation-errors-accepted/code/packet",
+      "viewer": "/tmp/runforge-alpha8-dogfood/viewer-validation-errors-accepted/viewer/index.html",
+      "notes": "One malformed provider attempt was rejected before the accepted packet."
+    },
+    {
+      "id": "inspector-artifact-count",
+      "accepted": true,
+      "manualApply": true,
+      "providerBacked": true,
+      "packet": "/tmp/runforge-alpha8-dogfood/inspector-artifact-count/code/packet",
+      "viewer": "/tmp/runforge-alpha8-dogfood/inspector-artifact-count/viewer/index.html"
+    },
+    {
+      "id": "provider-audit-docs",
+      "accepted": true,
+      "manualApply": true,
+      "providerBacked": true,
+      "packet": "/tmp/runforge-alpha8-dogfood/provider-audit-docs-accepted/code/packet",
+      "viewer": "/tmp/runforge-alpha8-dogfood/provider-audit-docs-accepted/viewer/index.html",
+      "notes": "One stale-context provider patch was rejected before the accepted packet."
+    }
+  ],
+  "validation": [
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm exec vitest run tests/integration/alpha6-packet-provider.test.ts",
+      "status": "passed",
+      "tests": 6
+    },
+    {
+      "command": "pnpm validation:packets",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm test",
+      "status": "passed",
+      "tests": 101
+    },
+    {
+      "command": "pnpm build",
+      "status": "passed"
+    }
+  ],
+  "providerAudit": {
+    "artifacts": [
+      "proposal-status.json",
+      "metrics.json",
+      "provider-safety-report.json"
+    ],
+    "rawProviderCommandStoredInAudit": false,
+    "tokenUsage": null,
+    "estimatedCost": null
+  }
+}

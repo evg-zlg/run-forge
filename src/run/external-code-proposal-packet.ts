@@ -128,6 +128,7 @@ function proposalStatus(input: CodeProposalPacketInput) {
     providerEnabled: input.provider.enabled,
     providerBackend: input.provider.backend,
     providerStatus: input.provider.result?.status ?? (input.provider.enabled ? "not_run" : "disabled"),
+    providerAudit: input.provider.result?.providerAudit ?? null,
     reviewerDecision: input.reviewerDecision,
     reviewerReason: input.reviewerReason,
     filesChanged: input.proposal?.filesChanged ?? [],
@@ -176,9 +177,11 @@ function metricsJson(input: CodeProposalPacketInput) {
     providerEnabled: input.provider.enabled,
     providerBackend: input.provider.backend,
     providerDurationMs: input.provider.result?.durationMs ?? 0,
+    providerInputBytes: input.provider.result?.inputBytes ?? 0,
     providerOutputBytes: input.provider.result?.outputBytes ?? 0,
     providerAccepted: input.provider.result?.status === "accepted",
     providerStatus: input.provider.result?.status ?? (input.provider.enabled ? "not_run" : "disabled"),
+    providerAudit: input.provider.result?.providerAudit ?? null,
     verificationStatus: input.verificationPassed ? "passed" : input.verificationResults.length > 0 ? "failed" : "not_run",
     humanGateRequired: true
   };
@@ -205,7 +208,8 @@ function safetyJson(input: CodeProposalPacketInput) {
       enabled: input.provider.enabled,
       backend: input.provider.backend,
       status: input.provider.result?.status ?? (input.provider.enabled ? "not_run" : "disabled"),
-      safetyReportArtifact: input.provider.result ? "provider-safety-report.json" : null
+      safetyReportArtifact: input.provider.result ? "provider-safety-report.json" : null,
+      providerAudit: input.provider.result?.providerAudit ?? null
     }
   };
 }
