@@ -1,8 +1,9 @@
-import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildPacketIndex, renderPacketIndexMarkdown } from "../../src/run/packet-indexer.js";
+import { exportPacketViewersForIndex } from "../../src/run/packet-viewer.js";
 import {
   buildDashboardSeed,
   buildLatestDogfoodReport,
@@ -187,5 +188,71 @@ describe("packet indexer", () => {
     expect(seed.records[0]).toHaveProperty("summaryPath");
     expect(await readFile(join(out, "latest-dogfood.md"), "utf8")).toContain("Latest alpha: ALPHA-10");
     expect(await readFile(join(out, "dashboard-seed.json"), "utf8")).toContain("alpha-11-dashboard-seed");
+  });
+
+  it("renders viewers for indexed packet paths and skips missing packets in non-strict mode", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-view-index-"));
+    const packetDir = join(root, "packet");
+    const out = join(root, "viewers");
+    const indexPath = join(root, "index.json");
+    await mkdir(packetDir, { recursive: true });
+    await writeFile(join(packetDir, "run.json"), JSON.stringify({
+      schemaVersion: "alpha-test",
+      runId: "view-index-packet",
+      taskType: "external_code_proposal",
+      status: "no_safe_proposal"
+    }), "utf8");
+    await writeFile(join(packetDir, "packet-manifest.json"), JSON.stringify({
+      schemaVersion: "alpha-test",
+      runId: "view-index-packet",
+      artifacts: []
+    }), "utf8");
+    await writeFile(indexPath, JSON.stringify({
+      schemaVersion: "packet-index-v1",
+      generatedAt: new Date().toISOString(),
+      root,
+      entries: [
+        {
+          milestone: "ALPHA-X",
+          scenario: "rendered",
+          packetType: "external_code_proposal",
+          outcome: "no_safe_proposal",
+          providerStatus: "disabled",
+          repo: "fixture",
+          patchTouchedFiles: [],
+          packetPath: packetDir,
+          viewerPath: "unknown",
+          externalRepoHeadBefore: null,
+          externalRepoHeadAfter: null,
+          externalRepoMutationVerdict: "unchanged",
+          decision: "do_not_apply",
+          notes: ""
+        },
+        {
+          milestone: "ALPHA-X",
+          scenario: "missing",
+          packetType: "external_code_proposal",
+          outcome: "unknown",
+          providerStatus: "unknown",
+          repo: "fixture",
+          patchTouchedFiles: [],
+          packetPath: join(root, "missing", "packet"),
+          viewerPath: "unknown",
+          externalRepoHeadBefore: null,
+          externalRepoHeadAfter: null,
+          externalRepoMutationVerdict: "unknown",
+          decision: "unknown",
+          notes: ""
+        }
+      ]
+    }), "utf8");
+
+    const result = await exportPacketViewersForIndex({ index: indexPath, out });
+
+    expect(result.rendered).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(result.failed).toBe(0);
+    await access(result.records[0]!.viewerPath!);
+    expect(await readFile(result.summaryPath, "utf8")).toContain("Skipped: 1");
   });
 });

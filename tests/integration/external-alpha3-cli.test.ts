@@ -47,11 +47,12 @@ describe("external proposal-readiness CLI", () => {
 
   it("maps deterministic non-ready categories conservatively", async () => {
     const repo = await createSampleGitRepo();
-    await expectReadiness(repo, "node -e \"console.error('Cannot find module lodash'); process.exit(1)\"", "needs_more_context", "dependency_missing");
+    await expectReadiness(repo, "node -e \"console.error('Local package.json exists, but node_modules missing.'); console.error('Cannot find module lodash'); process.exit(1)\"", "needs_more_context", "dependency_missing", [], "Install or prepare dependencies");
+    await expectReadiness(repo, "node -e \"console.error(\\\"error TS2688: Cannot find type definition file for 'node'.\\\"); console.error(\\\"error TS2591: Cannot find name 'process'. Try `npm i --save-dev @types/node`.\\\"); process.exit(1)\"", "needs_more_context", "environment_error", [], "Install or prepare dependencies");
     await expectReadiness(repo, "node -e \"console.error('command not found: definitely-not-a-real-command'); process.exit(127)\"", "needs_more_context", "command_not_found");
     await expectReadiness(repo, "node -e \"setTimeout(() => {}, 2000)\"", "research_only", "timeout", ["--timeout-ms", "100"]);
     await expectReadiness(repo, "node -e \"console.log('ok')\"", "no_failure_observed", "no_failure_observed");
-  }, 15_000);
+  }, 30_000);
 
   it("reports blocked_by_safety from a synthetic triage safety blocker", async () => {
     const triagePacket = await createSyntheticTriagePacket({
@@ -324,6 +325,34 @@ describe("external code-proposal CLI", () => {
     expect(status.reviewerDecision).toBe("rejected_no_safe_proposal");
   });
 
+  it("does not run provider patch generation for environment setup failures", async () => {
+    const repo = await createPlainGitRepo();
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha15-env-not-ready-provider-"));
+
+    await runCli([
+      "external", "code-proposal",
+      "--repo", repo,
+      "--command", "node -e \"console.error('Local package.json exists, but node_modules missing.'); console.error(\\\"error TS2688: Cannot find type definition file for 'node'.\\\"); process.exit(1)\"",
+      "--enable-provider-proposal",
+      "--provider", "cli",
+      "--provider-command", providerPatchCommand(".env", "old", "secret"),
+      "--out", outDir
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    const status = JSON.parse(await readFile(join(packetDir, "proposal-status.json"), "utf8")) as {
+      outcome: string;
+      patchBytes: number;
+      providerStatus: string;
+      diagnostics: string[];
+    };
+    expect(status.outcome).toBe("not_ready");
+    expect(status.patchBytes).toBe(0);
+    expect(status.providerStatus).toBe("not_run");
+    expect(status.diagnostics.join("\n")).toContain("code proposal is not allowed");
+    await expect(access(join(packetDir, "provider-safety-report.json"))).rejects.toThrow();
+  });
+
   it("returns no_safe_proposal when the ready failure has no deterministic patch rule", async () => {
     const repo = await createPlainGitRepo();
     const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha3-code-no-safe-"));
@@ -416,17 +445,19 @@ function runCli(args: string[]) {
   });
 }
 
-async function expectReadiness(repo: string, command: string, outcome: string, category: string, extraArgs: string[] = []): Promise<void> {
+async function expectReadiness(repo: string, command: string, outcome: string, category: string, extraArgs: string[] = [], recommendedIncludes?: string): Promise<void> {
   const outDir = await mkdtemp(join(tmpdir(), "runforge-alpha3-readiness-case-"));
   await runCli(["external", "proposal-readiness", "--repo", repo, "--command", command, "--out", outDir, ...extraArgs]);
   const contract = JSON.parse(await readFile(join(outDir, "packet", "proposal-contract.json"), "utf8")) as {
     readinessOutcome: string;
     failureCategory: string;
     canAttemptCodeProposal: boolean;
+    recommendedNextAction?: string;
   };
   expect(contract.readinessOutcome).toBe(outcome);
   expect(contract.failureCategory).toBe(category);
   expect(contract.canAttemptCodeProposal).toBe(outcome === "ready_for_code_proposal");
+  if (recommendedIncludes) expect(contract.recommendedNextAction).toContain(recommendedIncludes);
 }
 
 function assertionCommand(): string {
@@ -447,6 +478,19 @@ function missingImportCommand(): string {
 
 function configMismatchCommand(): string {
   return "node -e \"const fs=require('fs'); const config=JSON.parse(fs.readFileSync('config/app.json','utf8')); if (config.apiBaseUrl === 'http://localhost:3000') process.exit(0); console.error('FAIL tests/config.test.ts'); console.error('Config apiBaseUrl mismatch'); console.error('Expected: \\\"http://localhost:3000\\\"'); console.error('Received: \\\"http://localhost:3001\\\"'); process.exit(1);\"";
+}
+
+function providerPatchCommand(file: string, before: string, after: string): string {
+  const patch = [
+    `diff --git a/${file} b/${file}`,
+    `--- a/${file}`,
+    `+++ b/${file}`,
+    "@@ -1 +1 @@",
+    `-${before}`,
+    `+${after}`,
+    ""
+  ].join("\n");
+  return `node -e 'require("fs").writeFileSync("provider-output.patch", ${JSON.stringify(patch)})'`;
 }
 
 async function createSampleGitRepo(): Promise<string> {

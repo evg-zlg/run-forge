@@ -54,6 +54,20 @@ describe("provider patch validator", () => {
     expect(result.errors.join("\n")).toContain("outside allowedPaths");
   });
 
+  it("deduplicates forbidden path patterns from defaults and readiness contracts", async () => {
+    const repo = await createRepo();
+    const result = await validateProviderPatch({
+      repoPath: repo,
+      patch: patchFor(".env", "bad", "good"),
+      contract: { forbiddenPaths: [".env", ".env.*", "deploy/**"] }
+    });
+
+    expect(result.accepted).toBe(false);
+    expect(result.forbiddenPaths).toEqual([...new Set(result.forbiddenPaths)]);
+    expect(result.forbiddenPaths.filter((path) => path === ".env")).toHaveLength(1);
+  });
+
+
   it("rejects patches that fail dry-run apply", async () => {
     const repo = await createRepo();
     const result = await validateProviderPatch({ repoPath: repo, patch: patchFor("state.txt", "missing", "good") });

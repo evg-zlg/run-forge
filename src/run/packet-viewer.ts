@@ -1,6 +1,7 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { access, mkdir, readFile, writeFile } from "node:fs/promises";
+import { basename, join, resolve } from "node:path";
 import { inspectPacket } from "./packet-inspector.js";
+import type { PacketIndexResult } from "./packet-indexer.js";
 
 interface ViewerOptions {
   packet: string;
@@ -13,6 +14,33 @@ export interface PacketViewerResult {
   indexPath: string;
 }
 
+export interface PacketViewerIndexOptions {
+  index: string;
+  out: string;
+  strict?: boolean;
+}
+
+export interface PacketViewerIndexRecord {
+  milestone: string;
+  scenario: string;
+  packetPath: string;
+  viewerPath: string | null;
+  status: "rendered" | "skipped" | "failed";
+  reason?: string;
+}
+
+export interface PacketViewerIndexResult {
+  indexPath: string;
+  outDir: string;
+  totalRecords: number;
+  rendered: number;
+  skipped: number;
+  failed: number;
+  records: PacketViewerIndexRecord[];
+  summaryPath: string;
+  jsonPath: string;
+}
+
 export async function exportPacketViewer(options: ViewerOptions): Promise<PacketViewerResult> {
   const packetDir = resolve(options.packet);
   const outDir = resolve(options.out);
@@ -23,6 +51,97 @@ export async function exportPacketViewer(options: ViewerOptions): Promise<Packet
   const indexPath = join(outDir, "index.html");
   await writeFile(indexPath, html, "utf8");
   return { packetDir, outDir, indexPath };
+}
+
+export async function exportPacketViewersForIndex(options: PacketViewerIndexOptions): Promise<PacketViewerIndexResult> {
+  const indexPath = resolve(options.index);
+  const outDir = resolve(options.out);
+  await mkdir(outDir, { recursive: true });
+  const index = JSON.parse(await readFile(indexPath, "utf8")) as PacketIndexResult;
+  const records: PacketViewerIndexRecord[] = [];
+
+  for (const [entryIndex, entry] of index.entries.entries()) {
+    const packetPath = entry.packetPath;
+    if (!packetPath || packetPath === "unknown") {
+      records.push({
+        milestone: entry.milestone,
+        scenario: entry.scenario,
+        packetPath: packetPath || "unknown",
+        viewerPath: null,
+        status: "skipped",
+        reason: "index record has no packetPath"
+      });
+      continue;
+    }
+
+    try {
+      await access(packetPath);
+      const viewerOut = join(outDir, viewerDirName(entryIndex, entry.milestone, entry.scenario, packetPath));
+      const rendered = await exportPacketViewer({ packet: packetPath, out: viewerOut });
+      records.push({
+        milestone: entry.milestone,
+        scenario: entry.scenario,
+        packetPath,
+        viewerPath: rendered.indexPath,
+        status: "rendered"
+      });
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : String(error);
+      records.push({
+        milestone: entry.milestone,
+        scenario: entry.scenario,
+        packetPath,
+        viewerPath: null,
+        status: options.strict ? "failed" : "skipped",
+        reason
+      });
+      if (options.strict) break;
+    }
+  }
+
+  const result: PacketViewerIndexResult = {
+    indexPath,
+    outDir,
+    totalRecords: index.entries.length,
+    rendered: records.filter((record) => record.status === "rendered").length,
+    skipped: records.filter((record) => record.status === "skipped").length,
+    failed: records.filter((record) => record.status === "failed").length,
+    records,
+    summaryPath: join(outDir, "viewer-index-summary.md"),
+    jsonPath: join(outDir, "viewer-index-summary.json")
+  };
+  await writeFile(result.jsonPath, `${JSON.stringify(result, null, 2)}\n`, "utf8");
+  await writeFile(result.summaryPath, renderViewerIndexSummary(result), "utf8");
+  if (options.strict && result.failed > 0) throw new Error(`Failed to render ${result.failed} indexed packet viewer(s). See ${result.summaryPath}`);
+  return result;
+}
+
+export function renderViewerIndexSummary(result: PacketViewerIndexResult): string {
+  const lines = [
+    "# RunForge Indexed Packet Viewers",
+    "",
+    `Index: ${result.indexPath}`,
+    `Output: ${result.outDir}`,
+    `Total records: ${result.totalRecords}`,
+    `Rendered: ${result.rendered}`,
+    `Skipped: ${result.skipped}`,
+    `Failed: ${result.failed}`,
+    "",
+    "| Status | Milestone | Scenario | Packet | Viewer | Reason |",
+    "| --- | --- | --- | --- | --- | --- |"
+  ];
+  for (const record of result.records) {
+    lines.push([
+      record.status,
+      record.milestone,
+      record.scenario,
+      record.packetPath,
+      record.viewerPath ?? "",
+      record.reason ?? ""
+    ].map(markdownCell).join(" | "));
+  }
+  lines.push("");
+  return `${lines.join("\n")}\n`;
 }
 
 async function readViewerFiles(packetDir: string): Promise<Record<string, unknown>> {
@@ -182,4 +301,16 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 function escapeHtml(value: string): string {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function viewerDirName(index: number, milestone: string, scenario: string, packetPath: string): string {
+  return `${String(index + 1).padStart(3, "0")}-${slug(milestone)}-${slug(scenario)}-${slug(basename(packetPath)) || "packet"}`;
+}
+
+function slug(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80);
+}
+
+function markdownCell(value: string): string {
+  return ` ${value.replaceAll("|", "\\|")} `;
 }

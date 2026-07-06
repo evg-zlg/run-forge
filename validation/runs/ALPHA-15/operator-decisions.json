@@ -1,0 +1,33 @@
+{
+  "schemaVersion": "alpha-15-operator-decisions",
+  "generatedAt": "2026-07-06",
+  "operator": "external_factory_trial",
+  "verdict": "useful_now",
+  "decisions": [
+    {
+      "caseId": "case-1",
+      "decision": "reject",
+      "operatorVerdict": "do_not_apply",
+      "shouldApplyPatch": false,
+      "packet": "/tmp/runforge-alpha15-factory-trial/case-1/code/packet",
+      "viewer": "/tmp/runforge-alpha15-factory-trial/case-1/code/viewer/index.html",
+      "reason": "The failure evidence points to missing disposable-workspace dependencies and Node types, not a narrow source-code defect."
+    },
+    {
+      "caseId": "case-2",
+      "decision": "reject",
+      "operatorVerdict": "do_not_apply",
+      "shouldApplyPatch": false,
+      "packet": "/tmp/runforge-alpha15-factory-trial/case-2/code/packet",
+      "viewer": "/tmp/runforge-alpha15-factory-trial/case-2/code/viewer/index.html",
+      "reason": "The provider attempted to touch .env, which is forbidden by RunForge safety policy."
+    }
+  ],
+  "factorySafety": {
+    "beforeHead": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "afterHead": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "statusBefore": "clean",
+    "statusAfter": "clean",
+    "patchApplied": false
+  }
+}

@@ -31,6 +31,9 @@ export function analyzeFailure(sourceRun: ExternalFailureTriageSourceRun, eviden
   }
 
   const combined = evidence.map((item) => `${item.command}\n${item.stdoutExcerpt}\n${item.stderrExcerpt}`).join("\n");
+  const environmentSetup = environmentSetupClassification(combined, evidence);
+  if (environmentSetup) return environmentSetup;
+
   for (const rule of classificationRules) {
     if (rule.pattern.test(combined)) {
       return classification(rule.category, rule.confidence, rule.rootCause, evidence, rule.nextAction, !rule.readyForCodeProposal, rule.readyForCodeProposal);
@@ -65,20 +68,20 @@ const classificationRules: Array<{
     readyForCodeProposal: false
   },
   {
+    category: "dependency_missing",
+    confidence: "high",
+    pattern: /(Cannot find module (?!['"]?[./])|Module not found:.* (?!['"]?[./])|ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND|Cannot find package|missing dependency|pnpm: command not found|npm: command not found)/i,
+    rootCause: "The command failed because a dependency, package, or package manager was missing in the disposable workspace environment.",
+    nextAction: setupNextAction(),
+    readyForCodeProposal: false
+  },
+  {
     category: "typecheck_error",
     confidence: "high",
     pattern: /(TS\d{4}:|Type '.*' is not assignable|Property .* does not exist|tsc\b|TypeScript)/i,
     rootCause: "The logs contain TypeScript/typecheck diagnostics.",
     nextAction: "Inspect the referenced type errors and prepare a narrow code proposal only if the diagnostics identify repo source files.",
     readyForCodeProposal: true
-  },
-  {
-    category: "dependency_missing",
-    confidence: "high",
-    pattern: /(Cannot find module|Module not found|ERR_MODULE_NOT_FOUND|Cannot find package|missing dependency|pnpm: command not found|npm: command not found)/i,
-    rootCause: "The command failed because a dependency, package, or package manager was missing in the disposable workspace environment.",
-    nextAction: "Run an explicit dependency setup command in the check flow or verify dependency declarations before proposing code changes.",
-    readyForCodeProposal: false
   },
   {
     category: "test_assertion_failure",
@@ -121,6 +124,49 @@ const classificationRules: Array<{
     readyForCodeProposal: true
   }
 ];
+
+function environmentSetupClassification(combined: string, evidence: FailureEvidence[]): FailureTriageAnalysis | null {
+  const missingNodeModules = /(node_modules missing|node_modules (?:is )?missing|Local package\.json exists, but node_modules missing)/i.test(combined);
+  const missingNodeTypes = /(Cannot find type definition file for ['"]?node['"]?|Cannot find name ['"]?(?:process|Buffer|__dirname|__filename|require|module)['"]?|Try `?npm i --save-dev @types\/node`?)/i.test(combined);
+  const missingPackage = hasMissingExternalPackage(combined);
+  if (!missingNodeModules && !missingNodeTypes && !missingPackage) return null;
+
+  const category: FailureTriageCategory = missingNodeModules || missingPackage ? "dependency_missing" : "environment_error";
+  const rootCause = missingNodeModules
+    ? "The disposable workspace appears to have a package manifest but missing installed dependencies."
+    : missingNodeTypes
+      ? "The command failed because Node.js ambient types were unavailable in the disposable workspace."
+      : "The command failed because a required package or module was unavailable in the disposable workspace.";
+  return classification(
+    category,
+    "high",
+    rootCause,
+    evidence,
+    setupNextAction(),
+    true,
+    false
+  );
+}
+
+function hasMissingExternalPackage(text: string): boolean {
+  if (/(ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND)/i.test(text)) return true;
+  const packagePatterns = [
+    /Cannot find package ['"]([^'"]+)['"]/gi,
+    /Cannot find module ['"]([^'"]+)['"]/gi,
+    /Module not found:.*?['"]([^'"]+)['"]/gi
+  ];
+  for (const pattern of packagePatterns) {
+    for (const match of text.matchAll(pattern)) {
+      const specifier = match[1] ?? "";
+      if (specifier && !specifier.startsWith(".") && !specifier.startsWith("/")) return true;
+    }
+  }
+  return false;
+}
+
+function setupNextAction(): string {
+  return "Install or prepare dependencies in the disposable workspace, or provide an explicit setup command, then rerun the failing command before attempting a code proposal.";
+}
 
 function classification(
   category: FailureTriageCategory,

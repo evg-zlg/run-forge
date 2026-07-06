@@ -302,6 +302,16 @@ function decideReadiness(rootCause: TriageRootCause, triageRun: TriageRun | null
       recommendedNextAction: "Research the timeout with narrower commands or larger timeout limits before proposing code."
     };
   }
+  if (failureCategory === "dependency_missing" || failureCategory === "environment_error" || failureCategory === "configuration_error" || failureCategory === "command_not_found") {
+    return {
+      readinessOutcome: "needs_more_context",
+      canAttemptCodeProposal: false,
+      failureCategory,
+      confidence,
+      missingContext: [`${failureCategory} requires dependency, tool, or environment setup before source edits are safe to consider.`],
+      recommendedNextAction: setupRecommendedNextAction(rootCause.safeNextAction)
+    };
+  }
   if (failureCategory === "test_assertion_failure" || failureCategory === "typecheck_error" || failureCategory === "lint_error" || failureCategory === "build_error") {
     return {
       readinessOutcome: "ready_for_code_proposal",
@@ -320,6 +330,10 @@ function decideReadiness(rootCause: TriageRootCause, triageRun: TriageRun | null
     missingContext: [`${failureCategory} is not deterministic enough for the current proposal engine.`],
     recommendedNextAction: rootCause.safeNextAction ?? "Collect more focused failure evidence before attempting a code proposal."
   };
+}
+
+function setupRecommendedNextAction(fallback?: string): string {
+  return fallback ?? "Install or prepare dependencies in the disposable workspace, or provide an explicit setup command, then rerun the failing command before attempting a code proposal.";
 }
 
 function hasSafetyBlocker(safety: TriageSafetyReport | null): boolean {
