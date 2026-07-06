@@ -11,26 +11,36 @@ import type { WorkspaceChangeSummary } from "./external-command-check-git.js";
 export function buildMetrics(input: {
   runId: string;
   durationMs: number;
+  setupCommandsRequested: number;
+  mainCommandsRequested: number;
+  setupResults: CommandResult[];
   commandResults: CommandResult[];
   status: ExternalCheckStatus;
   workspaceChangeSummary: WorkspaceChangeSummary;
   originalBefore: { status: string | null };
   mutationVerdict: MutationVerdict;
 }) {
-  const durations = input.commandResults.map((result) => result.durationMs);
+  const allResults = [...input.setupResults, ...input.commandResults];
+  const durations = allResults.map((result) => result.durationMs);
   return {
     schemaVersion: externalCheckSchemaVersion,
     runId: input.runId,
     durationMs: input.durationMs,
-    commandsRequested: input.commandResults.length,
+    setupCommandsRequested: input.setupCommandsRequested,
+    setupCommandsRun: input.setupResults.filter((result) => result.status !== "blocked").length,
+    setupCommandsPassed: input.setupResults.filter((result) => result.status === "passed").length,
+    setupCommandsFailed: input.setupResults.filter((result) => result.status === "failed").length,
+    setupCommandsTimedOut: input.setupResults.filter((result) => result.status === "timed_out").length,
+    setupDurationMs: input.setupResults.reduce((sum, result) => sum + result.durationMs, 0),
+    commandsRequested: input.mainCommandsRequested,
     commandsRun: input.commandResults.filter((result) => result.status !== "blocked").length,
     commandsPassed: input.commandResults.filter((result) => result.status === "passed").length,
     commandsFailed: input.commandResults.filter((result) => result.status === "failed").length,
     commandsTimedOut: input.commandResults.filter((result) => result.status === "timed_out").length,
-    stdoutBytes: input.commandResults.reduce((sum, result) => sum + result.stdoutBytes, 0),
-    stderrBytes: input.commandResults.reduce((sum, result) => sum + result.stderrBytes, 0),
-    stdoutTruncations: input.commandResults.filter((result) => result.stdoutTruncated).length,
-    stderrTruncations: input.commandResults.filter((result) => result.stderrTruncated).length,
+    stdoutBytes: allResults.reduce((sum, result) => sum + result.stdoutBytes, 0),
+    stderrBytes: allResults.reduce((sum, result) => sum + result.stderrBytes, 0),
+    stdoutTruncations: allResults.filter((result) => result.stdoutTruncated).length,
+    stderrTruncations: allResults.filter((result) => result.stderrTruncated).length,
     workspaceChanges: input.workspaceChangeSummary.counts,
     originalRepoBaselineDirty: input.originalBefore.status === null ? null : input.originalBefore.status.length > 0,
     originalRepoMutationVerdict: input.mutationVerdict,
@@ -43,8 +53,9 @@ export function buildMetrics(input: {
       max: durations.length > 0 ? Math.max(...durations) : 0,
       total: durations.reduce((sum, duration) => sum + duration, 0)
     },
-    commands: input.commandResults.map((result) => ({
+    commands: allResults.map((result) => ({
       commandId: result.commandId,
+      phase: result.phase,
       index: result.index,
       status: result.status,
       exitCode: result.exitCode,
@@ -65,6 +76,7 @@ export function renderSummary(input: {
   status: ExternalCheckStatus;
   repoPath: string;
   workspacePath?: string;
+  setupResults: CommandResult[];
   commandResults: CommandResult[];
   mutationVerdict: string;
   originalBefore: { status: string | null };
@@ -72,7 +84,8 @@ export function renderSummary(input: {
   cliExitPolicy: CliExitPolicy;
   commandPolicy: CommandPolicy;
 }): string {
-  const truncated = input.commandResults.some((result) => result.stdoutTruncated || result.stderrTruncated);
+  const allResults = [...input.setupResults, ...input.commandResults];
+  const truncated = allResults.some((result) => result.stdoutTruncated || result.stderrTruncated);
   return `# RunForge External Check Summary
 
 Run ID: ${input.runId}
@@ -88,9 +101,14 @@ Workspace diff: ${input.workspaceChangeSummary.method}, ${input.workspaceChangeS
 Workspace changes: added ${input.workspaceChangeSummary.counts.added}, modified ${input.workspaceChangeSummary.counts.modified}, deleted ${input.workspaceChangeSummary.counts.deleted}
 ${renderWorkspaceFiles(input.workspaceChangeSummary)}
 
-Commands:
-${input.commandResults.map(renderCommand).join("\n")}
+Setup:
+${input.setupResults.length > 0 ? input.setupResults.map(renderCommand).join("\n") : "No setup commands requested."}
 
+Commands:
+${input.commandResults.length > 0 ? input.commandResults.map(renderCommand).join("\n") : "Main commands skipped."}
+
+${input.status === "setup_failed" ? "Setup next action: inspect setup stdout/stderr logs, adjust dependency preparation or setup command, then rerun before attempting a code proposal." : ""}
+${input.status === "setup_timed_out" ? "Setup timeout next action: inspect setup logs, then rerun with a larger --timeout-ms or narrower setup command if the duration was expected." : ""}
 ${input.status === "timed_out" ? "Timeout next action: inspect the timed-out command logs, then rerun with a larger --timeout-ms or a narrower command if the timeout was expected." : ""}
 ${truncated ? "Warning: one or more command logs were truncated by --max-log-bytes. Inspect truncation flags before drawing conclusions from missing log tail content." : ""}
 
@@ -99,6 +117,7 @@ RunForge runs commands in a disposable copied workspace. Dependency directories 
 
 Key artifacts:
 - command-results.json
+- setup-results.json
 - logs/
 - metrics.json
 - events.jsonl
@@ -107,7 +126,7 @@ Key artifacts:
 - packet-manifest.json
 
 Suggested next action:
-${input.status === "passed" ? "Review summary.md and preserve this packet as evidence." : "Inspect the command stderr/stdout logs and run failure triage when ready."}
+${suggestedNextAction(input.status)}
 `;
 }
 
@@ -119,6 +138,14 @@ function renderCommand(result: CommandResult): string {
     `   stdout: ${result.stdoutPath} (${result.stdoutBytes} bytes, truncated: ${result.stdoutTruncated})`,
     `   stderr: ${result.stderrPath} (${result.stderrBytes} bytes, truncated: ${result.stderrTruncated})`
   ].join("\n");
+}
+
+function suggestedNextAction(status: ExternalCheckStatus): string {
+  if (status === "passed") return "Review summary.md and preserve this packet as evidence.";
+  if (status === "setup_failed" || status === "setup_timed_out" || status === "setup_error") {
+    return "Inspect the setup logs and rerun with corrected setup/preflight commands before failure triage or proposal work.";
+  }
+  return "Inspect the command stderr/stdout logs and run failure triage when ready.";
 }
 
 function baselineStatus(status: string | null): string {

@@ -69,7 +69,7 @@ const requiredByTaskType: Record<string, string[]> = {
 const requiredRunFields = ["schemaVersion", "runId", "taskType", "status"];
 const taskTypes = new Set(Object.keys(requiredByTaskType));
 const statusEnums: Record<string, Set<string>> = {
-  external_command_check: new Set(["passed", "failed", "timed_out", "error", "blocked"]),
+  external_command_check: new Set(["passed", "failed", "timed_out", "error", "blocked", "setup_failed", "setup_timed_out", "setup_error"]),
   external_failure_triage: new Set(["triaged", "no_failure_observed", "needs_more_context"]),
   external_proposal_readiness: new Set(["ready_for_code_proposal", "needs_more_context", "research_only", "blocked_by_safety", "no_failure_observed"]),
   external_code_proposal: new Set([

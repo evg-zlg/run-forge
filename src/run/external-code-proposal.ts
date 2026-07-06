@@ -41,6 +41,7 @@ export type CodeProposalOutcome =
 export interface ExternalCodeProposalOptions {
   fromReadinessPacket?: string;
   repo?: string;
+  setupCommands?: string[];
   commands?: string[];
   out?: string;
   timeoutMs?: number;

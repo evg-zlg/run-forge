@@ -3,7 +3,6 @@ import { readFile, stat, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { ensureDir } from "../core/artifact-store.js";
 import { createRunId } from "../core/trajectory.js";
-import { validateCommandSafety } from "./command-safety.js";
 import { runOneCommand } from "./external-command-check-exec.js";
 import {
   diffWorkspaceSnapshots,
@@ -22,6 +21,15 @@ import {
   writePacketManifest,
   type ArtifactRecord
 } from "./external-command-check-packet.js";
+import {
+  blockedCommandReports,
+  blockedResult,
+  cliExitCodeFor,
+  defaultExternalCheckOutDir,
+  finalStatus,
+  firstSetupFailure,
+  setupPhaseStatus
+} from "./external-command-check-helpers.js";
 import type {
   CliExitPolicy,
   CommandPolicy,
@@ -50,7 +58,7 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
   const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
   const maxLogBytes = options.maxLogBytes ?? defaultMaxLogBytes;
   const cliExitPolicy = options.exitPolicy ?? "packet";
-  const packetDir = join(resolve(options.out ?? defaultOutDir()), "packet");
+  const packetDir = join(resolve(options.out ?? defaultExternalCheckOutDir()), "packet");
   const logsDir = join(packetDir, "logs");
   await ensureDir(logsDir);
 
@@ -86,14 +94,23 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
     emit("artifact_written", record);
   };
 
-  emit("task_received", { taskType: "external_command_check", commandsRequested: options.commands.length });
+  emit("task_received", {
+    taskType: "external_command_check",
+    setupCommandsRequested: options.setupCommands?.length ?? 0,
+    commandsRequested: options.commands.length
+  });
   emit("run_created", { packetDir, cliExitPolicy });
   emit("route_selected", { route: "external_command_check" });
 
   await assertDirectory(repoPath, "--repo");
   const originalBefore = await gitSnapshot(repoPath);
-  const blockedCommands = blockedCommandReports(options.commands);
+  const setupCommands = options.setupCommands ?? [];
+  const blockedCommands = [
+    ...blockedCommandReports(setupCommands, "setup"),
+    ...blockedCommandReports(options.commands, "main")
+  ];
   let workspacePath: string | undefined;
+  const setupResults: CommandResult[] = [];
   const commandResults: CommandResult[] = [];
   let status: ExternalCheckStatus = "passed";
   let workspaceBefore: WorkspaceFileSnapshot | undefined;
@@ -104,7 +121,8 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
       const result = blockedResult(blocked, repoPath, runId);
       await writeFile(join(packetDir, result.stdoutPath), "", "utf8");
       await writeFile(join(packetDir, result.stderrPath), `${blocked.reason}\n`, "utf8");
-      commandResults.push(result);
+      if (result.phase === "setup") setupResults.push(result);
+      else commandResults.push(result);
       await markArtifact(result.stdoutPath, "log");
       await markArtifact(result.stderrPath, "log");
     }
@@ -118,26 +136,69 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
     emit("workspace_prepared", { workspacePath });
     const workerId = `${runId}:worker:command_runner`;
     const workerStartedEventId = emit("worker_started", { workerId, worker: "command_runner" });
-    for (let i = 0; i < options.commands.length; i += 1) {
-      const index = i + 1;
-      const command = options.commands[i]!;
-      const commandId = `${runId}:command:${String(index).padStart(3, "0")}`;
-      emit("command_started", { parentEventId: workerStartedEventId, workerId, commandId, index, command });
-      const result = await runOneCommand({ commandId, index, command, cwd: workspacePath, timeoutMs, maxLogBytes, logsDir });
-      commandResults.push(result);
-      await markArtifact(result.stdoutPath, "log");
-      await markArtifact(result.stderrPath, "log");
-      emit("command_finished", {
+    if (setupCommands.length > 0) {
+      emit("setup_started", { parentEventId: workerStartedEventId, workerId, commandsRequested: setupCommands.length });
+      for (let i = 0; i < setupCommands.length; i += 1) {
+        const index = i + 1;
+        const command = setupCommands[i]!;
+        const commandId = `${runId}:setup:${String(index).padStart(3, "0")}`;
+        emit("command_started", { parentEventId: workerStartedEventId, workerId, commandId, phase: "setup", index, command });
+        const result = await runOneCommand({ commandId, phase: "setup", index, command, cwd: workspacePath, timeoutMs, maxLogBytes, logsDir });
+        setupResults.push(result);
+        await markArtifact(result.stdoutPath, "log");
+        await markArtifact(result.stderrPath, "log");
+        emit("command_finished", {
+          parentEventId: workerStartedEventId,
+          workerId,
+          commandId,
+          phase: "setup",
+          index,
+          command,
+          status: result.status,
+          exitCode: result.exitCode,
+          signal: result.signal,
+          durationMs: result.durationMs
+        });
+        if (result.status !== "passed") break;
+      }
+      emit("setup_finished", {
+        parentEventId: workerStartedEventId,
+        workerId,
+        status: setupPhaseStatus(setupResults),
+        commandsRun: setupResults.length
+      });
+    }
+    const setupFailure = firstSetupFailure(setupResults);
+    if (setupFailure) {
+      emit("setup_skipped_main_commands", {
+        parentEventId: workerStartedEventId,
+        workerId,
+        reason: setupFailure.status,
+        commandsSkipped: options.commands.length
+      });
+    } else {
+      for (let i = 0; i < options.commands.length; i += 1) {
+        const index = i + 1;
+        const command = options.commands[i]!;
+        const commandId = `${runId}:command:${String(index).padStart(3, "0")}`;
+        emit("command_started", { parentEventId: workerStartedEventId, workerId, commandId, phase: "main", index, command });
+        const result = await runOneCommand({ commandId, phase: "main", index, command, cwd: workspacePath, timeoutMs, maxLogBytes, logsDir });
+        commandResults.push(result);
+        await markArtifact(result.stdoutPath, "log");
+        await markArtifact(result.stderrPath, "log");
+        emit("command_finished", {
         parentEventId: workerStartedEventId,
         workerId,
         commandId,
+        phase: "main",
         index,
         command,
         status: result.status,
         exitCode: result.exitCode,
         signal: result.signal,
         durationMs: result.durationMs
-      });
+        });
+      }
     }
     emit("worker_finished", { parentEventId: workerStartedEventId, workerId, worker: "command_runner" });
   }
@@ -146,7 +207,7 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
   const originalAfter = await gitSnapshot(repoPath);
   const mutationVerdict = mutationVerdictFor(originalBefore, originalAfter);
   const workspaceChangeSummary = await computeWorkspaceChangeSummary(workspacePath, workspaceBefore);
-  status = finalStatus(status, commandResults, mutationVerdict);
+  status = finalStatus(status, setupResults, commandResults, mutationVerdict);
   const finishedAt = new Date().toISOString();
   const durationMs = Date.parse(finishedAt) - Date.parse(startedAt);
   const cliExitCode = cliExitCodeFor(cliExitPolicy, status);
@@ -174,6 +235,8 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
     repoPath,
     timeoutMs,
     maxLogBytes,
+    setupCommandsRequested: setupCommands.length,
+    mainCommandsRequested: options.commands.length,
     originalBefore,
     originalAfter,
     mutationVerdict,
@@ -182,6 +245,7 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
     cliExitPolicy,
     cliExitCode,
     commandPolicy,
+    setupResults,
     commandResults,
     safetyReport,
     markArtifact
@@ -194,7 +258,7 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
   await markArtifact("packet-manifest.json");
   await writeFile(join(packetDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
 
-  return { runId, status, packetDir, repoPath, workspacePath, cliExitPolicy, cliExitCode, commandResults, safetyReport };
+  return { runId, status, packetDir, repoPath, workspacePath, cliExitPolicy, cliExitCode, setupResults, commandResults, safetyReport };
 }
 
 export function renderExternalCommandCheckCliSummary(result: ExternalCommandCheckResult): string {
@@ -208,13 +272,21 @@ export function renderExternalCommandCheckCliSummary(result: ExternalCommandChec
     `Repo: ${result.repoPath}`,
     `Packet: ${result.packetDir}`,
     "",
+    "Setup:",
+    ...(result.setupResults.length > 0
+      ? result.setupResults.map((command) => `${command.index}. ${command.command} - ${command.status}`)
+      : ["No setup commands requested."]),
+    "",
     "Commands:",
-    ...result.commandResults.map((command) => `${command.index}. ${command.command} - ${command.status}`),
+    ...(result.commandResults.length > 0
+      ? result.commandResults.map((command) => `${command.index}. ${command.command} - ${command.status}`)
+      : ["Main commands skipped or not run."]),
     "",
     `Original repo: ${result.safetyReport.originalRepoMutationVerdict}`,
     "",
     "Key artifacts:",
     "- summary.md",
+    "- setup-results.json",
     "- command-results.json",
     "- logs/",
     "- events.jsonl",
@@ -226,6 +298,7 @@ export function renderExternalCommandCheckCliSummary(result: ExternalCommandChec
 function validateOptions(options: ExternalCommandCheckOptions): void {
   if (!options.repo) throw new Error("--repo is required.");
   if (!options.commands || options.commands.length === 0) throw new Error("At least one --command is required.");
+  if (options.setupCommands?.some((command) => command.trim().length === 0)) throw new Error("--setup-command values must be non-empty.");
   if (options.commands.some((command) => command.trim().length === 0)) throw new Error("--command values must be non-empty.");
   if (options.timeoutMs !== undefined && (!Number.isInteger(options.timeoutMs) || options.timeoutMs <= 0)) {
     throw new Error("--timeout-ms must be a positive integer.");
@@ -248,61 +321,6 @@ async function assertDirectory(path: string, field: string): Promise<void> {
   }
 }
 
-function blockedCommandReports(commands: string[]): Array<{ index: number; command: string; reason: string }> {
-  const reports: Array<{ index: number; command: string; reason: string }> = [];
-  commands.forEach((command, offset) => {
-    const safety = validateCommandSafety(command);
-    const policyBlock = blockedExternalCommandReason(command);
-    const reason = safety?.reason ?? policyBlock;
-    if (reason) reports.push({ index: offset + 1, command, reason });
-  });
-  return reports;
-}
-
-function blockedExternalCommandReason(command: string): string | undefined {
-  if (/\bgit\s+push\b/.test(command)) return "Blocked external check command: git push is not allowed.";
-  if (/\bgit\s+merge\b/.test(command)) return "Blocked external check command: git merge is not allowed.";
-  if (/\bdeploy\b/.test(command)) return "Blocked external check command: deploy commands are not allowed.";
-  return undefined;
-}
-
-function blockedResult(blocked: { index: number; command: string; reason: string }, cwd: string, runId: string): CommandResult {
-  const now = new Date().toISOString();
-  return {
-    commandId: `${runId}:command:${String(blocked.index).padStart(3, "0")}`,
-    index: blocked.index,
-    command: blocked.command,
-    cwd,
-    startedAt: now,
-    finishedAt: now,
-    durationMs: 0,
-    status: "blocked",
-    exitCode: null,
-    signal: null,
-    timedOut: false,
-    stdoutPath: `logs/command-${String(blocked.index).padStart(3, "0")}.stdout.log`,
-    stderrPath: `logs/command-${String(blocked.index).padStart(3, "0")}.stderr.log`,
-    stdoutBytes: 0,
-    stderrBytes: 0,
-    stdoutTruncated: false,
-    stderrTruncated: false,
-    blockReason: blocked.reason
-  };
-}
-
-function finalStatus(current: ExternalCheckStatus, commandResults: CommandResult[], mutationVerdict: string): ExternalCheckStatus {
-  if (mutationVerdict === "changed") return "error";
-  if (current === "blocked") return "blocked";
-  if (commandResults.some((result) => result.status === "timed_out")) return "timed_out";
-  if (commandResults.some((result) => result.status === "error")) return "error";
-  if (commandResults.some((result) => result.status === "failed")) return "failed";
-  return "passed";
-}
-
-function defaultOutDir(): string {
-  return join(process.cwd(), "artifacts", "external-check");
-}
-
 async function computeWorkspaceChangeSummary(
   workspacePath: string | undefined,
   workspaceBefore: WorkspaceFileSnapshot | undefined
@@ -314,11 +332,6 @@ async function computeWorkspaceChangeSummary(
   } catch (error) {
     return unknownWorkspaceChangeSummary(errorMessage(error));
   }
-}
-
-function cliExitCodeFor(policy: CliExitPolicy, status: ExternalCheckStatus): number {
-  if (policy === "packet") return 0;
-  return status === "passed" ? 0 : 1;
 }
 
 function errorMessage(error: unknown): string {

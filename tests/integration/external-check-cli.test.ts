@@ -180,6 +180,140 @@ describe("external check CLI", () => {
     expect(await gitStatus(repo)).toEqual(before);
   });
 
+  it("runs explicit setup commands in the disposable workspace before main commands", async () => {
+    const repo = await createGitFixtureRepo();
+    const before = await gitStatus(repo);
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-external-check-setup-pass-"));
+
+    await runCli([
+      "external", "check",
+      "--repo", repo,
+      "--setup-command", "node -e \"require('fs').writeFileSync('prepared.txt', 'ready')\"",
+      "--command", "node -e \"console.log(require('fs').readFileSync('prepared.txt', 'utf8'))\"",
+      "--out", outDir
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    await access(join(packetDir, "setup-results.json"));
+    await access(join(packetDir, "logs/setup-001.stdout.log"));
+    await access(join(packetDir, "logs/setup-001.stderr.log"));
+    const setupResults = JSON.parse(await readFile(join(packetDir, "setup-results.json"), "utf8")) as {
+      commands: Array<{ phase: string; status: string; stdoutPath: string; stderrPath: string }>;
+    };
+    expect(setupResults.commands[0]).toMatchObject({
+      phase: "setup",
+      status: "passed",
+      stdoutPath: "logs/setup-001.stdout.log",
+      stderrPath: "logs/setup-001.stderr.log"
+    });
+    const run = JSON.parse(await readFile(join(packetDir, "run.json"), "utf8")) as {
+      status: string;
+      setupCommands: Array<{ phase: string; status: string }>;
+      commands: Array<{ phase: string; status: string }>;
+    };
+    expect(run.status).toBe("passed");
+    expect(run.setupCommands[0]).toMatchObject({ phase: "setup", status: "passed" });
+    expect(run.commands[0]).toMatchObject({ phase: "main", status: "passed" });
+    const metrics = JSON.parse(await readFile(join(packetDir, "metrics.json"), "utf8")) as {
+      setupCommandsRequested: number;
+      setupCommandsRun: number;
+      setupCommandsPassed: number;
+      setupCommandsFailed: number;
+      commandsRun: number;
+      commands: Array<{ phase: string }>;
+    };
+    expect(metrics).toMatchObject({
+      setupCommandsRequested: 1,
+      setupCommandsRun: 1,
+      setupCommandsPassed: 1,
+      setupCommandsFailed: 0,
+      commandsRun: 1
+    });
+    expect(metrics.commands.map((command) => command.phase)).toEqual(["setup", "main"]);
+    const safety = JSON.parse(await readFile(join(packetDir, "safety-report.json"), "utf8")) as {
+      setupCommandsUserProvided: boolean;
+      originalRepoMutationAllowed: boolean;
+      setupMayUseNetwork: string;
+      originalRepoMutationVerdict: string;
+    };
+    expect(safety).toMatchObject({
+      setupCommandsUserProvided: true,
+      originalRepoMutationAllowed: false,
+      originalRepoMutationVerdict: "unchanged"
+    });
+    expect(["unknown", "yes", "no"]).toContain(safety.setupMayUseNetwork);
+    expect(await readFile(join(packetDir, "logs/command-001.stdout.log"), "utf8")).toContain("ready");
+    await expect(access(join(repo, "prepared.txt"))).rejects.toThrow();
+    expect(await gitStatus(repo)).toEqual(before);
+  });
+
+  it("records setup failure and skips main commands by default", async () => {
+    const repo = await createGitFixtureRepo();
+    const before = await gitStatus(repo);
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-external-check-setup-fail-"));
+
+    await runCli([
+      "external", "check",
+      "--repo", repo,
+      "--setup-command", "node -e \"console.error('setup dependency missing'); process.exit(3)\"",
+      "--command", "node -e \"require('fs').writeFileSync('should-not-run.txt', 'bad')\"",
+      "--out", outDir
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    const run = JSON.parse(await readFile(join(packetDir, "run.json"), "utf8")) as {
+      status: string;
+      setupCommands: Array<{ status: string; phase: string }>;
+      commands: Array<unknown>;
+    };
+    expect(run.status).toBe("setup_failed");
+    expect(run.setupCommands[0]).toMatchObject({ phase: "setup", status: "failed" });
+    expect(run.commands).toHaveLength(0);
+    await expect(access(join(packetDir, "logs/command-001.stdout.log"))).rejects.toThrow();
+    const events = await readEvents(packetDir);
+    expect(events.some((event) => event.type === "setup_started")).toBe(true);
+    expect(events.some((event) => event.type === "setup_finished" && event.status === "setup_failed")).toBe(true);
+    expect(events.some((event) => event.type === "setup_skipped_main_commands")).toBe(true);
+    const summary = await readFile(join(packetDir, "summary.md"), "utf8");
+    expect(summary).toContain("Setup:");
+    expect(summary).toContain("Main commands skipped.");
+    expect(summary).toContain("Setup next action:");
+    const metrics = JSON.parse(await readFile(join(packetDir, "metrics.json"), "utf8")) as { commandsRequested: number; commandsRun: number };
+    expect(metrics).toMatchObject({ commandsRequested: 1, commandsRun: 0 });
+    expect(await gitStatus(repo)).toEqual(before);
+    await expect(access(join(repo, "should-not-run.txt"))).rejects.toThrow();
+  });
+
+  it("records setup timeout separately from main command timeouts", async () => {
+    const repo = await createGitFixtureRepo();
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-external-check-setup-timeout-"));
+
+    await runCli([
+      "external", "check",
+      "--repo", repo,
+      "--setup-command", "node -e \"setTimeout(() => {}, 2000)\"",
+      "--command", "node -e \"console.log('should not run')\"",
+      "--timeout-ms", "100",
+      "--out", outDir
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    const run = JSON.parse(await readFile(join(packetDir, "run.json"), "utf8")) as {
+      status: string;
+      setupCommands: Array<{ status: string; timedOut: boolean }>;
+      commands: Array<unknown>;
+    };
+    expect(run.status).toBe("setup_timed_out");
+    expect(run.setupCommands[0]).toMatchObject({ status: "timed_out", timedOut: true });
+    expect(run.commands).toHaveLength(0);
+    const metrics = JSON.parse(await readFile(join(packetDir, "metrics.json"), "utf8")) as {
+      setupCommandsTimedOut: number;
+      commandsTimedOut: number;
+    };
+    expect(metrics.setupCommandsTimedOut).toBe(1);
+    expect(metrics.commandsTimedOut).toBe(0);
+  });
+
   it("records workspace additions with filesystem snapshot diff and no copied-workspace git error", async () => {
     const repo = await createGitFixtureRepo();
     const outDir = await mkdtemp(join(tmpdir(), "runforge-external-check-mutation-"));
@@ -361,6 +495,60 @@ describe("external failure-triage CLI", () => {
       requiresMoreContext: true,
       readyForCodeProposal: false
     });
+  });
+
+  it("triages setup failure from setup logs and keeps readiness/code proposal gated", async () => {
+    const repo = await createGitFixtureRepo();
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-external-setup-chain-"));
+
+    await runCli([
+      "external", "proposal-readiness",
+      "--repo", repo,
+      "--setup-command", "node -e \"console.error('Local package.json exists, but node_modules missing.'); process.exit(1)\"",
+      "--command", "node -e \"console.log('main should not run')\"",
+      "--out", outDir
+    ]);
+
+    const readinessPacket = join(outDir, "packet");
+    const readinessRun = JSON.parse(await readFile(join(readinessPacket, "run.json"), "utf8")) as {
+      status: string;
+      failureCategory: string;
+      canAttemptCodeProposal: boolean;
+    };
+    expect(readinessRun).toMatchObject({
+      status: "needs_more_context",
+      failureCategory: "dependency_missing",
+      canAttemptCodeProposal: false
+    });
+    expect(await readFile(join(readinessPacket, "recommended-next-action.md"), "utf8")).toContain("setup/preflight logs");
+
+    const triagePacket = join(outDir, "triage-source", "packet");
+    const rootCause = JSON.parse(await readFile(join(triagePacket, "root-cause.json"), "utf8")) as {
+      sourceCheckStatus: string;
+      category: string;
+      readyForCodeProposal: boolean;
+      commands: Array<{ phase: string; stderrPath: string }>;
+    };
+    expect(rootCause).toMatchObject({
+      sourceCheckStatus: "setup_failed",
+      category: "dependency_missing",
+      readyForCodeProposal: false
+    });
+    expect(rootCause.commands[0]).toMatchObject({ phase: "setup", stderrPath: "logs/setup-001.stderr.log" });
+    expect(await readFile(join(triagePacket, "evidence-excerpts.md"), "utf8")).toContain("node_modules missing");
+
+    const codeOut = await mkdtemp(join(tmpdir(), "runforge-external-setup-code-"));
+    await runCli([
+      "external", "code-proposal",
+      "--from-readiness-packet", readinessPacket,
+      "--out", codeOut
+    ]);
+    const proposalStatus = JSON.parse(await readFile(join(codeOut, "packet", "proposal-status.json"), "utf8")) as {
+      outcome: string;
+      patchBytes: number;
+    };
+    expect(proposalStatus.outcome).toBe("not_ready");
+    expect(proposalStatus.patchBytes).toBe(0);
   });
 
   it("reports no_failure_observed for a passed packet", async () => {

@@ -2,10 +2,11 @@ import { spawn } from "node:child_process";
 import { createWriteStream } from "node:fs";
 import { mkdir } from "node:fs/promises";
 import { basename, join } from "node:path";
-import type { CommandResult, CommandStatus } from "./external-command-check-types.js";
+import type { CommandPhase, CommandResult, CommandStatus } from "./external-command-check-types.js";
 
 export async function runOneCommand(input: {
   commandId: string;
+  phase?: CommandPhase;
   index: number;
   command: string;
   cwd: string;
@@ -15,8 +16,10 @@ export async function runOneCommand(input: {
 }): Promise<CommandResult> {
   const startedAt = new Date().toISOString();
   const startMs = Date.now();
-  const stdoutPath = `logs/command-${String(input.index).padStart(3, "0")}.stdout.log`;
-  const stderrPath = `logs/command-${String(input.index).padStart(3, "0")}.stderr.log`;
+  const phase = input.phase ?? "main";
+  const logPrefix = phase === "setup" ? "setup" : "command";
+  const stdoutPath = `logs/${logPrefix}-${String(input.index).padStart(3, "0")}.stdout.log`;
+  const stderrPath = `logs/${logPrefix}-${String(input.index).padStart(3, "0")}.stderr.log`;
   const stdoutFullPath = join(input.logsDir, basename(stdoutPath));
   const stderrFullPath = join(input.logsDir, basename(stderrPath));
   await mkdir(input.logsDir, { recursive: true });
@@ -52,6 +55,7 @@ export async function runOneCommand(input: {
         const status: CommandStatus = spawnError ? "error" : timedOut ? "timed_out" : exitCode === 0 ? "passed" : "failed";
         resolveResult({
           commandId: input.commandId,
+          phase,
           index: input.index,
           command: input.command,
           cwd: input.cwd,
