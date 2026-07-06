@@ -19,7 +19,6 @@ const scopeTerms = [
   "saas",
   "hosted mode",
   "byoc",
-  "dashboard",
   "auto-fix",
   "autofix",
   "persona reviewer",

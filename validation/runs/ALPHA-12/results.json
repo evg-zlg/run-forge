@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "alpha-12-results",
+  "generatedAt": "2026-07-06T07:20:11.344Z",
+  "outputs": {
+    "index": "/tmp/runforge-alpha12-index",
+    "dashboard": "/tmp/runforge-alpha12-dashboard"
+  },
+  "checks": {
+    "dashboardSchemaVersion": "alpha-12-dashboard",
+    "dashboardRecords": 6,
+    "latestAlpha": "ALPHA-10",
+    "verifiedProposals": 3,
+    "rejectedProviderProposals": 3,
+    "originalReposUnchanged": true,
+    "indexHtmlIncludesSummary": true,
+    "indexHtmlIncludesRecords": true,
+    "missingSeedExitCode": 1,
+    "invalidSeedExitCode": 1
+  },
+  "commands": [
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet index --root /Users/evgeny/Documents/projects/RunForge/validation/runs --out /tmp/runforge-alpha12-index --dashboard-seed",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev dashboard build --seed /tmp/runforge-alpha12-index/dashboard-seed.json --out /tmp/runforge-alpha12-dashboard",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev dashboard build --seed /tmp/runforge-alpha12-missing-seed.json --out /tmp/runforge-alpha12-missing-dashboard",
+      "status": "passed",
+      "exitCode": 1
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev dashboard build --seed /tmp/runforge-alpha12-invalid-seed.json --out /tmp/runforge-alpha12-invalid-dashboard",
+      "status": "passed",
+      "exitCode": 1
+    }
+  ],
+  "errors": []
+}

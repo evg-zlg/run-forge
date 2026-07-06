@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { Command } from "commander";
 import { runForgeVersion } from "../core/version.js";
+import { dashboardCommand } from "./commands/dashboard.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { externalCommand } from "./commands/external.js";
 import { initCommand } from "./commands/init.js";
@@ -15,6 +16,7 @@ program
   .description("RunForge Agentic Engineering Harness")
   .version(runForgeVersion);
 
+program.addCommand(dashboardCommand());
 program.addCommand(doctorCommand());
 program.addCommand(externalCommand());
 program.addCommand(initCommand());

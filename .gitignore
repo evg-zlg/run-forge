@@ -30,6 +30,9 @@ validation/runs/*/*
 !validation/runs/ALPHA-11/
 !validation/runs/ALPHA-11/summary.md
 !validation/runs/ALPHA-11/results.json
+!validation/runs/ALPHA-12/
+!validation/runs/ALPHA-12/summary.md
+!validation/runs/ALPHA-12/results.json
 !validation/runs/PACKET-VALIDATION/summary.md
 !validation/runs/PACKET-VALIDATION/results.json
 .DS_Store
