@@ -1,6 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { DashboardSeedRecord, DashboardSeedResult } from "./packet-query.js";
+import { dashboardCss, dashboardJs } from "./dashboard-assets.js";
+import { countBy, isDoNotApplyOrUnsafe, isFailedOrUnsafe, latestAlpha, safetyLabels, searchableRecordText, stringField } from "./dashboard-record-utils.js";
 
 export interface DashboardBuildOptions {
   seed: string;
@@ -10,6 +12,10 @@ export interface DashboardBuildOptions {
 export interface DashboardRecord extends DashboardSeedRecord {
   notes: string;
   safetyLabels: string[];
+  validationEvidencePath: string;
+  providerAuditPath: string;
+  proposalPatchPath: string;
+  humanReviewPath: string;
 }
 
 export interface DashboardData {
@@ -87,11 +93,23 @@ async function readDashboardSeed(path: string): Promise<DashboardSeedResult> {
   return parsed;
 }
 
-function normalizeRecord(record: DashboardSeedRecord): DashboardSeedRecord & { notes: string } {
+type NormalizedDashboardSeedRecord = DashboardSeedRecord & {
+  notes: string;
+  validationEvidencePath: string;
+  providerAuditPath: string;
+  proposalPatchPath: string;
+  humanReviewPath: string;
+};
+
+function normalizeRecord(record: DashboardSeedRecord): NormalizedDashboardSeedRecord {
   return {
     ...record,
     tags: Array.isArray(record.tags) ? record.tags : [],
-    notes: stringField(record, "notes")
+    notes: stringField(record, "notes"),
+    validationEvidencePath: stringField(record, "validationEvidencePath"),
+    providerAuditPath: stringField(record, "providerAuditPath"),
+    proposalPatchPath: stringField(record, "proposalPatchPath"),
+    humanReviewPath: stringField(record, "humanReviewPath")
   };
 }
 
@@ -117,13 +135,14 @@ function renderDashboardHtml(data: DashboardData): string {
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>RunForge Operator Dashboard</title>
-  <style>${css()}</style>
+  <style>${dashboardCss()}</style>
 </head>
 <body>
   <header>
     <div>
       <p class="eyebrow">RunForge Alpha-12</p>
       <h1>Static Operator Dashboard</h1>
+      <p class="lede">Local-only dashboard. File links use browser-dependent <code>file://</code> URLs; every artifact path is also rendered as copyable text.</p>
     </div>
     <dl class="summary-grid">
       ${summaryMetric("Generated", data.generatedAt)}
@@ -136,6 +155,7 @@ function renderDashboardHtml(data: DashboardData): string {
     </dl>
   </header>
   <main>
+    ${renderFilters(data.records)}
     ${renderCountSection("By outcome", data.summary.byOutcome)}
     ${renderCountSection("By repo", data.summary.byRepo)}
     ${renderCountSection("By provider status", data.summary.byProviderStatus)}
@@ -145,9 +165,44 @@ function renderDashboardHtml(data: DashboardData): string {
     ${renderGroup("Failed / unsafe proposals", data.records.filter(isFailedOrUnsafe))}
     ${renderTable(data.records)}
   </main>
+  <script>${dashboardJs()}</script>
 </body>
 </html>
 `;
+}
+
+function renderFilters(records: DashboardRecord[]): string {
+  return `<section class="filters" aria-labelledby="filters-title">
+    <div class="section-title">
+      <h2 id="filters-title">Search and filters</h2>
+      <button id="reset-filters" type="button">Reset filters</button>
+    </div>
+    <div class="filter-grid">
+      <label>Search
+        <input id="dashboard-search" type="search" placeholder="repo, scenario, outcome, provider, notes, tags" autocomplete="off">
+      </label>
+      ${selectFilter("outcome-filter", "Outcome", unique(records.map((record) => record.outcome)))}
+      ${selectFilter("repo-filter", "Repo", unique(records.map((record) => record.repo)))}
+      ${selectFilter("provider-status-filter", "Provider status", unique(records.map((record) => record.providerStatus)))}
+      ${selectFilter("mutation-verdict-filter", "Mutation verdict", unique(records.map((record) => record.mutationVerdict)))}
+      ${selectFilter("alpha-filter", "Alpha / milestone", unique(records.map((record) => record.alpha)))}
+    </div>
+    <div class="filter-status" aria-live="polite">
+      <span>Total records: <strong id="total-records">${records.length}</strong></span>
+      <span>Visible records: <strong id="visible-records">${records.length}</strong></span>
+      <span>Active filters: <strong id="active-filters">none</strong></span>
+    </div>
+  </section>`;
+}
+
+function selectFilter(id: string, label: string, values: string[]): string {
+  const options = values.map((value) => `<option value="${escapeAttr(value)}">${escapeHtml(value)}</option>`).join("");
+  return `<label>${escapeHtml(label)}
+    <select id="${escapeAttr(id)}">
+      <option value="">All</option>
+      ${options}
+    </select>
+  </label>`;
 }
 
 function renderCountSection(title: string, counts: Record<string, number>): string {
@@ -161,84 +216,119 @@ function renderGroup(title: string, records: DashboardRecord[]): string {
 }
 
 function renderTable(records: DashboardRecord[]): string {
-  const rows = records.map((record) => `<tr>
+  const rows = records.map((record) => `<tr class="record-row ${rowClass(record)}" data-search="${escapeAttr(searchText(record))}" data-outcome="${escapeAttr(record.outcome)}" data-repo="${escapeAttr(record.repo)}" data-provider-status="${escapeAttr(record.providerStatus)}" data-mutation-verdict="${escapeAttr(record.mutationVerdict)}" data-alpha="${escapeAttr(record.alpha)}">
     <td>${escapeHtml(record.alpha)}</td>
     <td>${escapeHtml(record.repo)}</td>
     <td>${escapeHtml(record.scenario)}</td>
     <td>${escapeHtml(record.packetType)}</td>
-    <td>${escapeHtml(record.outcome)}</td>
-    <td>${escapeHtml(record.providerStatus)}</td>
-    <td>${escapeHtml(record.operatorVerdict)}</td>
-    <td>${escapeHtml(record.mutationVerdict)}</td>
+    <td>${outcomeBadge(record.outcome)}</td>
+    <td>${providerStatus(record)}</td>
+    <td>${operatorVerdict(record)}</td>
+    <td>${mutationVerdict(record)}</td>
     <td>${labels(record.safetyLabels)}</td>
-    <td>${link(record.packetPath)}</td>
-    <td>${link(record.viewerPath)}</td>
-    <td>${link(record.summaryPath)}</td>
+    <td>${artifactLink("Packet path", record.packetPath)}</td>
+    <td>${artifactLink("Viewer path", record.viewerPath)}</td>
+    <td>${artifactLink("Summary path", record.summaryPath)}</td>
+    <td>${renderDetails(record)}</td>
     <td>${escapeHtml(record.tags.join(", "))}</td>
     <td>${escapeHtml(record.notes ?? "")}</td>
   </tr>`).join("");
-  return `<section><h2>Records</h2><table class="records"><thead><tr><th>Alpha</th><th>Repo</th><th>Scenario</th><th>Packet type</th><th>Outcome</th><th>Provider</th><th>Operator verdict</th><th>Mutation</th><th>Safety</th><th>Packet</th><th>Viewer</th><th>Summary</th><th>Tags</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table></section>`;
-}
-
-function safetyLabels(record: DashboardSeedRecord): string[] {
-  const labels = new Set<string>();
-  if (record.mutationVerdict === "unchanged") labels.add("original repo unchanged");
-  if (record.operatorVerdict === "do_not_apply" || record.operatorVerdict === "no_apply") labels.add("do_not_apply");
-  if (record.providerStatus === "rejected" || record.outcome === "provider_rejected") labels.add("provider rejected");
-  if (record.outcome.includes("failed") || record.providerStatus.includes("failed")) labels.add("verification failed");
-  if (record.outcome === "proposal_ready_verified") labels.add("proposal_ready_verified");
-  if (isDoNotApplyOrUnsafe(record)) labels.add("unsafe/do_not_apply");
-  return [...labels].sort();
+  return `<section><h2>Records</h2><table class="records"><thead><tr><th>Alpha</th><th>Repo</th><th>Scenario</th><th>Packet type</th><th>Outcome</th><th>Provider</th><th>Operator verdict</th><th>Mutation</th><th>Safety</th><th>Packet</th><th>Viewer</th><th>Summary</th><th>Details</th><th>Tags</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table><p id="empty-state" class="empty-state" hidden>No records match the active filters.</p></section>`;
 }
 
 function labels(values: string[]): string {
-  return values.map((value) => `<span class="label">${escapeHtml(value)}</span>`).join(" ");
+  return values.map((value) => `<span class="label label-${labelClass(value)}">${escapeHtml(value)}</span>`).join(" ");
 }
 
-function link(path: string): string {
+function artifactLink(label: string, path: string): string {
   if (!path || path === "unknown") return "unknown";
   const href = path.startsWith("/") ? `file://${path}` : path;
-  return `<a href="${escapeHtml(href)}">${escapeHtml(basename(path) || path)}</a>`;
+  return `<div class="artifact"><a href="${escapeAttr(href)}">${escapeHtml(basename(path) || path)}</a><code aria-label="${escapeAttr(label)}">${escapeHtml(path)}</code></div>`;
 }
 
 function summaryMetric(label: string, value: string): string {
   return `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
 }
 
-function isFailedOrUnsafe(record: DashboardSeedRecord): boolean {
-  const text = `${record.outcome} ${record.providerStatus} ${record.operatorVerdict} ${record.mutationVerdict} ${record.tags.join(" ")}`.toLowerCase();
-  return text.includes("rejected") || text.includes("failed") || text.includes("unsafe") || text.includes("forbidden") || text.includes("do_not_apply");
+function renderDetails(record: DashboardRecord): string {
+  return `<details>
+    <summary>Evidence drilldown</summary>
+    <div class="details-body">
+      <p><strong>Operator verdict:</strong> ${escapeHtml(operatorVerdictText(record.operatorVerdict))}</p>
+      <p><strong>Provider status:</strong> ${escapeHtml(record.providerStatus)}</p>
+      <p><strong>Reason:</strong> ${escapeHtml(reasonFor(record))}</p>
+      <div class="artifact-list">
+        ${artifactRow("Packet path", record.packetPath)}
+        ${artifactRow("Viewer path", record.viewerPath)}
+        ${artifactRow("Summary path", record.summaryPath)}
+        ${artifactRow("Validation evidence path", record.validationEvidencePath)}
+        ${artifactRow("Provider audit path", record.providerAuditPath)}
+        ${artifactRow("Proposal patch path", record.proposalPatchPath)}
+        ${artifactRow("Human review path", record.humanReviewPath)}
+      </div>
+      <p><strong>Safety notes:</strong> ${escapeHtml(record.safetyLabels.join(", ") || "none")}</p>
+      <pre>${escapeHtml(JSON.stringify(record, null, 2))}</pre>
+    </div>
+  </details>`;
 }
 
-function isDoNotApplyOrUnsafe(record: DashboardSeedRecord): boolean {
-  const text = `${record.outcome} ${record.operatorVerdict} ${record.tags.join(" ")}`.toLowerCase();
-  return text.includes("do_not_apply") || text.includes("unsafe") || text.includes("forbidden");
+function artifactRow(label: string, path: string): string {
+  return `<div><strong>${escapeHtml(label)}:</strong> ${artifactLink(label, path || "unknown")}</div>`;
 }
 
-function latestAlpha(alphas: string[]): string {
-  return [...new Set(alphas)].sort((a, b) => alphaNumber(a) - alphaNumber(b) || a.localeCompare(b)).at(-1) ?? "unknown";
+function outcomeBadge(outcome: string): string {
+  return `<span class="outcome outcome-${labelClass(outcome)}">${escapeHtml(outcome)}</span>`;
 }
 
-function alphaNumber(alpha: string): number {
-  const match = /^ALPHA-(\d+)/.exec(alpha);
-  return match ? Number(match[1]) : -1;
+function providerStatus(record: DashboardRecord): string {
+  return `<span class="${record.providerStatus === "rejected" ? "danger-text" : ""}">${escapeHtml(record.providerStatus)}</span>`;
 }
 
-function countBy<T>(items: T[], keyFor: (item: T) => string): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const item of items) counts[keyFor(item) || "unknown"] = (counts[keyFor(item) || "unknown"] ?? 0) + 1;
-  return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
+function operatorVerdict(record: DashboardRecord): string {
+  return `<span class="${isDoNotApplyVerdict(record.operatorVerdict) ? "danger-text" : ""}">${escapeHtml(operatorVerdictText(record.operatorVerdict))}</span>`;
+}
+
+function mutationVerdict(record: DashboardRecord): string {
+  return record.mutationVerdict === "unchanged" ? `<span class="safe-text">unchanged</span>` : escapeHtml(record.mutationVerdict);
+}
+
+function operatorVerdictText(verdict: string): string {
+  if (verdict === "do_not_apply") return "DO NOT APPLY";
+  if (verdict === "no_apply") return "NO AUTO-APPLY";
+  return verdict;
+}
+
+function reasonFor(record: DashboardRecord): string {
+  const priority = ["forbidden_path", "malformed_diff", "dry_run_apply_failed", "verification_failed", "provider_rejected", "do_not_apply"];
+  return priority.find((label) => record.safetyLabels.includes(label)) ?? record.outcome;
+}
+
+function rowClass(record: DashboardRecord): string {
+  if (record.safetyLabels.includes("do_not_apply") || record.safetyLabels.includes("provider_rejected") || record.safetyLabels.includes("forbidden_path")) return "record-danger";
+  if (record.outcome === "proposal_ready_verified") return "record-ready";
+  return "record-neutral";
+}
+
+function searchText(record: DashboardRecord): string {
+  return searchableRecordText(record);
+}
+
+function labelClass(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "unknown";
+}
+
+function isDoNotApplyVerdict(verdict: string): boolean {
+  return verdict === "do_not_apply";
 }
 
 function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;");
 }
 
-function stringField(record: DashboardSeedRecord, key: string): string {
-  const value = (record as unknown as Record<string, unknown>)[key];
-  return typeof value === "string" ? value : "";
+function escapeAttr(value: string): string {
+  return escapeHtml(value).replaceAll("'", "&#39;");
 }
 
-function css(): string {
-  return `body{font-family:Arial,sans-serif;margin:0;background:#f6f7f9;color:#18202a}header{background:#17212f;color:#fff;padding:28px 32px}main{padding:24px 32px}h1{margin:0;font-size:28px}h2{font-size:18px;margin:0 0 12px}.eyebrow{margin:0 0 6px;color:#a7c7ff;text-transform:uppercase;font-size:12px}.summary-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:12px;margin:22px 0 0}.summary-grid div,section{background:#fff;color:#18202a;border:1px solid #d9dee7;border-radius:6px}.summary-grid div{padding:12px}.summary-grid dt{font-size:12px;color:#5c6675}.summary-grid dd{margin:4px 0 0;font-weight:700}section{padding:16px;margin:0 0 16px;overflow:auto}table{border-collapse:collapse;width:100%;font-size:13px}th,td{border-bottom:1px solid #e4e8ef;text-align:left;padding:8px;vertical-align:top}th{background:#eef2f7}.counts{max-width:620px}.record-list{margin:0;padding-left:18px}.record-list li{margin:6px 0}.record-list span,.label{display:inline-block;background:#eef2f7;border:1px solid #d1d8e3;border-radius:4px;padding:2px 6px;margin:1px;color:#273142}a{color:#0759b8}`;
+function unique(values: string[]): string[] {
+  return [...new Set(values.filter(Boolean))].sort((a, b) => a.localeCompare(b));
 }
