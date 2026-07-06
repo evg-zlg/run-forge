@@ -1,0 +1,97 @@
+{
+  "schemaVersion": "alpha-16-results",
+  "verdict": "passed",
+  "implementation": {
+    "baseSha": "af1fc9580a0ca5a7f0e9ccd64c99bfe6fe6f2085",
+    "setupCliSupported": true,
+    "repeatedSetupCommandsSupported": true,
+    "setupRunsOnlyInDisposableWorkspace": true,
+    "automaticInstallEnabled": false,
+    "combinedCodeProposalPassThrough": true
+  },
+  "artifacts": {
+    "setupResults": "setup-results.json",
+    "setupStdoutLog": "logs/setup-001.stdout.log",
+    "setupStderrLog": "logs/setup-001.stderr.log",
+    "summaryIncludesSetupPhase": true,
+    "safetyReportIncludesSetupFields": true
+  },
+  "scenarios": [
+    {
+      "id": "setup-pass-main-pass",
+      "status": "passed",
+      "mainCommandsRun": 1,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true
+    },
+    {
+      "id": "setup-pass-main-fail",
+      "status": "failed",
+      "mainCommandsRun": 1,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true
+    },
+    {
+      "id": "setup-fail-main-skipped",
+      "status": "setup_failed",
+      "mainCommandsRun": 0,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true
+    },
+    {
+      "id": "setup-timeout",
+      "status": "setup_timed_out",
+      "mainCommandsRun": 0,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true
+    },
+    {
+      "id": "setup-logs-persisted",
+      "status": "passed",
+      "mainCommandsRun": 1,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true
+    },
+    {
+      "id": "original-repo-unchanged",
+      "status": "passed",
+      "mainCommandsRun": 1,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true
+    },
+    {
+      "id": "triage-setup-failure",
+      "status": "needs_more_context",
+      "mainCommandsRun": 0,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true
+    },
+    {
+      "id": "readiness-setup-failure",
+      "status": "needs_more_context",
+      "mainCommandsRun": 0,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true,
+      "readinessOutcome": "needs_more_context"
+    },
+    {
+      "id": "code-proposal-refuses-setup-failure",
+      "status": "not_ready",
+      "mainCommandsRun": 0,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true,
+      "codeProposalOutcome": "not_ready"
+    },
+    {
+      "id": "packet-validation",
+      "status": "passed",
+      "mainCommandsRun": 1,
+      "setupCommandsRun": 1,
+      "originalRepoUnchanged": true
+    }
+  ],
+  "validationCommands": [
+    "pnpm exec vitest run tests/integration/external-check-cli.test.ts",
+    "pnpm validation:alpha16"
+  ]
+}

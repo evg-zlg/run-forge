@@ -27,6 +27,7 @@ export type ProposalReadinessOutcome =
 export interface ExternalProposalReadinessOptions {
   fromTriagePacket?: string;
   repo?: string;
+  setupCommands?: string[];
   commands?: string[];
   out?: string;
   timeoutMs?: number;
@@ -226,6 +227,7 @@ function validateOptions(options: ExternalProposalReadinessOptions): void {
   if (!hasPacket && (!options.commands || options.commands.length === 0)) {
     throw new Error("At least one --command is required when --from-triage-packet is not provided.");
   }
+  if (options.setupCommands?.some((command) => command.trim().length === 0)) throw new Error("--setup-command values must be non-empty.");
   if (options.commands?.some((command) => command.trim().length === 0)) throw new Error("--command values must be non-empty.");
 }
 
@@ -238,6 +240,7 @@ async function createSourceTriagePacket(
   emit("source_triage_started", { triageOut });
   const result = await runExternalFailureTriage({
     repo: options.repo,
+    setupCommands: options.setupCommands,
     commands: options.commands,
     out: triageOut,
     timeoutMs: options.timeoutMs,
@@ -268,7 +271,6 @@ export interface ReadinessDecision {
   missingContext: string[];
   recommendedNextAction: string;
 }
-
 function decideReadiness(rootCause: TriageRootCause, triageRun: TriageRun | null, safety: TriageSafetyReport | null): ReadinessDecision {
   const failureCategory = rootCause.category ?? triageRun?.category ?? "unknown_failure";
   const confidence = rootCause.confidence ?? triageRun?.confidence ?? "low";
@@ -342,7 +344,6 @@ function hasSafetyBlocker(safety: TriageSafetyReport | null): boolean {
   if (safety.originalRepoMutationVerdict === "changed") return true;
   return safety.noPushAttempted === false || safety.noMergeAttempted === false || safety.noDeployAttempted === false || safety.noApplyToOriginalRepoAttempted === false;
 }
-
 function defaultOutDir(): string {
   return join(process.cwd(), "artifacts", "external-proposal-readiness");
 }

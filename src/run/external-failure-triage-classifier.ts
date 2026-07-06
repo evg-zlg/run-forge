@@ -18,6 +18,8 @@ export function analyzeFailure(sourceRun: ExternalFailureTriageSourceRun, eviden
       safeNextAction: "Preserve the packet as passing evidence; no failure triage action is needed."
     };
   }
+  const setupPacketClassification = setupFailureClassification(sourceRun, evidence);
+  if (setupPacketClassification) return setupPacketClassification;
   if (evidence.some((item) => item.timedOut || item.status === "timed_out")) {
     return classification(
       "timeout",
@@ -148,6 +150,30 @@ function environmentSetupClassification(combined: string, evidence: FailureEvide
   );
 }
 
+function setupFailureClassification(sourceRun: ExternalFailureTriageSourceRun, evidence: FailureEvidence[]): FailureTriageAnalysis | null {
+  const status = sourceRun.status ?? "";
+  const setupEvidence = evidence.filter((item) => item.phase === "setup" || item.commandId.includes(":setup:"));
+  if (!status.startsWith("setup_") && setupEvidence.length === 0) return null;
+  const combined = setupEvidence.map((item) => `${item.command}\n${item.stdoutExcerpt}\n${item.stderrExcerpt}`).join("\n");
+  const dependency = environmentSetupClassification(combined, setupEvidence);
+  if (dependency) {
+    return {
+      ...dependency,
+      probableRootCause: `Setup/preflight failed before main commands ran. ${dependency.probableRootCause}`,
+      safeNextAction: "Inspect setup/preflight logs, correct the dependency preparation command, then rerun before attempting a code proposal."
+    };
+  }
+  return classification(
+    "environment_error",
+    "high",
+    "Setup/preflight failed before main commands ran, so the packet does not yet provide source-fix evidence.",
+    setupEvidence.length > 0 ? setupEvidence : evidence,
+    "Inspect setup/preflight logs, correct the setup command or disposable workspace environment, then rerun before attempting a code proposal.",
+    true,
+    false
+  );
+}
+
 function hasMissingExternalPackage(text: string): boolean {
   if (/(ERR_MODULE_NOT_FOUND|MODULE_NOT_FOUND)/i.test(text)) return true;
   const packagePatterns = [
@@ -181,7 +207,7 @@ function classification(
     category,
     confidence,
     probableRootCause,
-    evidenceBasis: evidence.map((item) => `Command ${item.index} (${item.status}) ${item.command}`),
+    evidenceBasis: evidence.map((item) => `${item.phase === "setup" ? "Setup" : "Command"} ${item.index} (${item.status}) ${item.command}`),
     requiresMoreContext,
     readyForCodeProposal,
     safeNextAction

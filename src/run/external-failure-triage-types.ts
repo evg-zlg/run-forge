@@ -21,6 +21,7 @@ export type FailureTriageStatus = "triaged" | "no_failure_observed" | "needs_mor
 export interface ExternalFailureTriageOptions {
   fromCheckPacket?: string;
   repo?: string;
+  setupCommands?: string[];
   commands?: string[];
   out?: string;
   timeoutMs?: number;
@@ -30,6 +31,7 @@ export interface ExternalFailureTriageOptions {
 
 export interface FailureEvidence {
   commandId: string;
+  phase?: CommandResult["phase"];
   index: number;
   command: string;
   status: CommandResult["status"];

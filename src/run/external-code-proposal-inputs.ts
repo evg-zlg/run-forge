@@ -22,6 +22,7 @@ export function validateOptions(options: ExternalCodeProposalOptions): void {
   if (hasPacket && hasRepoCommand) throw new Error("Use either --from-readiness-packet or --repo with --command, not both.");
   if (!hasPacket && !options.repo) throw new Error("--repo is required when --from-readiness-packet is not provided.");
   if (!hasPacket && (!options.commands || options.commands.length === 0)) throw new Error("At least one --command is required when --from-readiness-packet is not provided.");
+  if (options.setupCommands?.some((command) => command.trim().length === 0)) throw new Error("--setup-command values must be non-empty.");
   if (options.commands?.some((command) => command.trim().length === 0)) throw new Error("--command values must be non-empty.");
 }
 
@@ -34,6 +35,7 @@ export async function createSourceReadinessPacket(
   emit("source_readiness_started", { readinessOut });
   const result = await runExternalProposalReadiness({
     repo: options.repo,
+    setupCommands: options.setupCommands,
     commands: options.commands,
     out: readinessOut,
     timeoutMs: options.timeoutMs,

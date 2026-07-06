@@ -99,6 +99,7 @@ export async function runExternalFailureTriage(options: ExternalFailureTriageOpt
     safeNextAction: analysis.safeNextAction,
     commands: evidence.map((item) => ({
       commandId: item.commandId,
+      phase: item.phase,
       index: item.index,
       command: item.command,
       status: item.status,
@@ -238,6 +239,7 @@ function validateOptions(options: ExternalFailureTriageOptions): void {
   if (!hasPacket && (!options.commands || options.commands.length === 0)) {
     throw new Error("At least one --command is required when --from-check-packet is not provided.");
   }
+  if (options.setupCommands?.some((command) => command.trim().length === 0)) throw new Error("--setup-command values must be non-empty.");
   if (options.commands?.some((command) => command.trim().length === 0)) throw new Error("--command values must be non-empty.");
 }
 
@@ -250,6 +252,7 @@ async function createSourceCheckPacket(
   emit("source_check_started", { checkOut });
   const result = await runExternalCommandCheck({
     repo: options.repo!,
+    setupCommands: options.setupCommands,
     commands: options.commands!,
     out: checkOut,
     timeoutMs: options.timeoutMs,
@@ -267,13 +270,23 @@ async function readSourceRun(packetDir: string): Promise<ExternalFailureTriageSo
 }
 
 async function readCommandResults(packetDir: string, sourceRun: ExternalFailureTriageSourceRun): Promise<CommandResult[]> {
+  const setupResults = await readSetupResults(packetDir);
   try {
     const results = JSON.parse(await readFile(join(packetDir, "command-results.json"), "utf8")) as { commands?: CommandResult[] };
-    if (Array.isArray(results.commands)) return results.commands;
+    if (Array.isArray(results.commands)) return [...setupResults, ...results.commands];
   } catch {
     // Fall back to run.json below.
   }
-  return Array.isArray(sourceRun.commands) ? sourceRun.commands : [];
+  return [...setupResults, ...(Array.isArray(sourceRun.commands) ? sourceRun.commands : [])];
+}
+
+async function readSetupResults(packetDir: string): Promise<CommandResult[]> {
+  try {
+    const results = JSON.parse(await readFile(join(packetDir, "setup-results.json"), "utf8")) as { commands?: CommandResult[] };
+    return Array.isArray(results.commands) ? results.commands : [];
+  } catch {
+    return [];
+  }
 }
 
 async function collectEvidence(packetDir: string, commandResults: CommandResult[]): Promise<FailureEvidence[]> {
@@ -281,6 +294,7 @@ async function collectEvidence(packetDir: string, commandResults: CommandResult[
   const selected = interesting.length > 0 ? interesting : commandResults;
   return Promise.all(selected.map(async (result) => ({
     commandId: result.commandId,
+    phase: result.phase,
     index: result.index,
     command: result.command,
     status: result.status,

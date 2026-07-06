@@ -50,11 +50,13 @@ export function buildSafetyReport(input: {
     originalRepoAfter: input.originalAfter,
     originalRepoMutationVerdict: input.mutationVerdict,
     workspacePath: input.workspacePath,
-    noPushAttempted: !input.options.commands.some((command) => /\bgit\s+push\b/.test(command)),
-    noMergeAttempted: !input.options.commands.some((command) => /\bgit\s+merge\b/.test(command)),
+    noPushAttempted: !allUserCommands(input.options).some((command) => /\bgit\s+push\b/.test(command)),
+    noMergeAttempted: !allUserCommands(input.options).some((command) => /\bgit\s+merge\b/.test(command)),
     noApplyToOriginalRepoAttempted: true,
-    noDeployAttempted: !input.options.commands.some((command) => /\bdeploy\b/.test(command)),
+    noDeployAttempted: !allUserCommands(input.options).some((command) => /\bdeploy\b/.test(command)),
     commandsUserProvidedViaCli: true,
+    setupCommandsUserProvided: (input.options.setupCommands?.length ?? 0) > 0,
+    setupMayUseNetwork: setupMayUseNetwork(input.options.setupCommands ?? []),
     secretsHandling: {
       deliberateSecretPrinting: false,
       note: "RunForge captures user-provided command stdout/stderr as evidence and does not deliberately print or expand secrets."
@@ -93,6 +95,8 @@ export async function writeArtifacts(input: {
   repoPath: string;
   timeoutMs: number;
   maxLogBytes: number;
+  setupCommandsRequested: number;
+  mainCommandsRequested: number;
   originalBefore: SafetyReport["originalRepoBefore"];
   originalAfter: SafetyReport["originalRepoAfter"];
   mutationVerdict: SafetyReport["originalRepoMutationVerdict"];
@@ -101,10 +105,17 @@ export async function writeArtifacts(input: {
   cliExitPolicy: CliExitPolicy;
   cliExitCode: number;
   commandPolicy: CommandPolicy;
+  setupResults: CommandResult[];
   commandResults: CommandResult[];
   safetyReport: SafetyReport;
   markArtifact: (path: string, artifactType?: string) => Promise<void>;
 }) {
+  await writeJson(join(input.packetDir, "setup-results.json"), {
+    schemaVersion: input.schemaVersion,
+    runId: input.runId,
+    commands: input.setupResults
+  });
+  await input.markArtifact("setup-results.json");
   await writeJson(join(input.packetDir, "command-results.json"), {
     schemaVersion: input.schemaVersion,
     runId: input.runId,
@@ -146,22 +157,9 @@ function buildRunJson(input: Parameters<typeof writeArtifacts>[0]) {
       mutationVerdict: input.mutationVerdict
     },
     workspace: { path: input.workspacePath, changeSummary: input.workspaceChangeSummary },
-    commands: input.commandResults.map((result) => ({
-      commandId: result.commandId,
-      index: result.index,
-      command: result.command,
-      status: result.status,
-      exitCode: result.exitCode,
-      signal: result.signal,
-      timedOut: result.timedOut,
-      durationMs: result.durationMs,
-      stdoutPath: result.stdoutPath,
-      stderrPath: result.stderrPath,
-      stdoutBytes: result.stdoutBytes,
-      stderrBytes: result.stderrBytes,
-      stdoutTruncated: result.stdoutTruncated,
-      stderrTruncated: result.stderrTruncated
-    })),
+    requested: { setupCommands: input.setupCommandsRequested, commands: input.mainCommandsRequested },
+    commands: input.commandResults.map(commandResultJson),
+    setupCommands: input.setupResults.map(commandResultJson),
     artifactDir: input.packetDir,
     defaults: { timeoutMs: input.timeoutMs, maxLogBytes: input.maxLogBytes }
   };
@@ -176,9 +174,51 @@ function buildTrajectory(input: Parameters<typeof writeArtifacts>[0]) {
     steps: [
       { type: "route_selected", route: "external_command_check" },
       { type: "workspace_prepared", status: input.workspacePath ? "finished" : "skipped" },
-      { type: "worker", worker: "command_runner", status: input.status === "blocked" ? "blocked" : "finished" },
+      { type: "setup", status: input.setupResults.length > 0 ? setupStepStatus(input.status) : "skipped", commands: input.setupResults.length },
+      { type: "worker", worker: "command_runner", status: input.status === "blocked" ? "blocked" : mainStepStatus(input.status) },
       { type: "safety_check", status: "finished" },
       { type: "summary", status: "written" }
     ]
   };
+}
+
+function commandResultJson(result: CommandResult) {
+  return {
+    commandId: result.commandId,
+    phase: result.phase,
+    index: result.index,
+    command: result.command,
+    status: result.status,
+    exitCode: result.exitCode,
+    signal: result.signal,
+    timedOut: result.timedOut,
+    durationMs: result.durationMs,
+    stdoutPath: result.stdoutPath,
+    stderrPath: result.stderrPath,
+    stdoutBytes: result.stdoutBytes,
+    stderrBytes: result.stderrBytes,
+    stdoutTruncated: result.stdoutTruncated,
+    stderrTruncated: result.stderrTruncated
+  };
+}
+
+function allUserCommands(options: ExternalCommandCheckOptions): string[] {
+  return [...(options.setupCommands ?? []), ...options.commands];
+}
+
+function setupMayUseNetwork(setupCommands: string[]): "unknown" | "yes" | "no" {
+  if (setupCommands.length === 0) return "no";
+  return setupCommands.some((command) => /\b(install|add|update|fetch|curl|wget|corepack|npx|pnpm|npm|yarn|bun)\b/i.test(command))
+    ? "yes"
+    : "unknown";
+}
+
+function setupStepStatus(status: ExternalCheckStatus): string {
+  if (status === "setup_failed" || status === "setup_timed_out" || status === "setup_error") return status;
+  return "setup_passed";
+}
+
+function mainStepStatus(status: ExternalCheckStatus): string {
+  if (status === "setup_failed" || status === "setup_timed_out" || status === "setup_error") return "skipped";
+  return "finished";
 }

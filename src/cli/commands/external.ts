@@ -19,6 +19,7 @@ function checkCommand(): Command {
   return new Command("check")
     .description("Run explicit local commands in a disposable external-repo workspace and write a trace packet.")
     .requiredOption("--repo <path>", "external local repository path")
+    .option("--setup-command <command>", "setup/preflight command to run in the disposable workspace before main commands; repeatable", collect, [])
     .requiredOption("--command <command>", "command to run in the disposable workspace; repeatable", collect, [])
     .option("--out <artifact-dir>", "artifact output directory")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds (default: 120000)", parsePositiveInteger)
@@ -29,6 +30,7 @@ function checkCommand(): Command {
       try {
         const result = await runExternalCommandCheck({
           repo: opts.repo as string,
+          setupCommands: opts.setupCommand as string[] | undefined,
           commands: opts.command as string[],
           out: opts.out as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,
@@ -49,6 +51,7 @@ function failureTriageCommand(): Command {
     .description("Analyze an external check packet or command failure and write a human-readable triage packet.")
     .option("--from-check-packet <packet-dir>", "existing external check packet directory")
     .option("--repo <path>", "external local repository path; requires --command when --from-check-packet is omitted")
+    .option("--setup-command <command>", "setup/preflight command passed to source external check; repeatable", collect, [])
     .option("--command <command>", "command to run through external check before triage; repeatable", collect, [])
     .option("--out <artifact-dir>", "artifact output directory")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds when running a source check", parsePositiveInteger)
@@ -59,6 +62,7 @@ function failureTriageCommand(): Command {
         const result = await runExternalFailureTriage({
           fromCheckPacket: opts.fromCheckPacket as string | undefined,
           repo: opts.repo as string | undefined,
+          setupCommands: opts.setupCommand as string[] | undefined,
           commands: opts.command as string[] | undefined,
           out: opts.out as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,
@@ -77,6 +81,7 @@ function proposalReadinessCommand(): Command {
     .description("Decide whether a failure triage packet is safe to advance to a proposal-only code patch.")
     .option("--from-triage-packet <packet-dir>", "existing external failure triage packet directory")
     .option("--repo <path>", "external local repository path; requires --command when --from-triage-packet is omitted")
+    .option("--setup-command <command>", "setup/preflight command passed to source external check; repeatable", collect, [])
     .option("--command <command>", "command to run through check and triage before readiness; repeatable", collect, [])
     .option("--out <artifact-dir>", "artifact output directory")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds when running source commands", parsePositiveInteger)
@@ -87,6 +92,7 @@ function proposalReadinessCommand(): Command {
         const result = await runExternalProposalReadiness({
           fromTriagePacket: opts.fromTriagePacket as string | undefined,
           repo: opts.repo as string | undefined,
+          setupCommands: opts.setupCommand as string[] | undefined,
           commands: opts.command as string[] | undefined,
           out: opts.out as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,
@@ -105,6 +111,7 @@ function codeProposalCommand(): Command {
     .description("Create and verify a proposal-only patch in a disposable workspace when readiness allows it.")
     .option("--from-readiness-packet <packet-dir>", "existing external proposal readiness packet directory")
     .option("--repo <path>", "external local repository path; requires --command when --from-readiness-packet is omitted")
+    .option("--setup-command <command>", "setup/preflight command passed to source external check; repeatable", collect, [])
     .option("--command <command>", "command to run through the combined flow and verification; repeatable", collect, [])
     .option("--out <artifact-dir>", "artifact output directory")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger)
@@ -118,6 +125,7 @@ function codeProposalCommand(): Command {
         const result = await runExternalCodeProposal({
           fromReadinessPacket: opts.fromReadinessPacket as string | undefined,
           repo: opts.repo as string | undefined,
+          setupCommands: opts.setupCommand as string[] | undefined,
           commands: opts.command as string[] | undefined,
           out: opts.out as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,

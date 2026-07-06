@@ -1,5 +1,6 @@
-export type ExternalCheckStatus = "passed" | "failed" | "timed_out" | "error" | "blocked";
+export type ExternalCheckStatus = "passed" | "failed" | "timed_out" | "error" | "blocked" | "setup_failed" | "setup_timed_out" | "setup_error";
 export type CommandStatus = "passed" | "failed" | "timed_out" | "error" | "blocked";
+export type CommandPhase = "setup" | "main";
 export type MutationVerdict = "unchanged" | "changed" | "unknown";
 export type CliExitPolicy = "packet" | "command-status";
 
@@ -12,6 +13,7 @@ export interface CommandPolicy {
 
 export interface ExternalCommandCheckOptions {
   repo: string;
+  setupCommands?: string[];
   commands: string[];
   out?: string;
   timeoutMs?: number;
@@ -28,12 +30,14 @@ export interface ExternalCommandCheckResult {
   workspacePath?: string;
   cliExitPolicy: CliExitPolicy;
   cliExitCode: number;
+  setupResults: CommandResult[];
   commandResults: CommandResult[];
   safetyReport: SafetyReport;
 }
 
 export interface CommandResult {
   commandId: string;
+  phase: CommandPhase;
   index: number;
   command: string;
   cwd: string;
@@ -74,6 +78,8 @@ export interface SafetyReport {
   noApplyToOriginalRepoAttempted: boolean;
   noDeployAttempted: boolean;
   commandsUserProvidedViaCli: boolean;
+  setupCommandsUserProvided: boolean;
+  setupMayUseNetwork: "unknown" | "yes" | "no";
   secretsHandling: {
     deliberateSecretPrinting: false;
     note: string;
