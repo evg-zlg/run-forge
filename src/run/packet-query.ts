@@ -90,6 +90,11 @@ export interface DashboardSeedRecord {
   packetPath: string;
   viewerPath: string;
   summaryPath: string;
+  validationEvidencePath?: string;
+  providerAuditPath?: string;
+  proposalPatchPath?: string;
+  humanReviewPath?: string;
+  notes?: string;
   tags: string[];
 }
 
@@ -246,6 +251,8 @@ function toQueryRecord(entry: PacketIndexEntry): PacketQueryRecord {
 }
 
 function toDashboardSeedRecord(entry: PacketIndexEntry, root: string): DashboardSeedRecord {
+  const packetArtifact = (name: string): string | undefined => entry.packetPath === "unknown" ? undefined : join(entry.packetPath, name);
+  const milestoneSummary = join(root, entry.milestone, "summary.md");
   return {
     id: `${entry.milestone}:${entry.scenario}`,
     alpha: entry.milestone,
@@ -258,7 +265,12 @@ function toDashboardSeedRecord(entry: PacketIndexEntry, root: string): Dashboard
     mutationVerdict: entry.externalRepoMutationVerdict,
     packetPath: entry.packetPath,
     viewerPath: entry.viewerPath,
-    summaryPath: join(root, entry.milestone, "summary.md"),
+    summaryPath: milestoneSummary,
+    validationEvidencePath: milestoneSummary,
+    providerAuditPath: packetArtifact("provider-safety-report.json"),
+    proposalPatchPath: packetArtifact("proposal.patch"),
+    humanReviewPath: packetArtifact("human-review.md"),
+    notes: entry.notes,
     tags: seedTags(entry)
   };
 }

@@ -1,0 +1,55 @@
+{
+  "schemaVersion": "alpha-13-results",
+  "generatedAt": "2026-07-06T15:59:24.591Z",
+  "outputs": {
+    "index": "/tmp/runforge-alpha13-index",
+    "dashboard": "/tmp/runforge-alpha13-dashboard",
+    "indexHtml": "/tmp/runforge-alpha13-dashboard/index.html",
+    "dashboardData": "/tmp/runforge-alpha13-dashboard/dashboard-data.json"
+  },
+  "checks": {
+    "dashboardSchemaVersion": "alpha-12-dashboard",
+    "dashboardRecords": 6,
+    "filtersTested": [
+      "text search",
+      "outcome",
+      "repo",
+      "provider status",
+      "mutation verdict",
+      "alpha/milestone"
+    ],
+    "expectedRecordsFound": [
+      "proposal_ready_verified",
+      "provider_rejected",
+      "smartsql",
+      "mutation:unchanged"
+    ],
+    "noBackendRequired": true,
+    "staticDashboardWorksFromGeneratedFiles": true,
+    "localLinksAndPathTextVerified": true,
+    "searchInput": true,
+    "outcomeFilter": true,
+    "repoFilter": true,
+    "providerStatusFilter": true,
+    "mutationVerdictFilter": true,
+    "alphaFilter": true,
+    "resetFiltersButton": true,
+    "detailsDrilldown": true,
+    "safetyLabels": true,
+    "noExternalNetworkDependencies": true,
+    "seedRecordCountMatchesDashboard": true
+  },
+  "commands": [
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet index --root /Users/evgeny/Documents/projects/RunForge/validation/runs --out /tmp/runforge-alpha13-index --dashboard-seed",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev dashboard build --seed /tmp/runforge-alpha13-index/dashboard-seed.json --out /tmp/runforge-alpha13-dashboard",
+      "status": "passed",
+      "exitCode": 0
+    }
+  ],
+  "errors": []
+}

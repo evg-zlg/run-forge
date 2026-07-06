@@ -29,11 +29,29 @@ describe("static dashboard builder", () => {
 
     expect(result.indexPath).toBe(join(out, "index.html"));
     expect(html).toContain("Total records");
+    expect(html).toContain('id="dashboard-search"');
+    expect(html).toContain('id="outcome-filter"');
+    expect(html).toContain('id="repo-filter"');
+    expect(html).toContain('id="provider-status-filter"');
+    expect(html).toContain('id="mutation-verdict-filter"');
+    expect(html).toContain('id="alpha-filter"');
+    expect(html).toContain('id="reset-filters"');
     expect(html).toContain("proposal_ready_verified");
     expect(html).toContain("provider_rejected");
+    expect(html).toContain("Provider status");
     expect(html).toContain("Operator verdict");
+    expect(html).toContain("DO NOT APPLY");
+    expect(html).toContain("Reason:");
     expect(html).toContain("do_not_apply");
-    expect(html).toContain("original repo unchanged");
+    expect(html).toContain("forbidden_path");
+    expect(html).toContain("Evidence drilldown");
+    expect(html).toContain("<details>");
+    expect(html).toContain("/tmp/runforge/packet");
+    expect(html).toContain("/tmp/runforge/viewer/index.html");
+    expect(html).toContain("/tmp/runforge/summary.md");
+    expect(html).toContain("/tmp/runforge/proposal.patch");
+    expect(html).toContain("/tmp/runforge/human-review.md");
+    expect(html).not.toContain("<script src=");
     expect(data.schemaVersion).toBe("alpha-12-dashboard");
     expect(data.sourceSeedPath).toBe(seedPath);
     expect(data.summary).toMatchObject({
@@ -46,7 +64,8 @@ describe("static dashboard builder", () => {
     expect(data.summary.byOutcome.provider_rejected).toBe(1);
     expect(data.records.some((record) => record.outcome === "proposal_ready_verified")).toBe(true);
     expect(data.records.some((record) => record.operatorVerdict === "do_not_apply")).toBe(true);
-    expect(data.records.flatMap((record) => record.safetyLabels)).toContain("provider rejected");
+    expect(data.records.flatMap((record) => record.safetyLabels)).toContain("provider_rejected");
+    expect(data.records.flatMap((record) => record.safetyLabels)).toContain("do_not_apply");
   });
 
   it("fails clearly on a missing seed", async () => {
@@ -135,6 +154,10 @@ function record(overrides: Record<string, unknown>): Record<string, unknown> {
     packetPath: "/tmp/runforge/packet",
     viewerPath: "/tmp/runforge/viewer/index.html",
     summaryPath: "/tmp/runforge/summary.md",
+    validationEvidencePath: "/tmp/runforge/validation.md",
+    providerAuditPath: "/tmp/runforge/provider-safety-report.json",
+    proposalPatchPath: "/tmp/runforge/proposal.patch",
+    humanReviewPath: "/tmp/runforge/human-review.md",
     notes: "dashboard fixture",
     ...overrides
   };
