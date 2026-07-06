@@ -87,8 +87,15 @@ describe("Alpha-6 gated provider proposal", () => {
       "--provider-command", providerPatchCommand(".env", "old", "secret"),
       "--out", outDir
     ]);
-    const status = JSON.parse(await readFile(join(outDir, "packet", "proposal-status.json"), "utf8")) as { outcome: string; providerStatus: string; patchBytes: number };
+    const packetDir = join(outDir, "packet");
+    const status = JSON.parse(await readFile(join(packetDir, "proposal-status.json"), "utf8")) as { outcome: string; providerStatus: string; patchBytes: number };
     expect(status).toMatchObject({ outcome: "provider_rejected", providerStatus: "rejected", patchBytes: 0 });
+    const safety = JSON.parse(await readFile(join(packetDir, "provider-safety-report.json"), "utf8")) as {
+      rejectionReason: string;
+      forbiddenPaths: string[];
+    };
+    expect(safety.rejectionReason).toContain("patch touches forbidden path: .env");
+    expect(safety.forbiddenPaths).toEqual([...new Set(safety.forbiddenPaths)]);
     expect(await readFile(join(repo, "state.txt"), "utf8")).toBe("bad\n");
   });
 

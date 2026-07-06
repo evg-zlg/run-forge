@@ -30,6 +30,7 @@
     "demo:packet-inspect": "tsx src/cli/index.ts packet inspect --packet ./artifacts/runs/external-code-proposal-demo/packet",
     "demo:packet-validate": "tsx src/cli/index.ts packet inspect --packet ./artifacts/runs/external-code-proposal-demo/packet --validate",
     "demo:packet-view": "tsx src/cli/index.ts packet view --packet ./artifacts/runs/external-code-proposal-demo/packet --out ./artifacts/runs/external-code-proposal-demo/viewer",
+    "demo:packet-view-index": "tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-demo-view-index && tsx src/cli/index.ts packet view-index --index /tmp/runforge-demo-view-index/index.json --out /tmp/runforge-demo-viewers",
     "demo:packet-query": "tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-demo-packet-query-index && tsx src/cli/index.ts packet query --index /tmp/runforge-demo-packet-query-index/index.json --out /tmp/runforge-demo-packet-query --outcome provider_rejected",
     "demo:latest-dogfood": "tsx src/cli/index.ts packet report latest --root ./validation/runs --out /tmp/runforge-demo-latest-dogfood",
     "demo:dashboard": "tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha14-demo-index --dashboard-seed && tsx src/cli/index.ts dashboard build --seed /tmp/runforge-alpha14-demo-index/dashboard-seed.json --out /tmp/runforge-alpha14-demo-dashboard && printf 'Index path: /tmp/runforge-alpha14-demo-index\\nDashboard HTML path: /tmp/runforge-alpha14-demo-dashboard/index.html\\nDashboard data path: /tmp/runforge-alpha14-demo-dashboard/dashboard-data.json\\n'",
@@ -55,7 +56,8 @@
     "validation:alpha11": "tsx scripts/alpha11-validation.ts",
     "validation:alpha12": "tsx scripts/alpha12-validation.ts",
     "validation:alpha13": "tsx scripts/alpha13-validation.ts",
-    "validation:alpha14": "tsx scripts/alpha14-validation.ts"
+    "validation:alpha14": "tsx scripts/alpha14-validation.ts",
+    "validation:alpha15": "tsx scripts/alpha15-validation.ts"
   },
   "keywords": [
     "agentic",

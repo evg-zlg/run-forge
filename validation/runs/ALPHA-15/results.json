@@ -1,0 +1,117 @@
+{
+  "schemaVersion": "alpha-15-results",
+  "generatedAt": "2026-07-06",
+  "trial": "runforge-alpha15-factory-external-operator",
+  "verdict": "useful_now",
+  "sourceArtifacts": {
+    "report": "/tmp/runforge-alpha15-factory-trial/operator-trial-report.md",
+    "results": "/tmp/runforge-alpha15-factory-trial/operator-trial-results.json"
+  },
+  "factory": {
+    "repo": "/Users/evgeny/Documents/projects/factory",
+    "before": {
+      "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "statusShort": ""
+    },
+    "after": {
+      "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "statusShort": ""
+    },
+    "remainedUnchanged": true,
+    "patchApplied": false
+  },
+  "runforge": {
+    "repo": "/Users/evgeny/Documents/projects/RunForge",
+    "headUsedInTrial": "27744f01c6172ec425b91b30dacee6b987f9b41f",
+    "statusShort": "",
+    "invocation": "pnpm --dir /Users/evgeny/Documents/projects/RunForge"
+  },
+  "trialRoot": "/tmp/runforge-alpha15-factory-trial",
+  "cases": [
+    {
+      "id": "case-1",
+      "name": "real_factory_typecheck_honest_no_proposal",
+      "repo": "/Users/evgeny/Documents/projects/factory",
+      "command": "pnpm typecheck",
+      "checkStatus": "failed",
+      "observedTriageCategory": "typecheck_error",
+      "expectedAlpha15Category": "dependency_missing_or_environment_error",
+      "observedReadinessOutcome": "ready_for_code_proposal",
+      "expectedAlpha15ReadinessOutcome": "needs_more_context",
+      "expectedAlpha15NextAction": "install_or_prepare_dependencies_in_disposable_workspace",
+      "codeOutcome": "no_safe_proposal",
+      "providerStatus": "disabled",
+      "proposalPatchPath": "/tmp/runforge-alpha15-factory-trial/case-1/code/packet/proposal.patch",
+      "proposalPatchBytes": 0,
+      "validation": "passed",
+      "operatorDecision": "reject",
+      "operatorVerdict": "do_not_apply",
+      "rationale": "Disposable workspace lacked dependencies and Node types; no source-code patch was justified.",
+      "packetPaths": {
+        "check": "/tmp/runforge-alpha15-factory-trial/case-1/check/packet",
+        "triage": "/tmp/runforge-alpha15-factory-trial/case-1/triage/packet",
+        "readiness": "/tmp/runforge-alpha15-factory-trial/case-1/readiness/packet",
+        "code": "/tmp/runforge-alpha15-factory-trial/case-1/code/packet"
+      },
+      "viewerPath": "/tmp/runforge-alpha15-factory-trial/case-1/code/viewer/index.html",
+      "inspectMermaidPath": "/tmp/runforge-alpha15-factory-trial/case-1/inspect.mmd",
+      "keyFinding": "Missing disposable-workspace dependencies were overclassified as source typecheck readiness."
+    },
+    {
+      "id": "case-2",
+      "name": "provider_forbidden_env_rejection",
+      "scenario": "provider proposes .env change",
+      "providerCommand": "node /tmp/runforge-alpha15-factory-trial/bad-env-provider.mjs",
+      "codeOutcome": "provider_rejected",
+      "providerStatus": "rejected",
+      "rejectionReason": "patch touches forbidden path: .env",
+      "proposalPatchPath": "/tmp/runforge-alpha15-factory-trial/case-2/code/packet/proposal.patch",
+      "proposalPatchBytes": 0,
+      "validation": "passed",
+      "operatorDecision": "reject",
+      "operatorVerdict": "do_not_apply",
+      "rationale": ".env is a forbidden path; provider output was rejected before apply.",
+      "packetPaths": {
+        "code": "/tmp/runforge-alpha15-factory-trial/case-2/code/packet",
+        "providerSafetyReport": "/tmp/runforge-alpha15-factory-trial/case-2/code/packet/provider-safety-report.json"
+      },
+      "viewerPath": "/tmp/runforge-alpha15-factory-trial/case-2/code/viewer/index.html",
+      "inspectMermaidPath": "/tmp/runforge-alpha15-factory-trial/case-2/inspect.mmd"
+    }
+  ],
+  "dashboardAndIndex": {
+    "indexMarkdown": "/tmp/runforge-alpha15-factory-trial/index/index.md",
+    "indexJson": "/tmp/runforge-alpha15-factory-trial/index/index.json",
+    "dashboardSeed": "/tmp/runforge-alpha15-factory-trial/index/dashboard-seed.json",
+    "queryMarkdown": "/tmp/runforge-alpha15-factory-trial/query/query.md",
+    "queryJson": "/tmp/runforge-alpha15-factory-trial/query/query.json",
+    "dashboardHtml": "/tmp/runforge-alpha15-factory-trial/dashboard/index.html",
+    "dashboardData": "/tmp/runforge-alpha15-factory-trial/dashboard/dashboard-data.json",
+    "indexedEntries": 5
+  },
+  "bugsFound": [
+    {
+      "severity": "medium",
+      "title": "Disposable dependency/setup failure classified as source typecheck readiness",
+      "detail": "pnpm typecheck failed because node_modules and Node types were missing in the disposable workspace, but triage reported high-confidence typecheck_error and readiness allowed code proposal."
+    },
+    {
+      "severity": "low",
+      "title": "Provider safety report duplicates forbidden path patterns",
+      "detail": "Default and readiness forbidden paths were concatenated without deduplication."
+    }
+  ],
+  "uxGaps": [
+    "No explicit dependency/setup guidance for disposable external workspaces.",
+    "Readiness can move environment/setup failures into code proposal flow.",
+    "Viewer generation is manual per packet; dashboard workflow benefits from auto-viewer generation.",
+    "no_safe_proposal packets report verificationPassed false rather than a clearer not-run status."
+  ],
+  "alpha15Actions": [
+    "Add setup/dependency-aware failure classification before generic TypeScript readiness.",
+    "Keep dependency_missing and environment_error out of ready_for_code_proposal.",
+    "Recommend dependency setup or an explicit setup command before source proposals.",
+    "Deduplicate provider forbidden path reports.",
+    "Add packet view-index helper for indexed packet viewer rendering."
+  ]
+}

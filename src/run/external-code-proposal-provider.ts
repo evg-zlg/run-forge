@@ -62,8 +62,8 @@ export async function runCliProviderProposal(input: {
   const proposalContract = {
     patchFormat: "unified_diff_or_json_patch_field",
     mustOnlyEditRepoRelativeFiles: true,
-    allowedPaths: input.contract?.allowedPaths ?? [],
-    forbiddenPaths: input.contract?.forbiddenPaths ?? [".env", ".env.*", "**/secrets/**", "deploy/**", "infra/**"],
+    allowedPaths: uniqueNonEmpty(input.contract?.allowedPaths),
+    forbiddenPaths: uniqueNonEmpty(input.contract?.forbiddenPaths ?? [".env", ".env.*", "**/secrets/**", "deploy/**", "infra/**"]),
     maxFilesChanged: input.contract?.maxFilesChanged ?? 3,
     maxPatchBytes: input.contract?.maxPatchBytes ?? 50_000,
     humanGateRequired: true,
@@ -134,6 +134,10 @@ export async function runCliProviderProposal(input: {
     const finishedAt = new Date(started + durationMs).toISOString();
     return providerResult("failed", "", startedAt, finishedAt, durationMs, inputBytes, 0, [error instanceof Error ? error.message : String(error)], [], input, null);
   }
+}
+
+function uniqueNonEmpty(values?: string[]): string[] {
+  return [...new Set((values ?? []).filter(Boolean))];
 }
 
 export async function runProviderProposalWorkers(input: {

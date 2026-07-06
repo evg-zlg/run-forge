@@ -146,11 +146,15 @@ export async function validateProviderPatch(input: {
 
 function normalizeContract(contract?: ProviderPatchContract | null): Required<ProviderPatchContract> {
   return {
-    allowedPaths: contract?.allowedPaths?.filter(Boolean) ?? [],
-    forbiddenPaths: [...defaultForbiddenPaths, ...(contract?.forbiddenPaths?.filter(Boolean) ?? [])],
+    allowedPaths: uniqueNonEmpty(contract?.allowedPaths),
+    forbiddenPaths: uniqueNonEmpty([...defaultForbiddenPaths, ...(contract?.forbiddenPaths ?? [])]),
     maxFilesChanged: contract?.maxFilesChanged ?? defaultMaxFilesChanged,
     maxPatchBytes: contract?.maxPatchBytes ?? defaultMaxPatchBytes
   };
+}
+
+function uniqueNonEmpty(values?: string[]): string[] {
+  return [...new Set((values ?? []).filter(Boolean))];
 }
 
 function parseUnifiedDiff(patch: string): {

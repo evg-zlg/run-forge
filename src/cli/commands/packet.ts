@@ -1,7 +1,7 @@
 import { Command, InvalidArgumentError } from "commander";
 import { buildPacketIndex, renderPacketIndexText } from "../../run/packet-indexer.js";
 import { inspectPacket, renderPacketInspection, type PacketInspectFormat } from "../../run/packet-inspector.js";
-import { exportPacketViewer } from "../../run/packet-viewer.js";
+import { exportPacketViewer, exportPacketViewersForIndex, renderViewerIndexSummary } from "../../run/packet-viewer.js";
 import {
   buildDashboardSeed,
   buildLatestDogfoodReport,
@@ -17,6 +17,7 @@ export function packetCommand(): Command {
   packet.addCommand(queryCommand());
   packet.addCommand(reportCommand());
   packet.addCommand(viewCommand());
+  packet.addCommand(viewIndexCommand());
   return packet;
 }
 
@@ -139,6 +140,26 @@ function viewCommand(): Command {
           out: opts.out as string
         });
         console.log(`Packet viewer written: ${result.indexPath}`);
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+function viewIndexCommand(): Command {
+  return new Command("view-index")
+    .description("Render static HTML viewers for packetPath records in an existing packet index.")
+    .requiredOption("--index <index-json>", "packet index JSON with entries containing packetPath")
+    .requiredOption("--out <out-dir>", "output directory for rendered viewers and summary files")
+    .option("--strict", "fail if any indexed packet cannot be rendered")
+    .action(async (opts) => {
+      try {
+        const result = await exportPacketViewersForIndex({
+          index: opts.index as string,
+          out: opts.out as string,
+          strict: Boolean(opts.strict)
+        });
+        console.log(renderViewerIndexSummary(result));
       } catch (error) {
         throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
       }
