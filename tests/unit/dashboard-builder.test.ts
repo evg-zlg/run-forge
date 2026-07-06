@@ -22,7 +22,14 @@ describe("static dashboard builder", () => {
         verifiedProposals: number;
         rejectedProviderProposals: number;
         doNotApplyOrUnsafe: number;
+        unchangedMutationVerdicts: number;
+        reposCovered: number;
+        latestVerifiedProposal: string;
+        latestRejection: string;
         byOutcome: Record<string, number>;
+        byRepo: Record<string, number>;
+        byScenario: Record<string, number>;
+        byAlphaComparison: unknown[];
       };
       records: Array<{ outcome: string; operatorVerdict: string; safetyLabels: string[] }>;
     };
@@ -36,6 +43,28 @@ describe("static dashboard builder", () => {
     expect(html).toContain('id="mutation-verdict-filter"');
     expect(html).toContain('id="alpha-filter"');
     expect(html).toContain('id="reset-filters"');
+    expect(html).toContain('id="copy-current-view"');
+    expect(html).toContain('id="current-view-url"');
+    expect(html).toContain('data-quick-filter="verified"');
+    expect(html).toContain('data-quick-filter="unsafe"');
+    expect(html).toContain("Show only verified proposals");
+    expect(html).toContain("Show only unsafe/do_not_apply");
+    expect(html).toContain("readStateFromHash");
+    expect(html).toContain("window.location.hash");
+    expect(html).toContain("URLSearchParams");
+    expect(html).toContain("history.pushState");
+    expect(html).toContain("Reset filters");
+    expect(html).toContain("By repo");
+    expect(html).toContain("By scenario");
+    expect(html).toContain("By outcome");
+    expect(html).toContain("By alpha / milestone");
+    expect(html).toContain("Alpha comparison");
+    expect(html).toContain('data-filter-key="repo"');
+    expect(html).toContain('data-filter-key="outcome"');
+    expect(html).toContain('data-filter-key="alpha"');
+    expect(html).toContain('data-sort="alpha"');
+    expect(html).toContain('data-sort="repo"');
+    expect(html).toContain("No records match the active filters");
     expect(html).toContain("proposal_ready_verified");
     expect(html).toContain("provider_rejected");
     expect(html).toContain("Provider status");
@@ -59,9 +88,16 @@ describe("static dashboard builder", () => {
       latestAlpha: "ALPHA-12",
       verifiedProposals: 1,
       rejectedProviderProposals: 1,
-      doNotApplyOrUnsafe: 1
+      doNotApplyOrUnsafe: 1,
+      unchangedMutationVerdicts: 3,
+      reposCovered: 2,
+      latestVerifiedProposal: "ALPHA-12 / smartsql / merge_intervals",
+      latestRejection: "ALPHA-12 / smartsql / forbidden_path"
     });
     expect(data.summary.byOutcome.provider_rejected).toBe(1);
+    expect(data.summary.byRepo.smartsql).toBe(2);
+    expect(data.summary.byScenario.merge_intervals).toBe(1);
+    expect(data.summary.byAlphaComparison).toHaveLength(2);
     expect(data.records.some((record) => record.outcome === "proposal_ready_verified")).toBe(true);
     expect(data.records.some((record) => record.operatorVerdict === "do_not_apply")).toBe(true);
     expect(data.records.flatMap((record) => record.safetyLabels)).toContain("provider_rejected");

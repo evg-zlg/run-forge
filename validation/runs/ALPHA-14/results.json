@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "alpha-14-results",
+  "generatedAt": "2026-07-06T16:12:20.657Z",
+  "outputs": {
+    "index": "/tmp/runforge-alpha14-index",
+    "dashboard": "/tmp/runforge-alpha14-dashboard",
+    "indexHtml": "/tmp/runforge-alpha14-dashboard/index.html",
+    "dashboardData": "/tmp/runforge-alpha14-dashboard/dashboard-data.json"
+  },
+  "checks": {
+    "dashboardSchemaVersion": "alpha-12-dashboard",
+    "dashboardRecords": 6,
+    "dashboardOutputPath": "/tmp/runforge-alpha14-dashboard",
+    "filtersRestoredFromHashOrQuery": true,
+    "filterStateUpdatesUrl": true,
+    "resetClearsUrlAndFilters": true,
+    "copyCurrentViewAffordance": true,
+    "groupedRepoCounts": true,
+    "groupedScenarioCounts": true,
+    "groupedOutcomeCounts": true,
+    "groupedAlphaCounts": true,
+    "alphaComparisonChecked": true,
+    "derivedCountersChecked": true,
+    "quickVerifiedFilter": true,
+    "quickUnsafeFilter": true,
+    "sortableRecordsTable": true,
+    "emptyState": true,
+    "noBackendRequired": true,
+    "noExternalNetworkDependencies": true,
+    "seedRecordCountMatchesDashboard": true
+  },
+  "commands": [
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev packet index --root /Users/evgeny/Documents/projects/RunForge/validation/runs --out /tmp/runforge-alpha14-index --dashboard-seed",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --dir /Users/evgeny/Documents/projects/RunForge dev dashboard build --seed /tmp/runforge-alpha14-index/dashboard-seed.json --out /tmp/runforge-alpha14-dashboard",
+      "status": "passed",
+      "exitCode": 0
+    }
+  ],
+  "errors": []
+}

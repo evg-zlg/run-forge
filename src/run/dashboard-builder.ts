@@ -2,7 +2,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { DashboardSeedRecord, DashboardSeedResult } from "./packet-query.js";
 import { dashboardCss, dashboardJs } from "./dashboard-assets.js";
-import { countBy, isDoNotApplyOrUnsafe, isFailedOrUnsafe, latestAlpha, safetyLabels, searchableRecordText, stringField } from "./dashboard-record-utils.js";
+import { isDoNotApplyOrUnsafe, isFailedOrUnsafe, safetyLabels, searchableRecordText, stringField } from "./dashboard-record-utils.js";
+import { buildSummary, type AlphaComparisonSummary, type DashboardSummary } from "./dashboard-summary.js";
 
 export interface DashboardBuildOptions {
   seed: string;
@@ -24,19 +25,6 @@ export interface DashboardData {
   sourceSeedPath: string;
   summary: DashboardSummary;
   records: DashboardRecord[];
-}
-
-export interface DashboardSummary {
-  total: number;
-  latestAlpha: string;
-  byOutcome: Record<string, number>;
-  byRepo: Record<string, number>;
-  byProviderStatus: Record<string, number>;
-  byAlpha: Record<string, number>;
-  verifiedProposals: number;
-  rejectedProviderProposals: number;
-  doNotApplyOrUnsafe: number;
-  originalReposUnchanged: boolean;
 }
 
 export interface DashboardBuildResult {
@@ -113,21 +101,6 @@ function normalizeRecord(record: DashboardSeedRecord): NormalizedDashboardSeedRe
   };
 }
 
-function buildSummary(records: DashboardRecord[]): DashboardSummary {
-  return {
-    total: records.length,
-    latestAlpha: latestAlpha(records.map((record) => record.alpha)),
-    byOutcome: countBy(records, (record) => record.outcome),
-    byRepo: countBy(records, (record) => record.repo),
-    byProviderStatus: countBy(records, (record) => record.providerStatus),
-    byAlpha: countBy(records, (record) => record.alpha),
-    verifiedProposals: records.filter((record) => record.outcome === "proposal_ready_verified").length,
-    rejectedProviderProposals: records.filter((record) => record.outcome === "provider_rejected" || record.providerStatus === "rejected").length,
-    doNotApplyOrUnsafe: records.filter(isDoNotApplyOrUnsafe).length,
-    originalReposUnchanged: records.length > 0 && records.every((record) => record.mutationVerdict === "unchanged")
-  };
-}
-
 function renderDashboardHtml(data: DashboardData): string {
   return `<!doctype html>
 <html lang="en">
@@ -152,14 +125,22 @@ function renderDashboardHtml(data: DashboardData): string {
       ${summaryMetric("Verified proposals", String(data.summary.verifiedProposals))}
       ${summaryMetric("Provider rejections", String(data.summary.rejectedProviderProposals))}
       ${summaryMetric("Do not apply / unsafe", String(data.summary.doNotApplyOrUnsafe))}
+      ${summaryMetric("Repos covered", String(data.summary.reposCovered))}
+      ${summaryMetric("Unchanged mutations", String(data.summary.unchangedMutationVerdicts))}
+      ${summaryMetric("Latest verified", data.summary.latestVerifiedProposal)}
+      ${summaryMetric("Latest rejection", data.summary.latestRejection)}
     </dl>
   </header>
   <main>
     ${renderFilters(data.records)}
-    ${renderCountSection("By outcome", data.summary.byOutcome)}
-    ${renderCountSection("By repo", data.summary.byRepo)}
+    <div class="summary-sections">
+      ${renderCountSection("By repo", data.summary.byRepo, "repo")}
+      ${renderCountSection("By scenario", data.summary.byScenario, "scenario")}
+      ${renderCountSection("By outcome", data.summary.byOutcome, "outcome")}
+      ${renderCountSection("By alpha / milestone", data.summary.byAlpha, "alpha")}
+    </div>
+    ${renderAlphaComparison(data.summary.byAlphaComparison)}
     ${renderCountSection("By provider status", data.summary.byProviderStatus)}
-    ${renderCountSection("By alpha", data.summary.byAlpha)}
     ${renderGroup("Verified proposals", data.records.filter((record) => record.outcome === "proposal_ready_verified"))}
     ${renderGroup("Provider rejections", data.records.filter((record) => record.outcome === "provider_rejected" || record.providerStatus === "rejected"))}
     ${renderGroup("Failed / unsafe proposals", data.records.filter(isFailedOrUnsafe))}
@@ -187,10 +168,19 @@ function renderFilters(records: DashboardRecord[]): string {
       ${selectFilter("mutation-verdict-filter", "Mutation verdict", unique(records.map((record) => record.mutationVerdict)))}
       ${selectFilter("alpha-filter", "Alpha / milestone", unique(records.map((record) => record.alpha)))}
     </div>
+    <div class="quick-actions" aria-label="Quick filters">
+      <button id="quick-verified" type="button" data-quick-filter="verified">Show only verified proposals</button>
+      <button id="quick-unsafe" type="button" data-quick-filter="unsafe">Show only unsafe/do_not_apply</button>
+      <button id="copy-current-view" type="button">Copy current view</button>
+      <label>Current view URL
+        <input id="current-view-url" type="text" readonly value="">
+      </label>
+    </div>
     <div class="filter-status" aria-live="polite">
       <span>Total records: <strong id="total-records">${records.length}</strong></span>
       <span>Visible records: <strong id="visible-records">${records.length}</strong></span>
       <span>Active filters: <strong id="active-filters">none</strong></span>
+      <span id="copy-current-view-status" class="muted"></span>
     </div>
   </section>`;
 }
@@ -205,9 +195,31 @@ function selectFilter(id: string, label: string, values: string[]): string {
   </label>`;
 }
 
-function renderCountSection(title: string, counts: Record<string, number>): string {
-  const rows = Object.entries(counts).map(([key, value]) => `<tr><td>${escapeHtml(key)}</td><td>${value}</td></tr>`).join("");
+function renderCountSection(title: string, counts: Record<string, number>, filterKey = ""): string {
+  const rows = Object.entries(counts).map(([key, value]) => {
+    const label = filterKey ? `<button type="button" class="link-button" data-filter-key="${escapeAttr(filterKey)}" data-filter-value="${escapeAttr(key)}">${escapeHtml(key)}</button>` : escapeHtml(key);
+    return `<tr><td>${label}</td><td>${value}</td></tr>`;
+  }).join("");
   return `<section><h2>${title}</h2><table class="counts"><tbody>${rows || "<tr><td>none</td><td>0</td></tr>"}</tbody></table></section>`;
+}
+
+function renderAlphaComparison(rows: AlphaComparisonSummary[]): string {
+  const body = rows.map((row) => `<tr>
+    <td><button type="button" class="link-button" data-filter-key="alpha" data-filter-value="${escapeAttr(row.alpha)}">${escapeHtml(row.alpha)}</button></td>
+    <td>${row.total}</td>
+    <td>${row.verifiedProposals}</td>
+    <td>${row.rejectedProviderProposals}</td>
+    <td>${row.doNotApplyOrUnsafe}</td>
+    <td>${row.unchangedMutationVerdicts}</td>
+    <td>${row.reposCovered}</td>
+  </tr>`).join("");
+  return `<section>
+    <h2>Alpha comparison</h2>
+    <table class="counts alpha-comparison">
+      <thead><tr><th>Alpha</th><th>Records</th><th>Verified</th><th>Rejected</th><th>Unsafe</th><th>Unchanged</th><th>Repos</th></tr></thead>
+      <tbody>${body || "<tr><td>none</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td></tr>"}</tbody>
+    </table>
+  </section>`;
 }
 
 function renderGroup(title: string, records: DashboardRecord[]): string {
@@ -216,7 +228,7 @@ function renderGroup(title: string, records: DashboardRecord[]): string {
 }
 
 function renderTable(records: DashboardRecord[]): string {
-  const rows = records.map((record) => `<tr class="record-row ${rowClass(record)}" data-search="${escapeAttr(searchText(record))}" data-outcome="${escapeAttr(record.outcome)}" data-repo="${escapeAttr(record.repo)}" data-provider-status="${escapeAttr(record.providerStatus)}" data-mutation-verdict="${escapeAttr(record.mutationVerdict)}" data-alpha="${escapeAttr(record.alpha)}">
+  const rows = records.map((record) => `<tr class="record-row ${rowClass(record)}" data-search="${escapeAttr(searchText(record))}" data-outcome="${escapeAttr(record.outcome)}" data-repo="${escapeAttr(record.repo)}" data-scenario="${escapeAttr(record.scenario)}" data-provider-status="${escapeAttr(record.providerStatus)}" data-mutation-verdict="${escapeAttr(record.mutationVerdict)}" data-alpha="${escapeAttr(record.alpha)}" data-unsafe="${isDoNotApplyOrUnsafe(record) ? "true" : "false"}">
     <td>${escapeHtml(record.alpha)}</td>
     <td>${escapeHtml(record.repo)}</td>
     <td>${escapeHtml(record.scenario)}</td>
@@ -233,7 +245,7 @@ function renderTable(records: DashboardRecord[]): string {
     <td>${escapeHtml(record.tags.join(", "))}</td>
     <td>${escapeHtml(record.notes ?? "")}</td>
   </tr>`).join("");
-  return `<section><h2>Records</h2><table class="records"><thead><tr><th>Alpha</th><th>Repo</th><th>Scenario</th><th>Packet type</th><th>Outcome</th><th>Provider</th><th>Operator verdict</th><th>Mutation</th><th>Safety</th><th>Packet</th><th>Viewer</th><th>Summary</th><th>Details</th><th>Tags</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table><p id="empty-state" class="empty-state" hidden>No records match the active filters.</p></section>`;
+  return `<section><h2>Records</h2><table class="records" id="records-table"><thead><tr><th><button type="button" class="sort-button" data-sort="alpha">Alpha</button></th><th><button type="button" class="sort-button" data-sort="repo">Repo</button></th><th><button type="button" class="sort-button" data-sort="scenario">Scenario</button></th><th>Packet type</th><th><button type="button" class="sort-button" data-sort="outcome">Outcome</button></th><th><button type="button" class="sort-button" data-sort="providerStatus">Provider</button></th><th>Operator verdict</th><th><button type="button" class="sort-button" data-sort="mutationVerdict">Mutation</button></th><th>Safety</th><th>Packet</th><th>Viewer</th><th>Summary</th><th>Details</th><th>Tags</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table><p id="empty-state" class="empty-state" hidden>No records match the active filters. Reset filters or copy the current view URL to share this empty state.</p></section>`;
 }
 
 function labels(values: string[]): string {
