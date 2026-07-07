@@ -8,6 +8,7 @@ import { runExternalCommandCheck } from "./external-command-check.js";
 import { gitSnapshot, mutationVerdictFor } from "./external-command-check-git.js";
 import type { CommandResult, ExternalCheckStatus } from "./external-command-check-types.js";
 import { runExternalCodeProposal } from "./external-code-proposal.js";
+import { runRealRepoDisposablePatchTrial } from "./external-real-repo-patch-trial.js";
 
 const execFileAsync = promisify(execFile);
 const defaultTrialRoot = "/tmp/runforge-alpha21-operator-trial";
@@ -16,18 +17,27 @@ export interface ExternalPatchTrialOptions {
   root?: string;
   out?: string;
   runId?: string;
+  repo?: string;
+  mode?: "controlled-fixture" | "real-repo-disposable";
 }
 
 export interface ExternalPatchTrialResult {
   runId: string;
   root: string;
   sourceRepo: string;
+  originalRepo?: string;
+  originalRepoHeadBefore?: string | null;
+  originalRepoHeadAfter?: string | null;
+  originalRepoStatusBefore?: string | null;
+  originalRepoStatusAfter?: string | null;
   proposalPacket: string;
   proposalPatch: string;
   operatorInstructions: string;
   outcome: string;
   verificationPassed: boolean;
   originalRepoMutationVerdict: string;
+  failureMode: "controlled_fixture" | "injected_into_disposable_copy";
+  validationCommand: string;
 }
 
 export type OperatorDecision = "accepted" | "rejected";
@@ -42,6 +52,9 @@ export interface ExternalRecordDecisionOptions {
   timeoutMs?: number;
   maxLogBytes?: number;
   notes?: string;
+  reason?: string;
+  applyMode?: string;
+  appliedTo?: string;
 }
 
 export interface ExternalRecordDecisionResult {
@@ -57,6 +70,7 @@ export interface ExternalRecordDecisionResult {
 }
 
 export async function runExternalPatchTrial(options: ExternalPatchTrialOptions): Promise<ExternalPatchTrialResult> {
+  if (options.mode === "real-repo-disposable" || options.repo) return runRealRepoDisposablePatchTrial(options);
   const root = resolve(options.root ?? defaultTrialRoot);
   const sourceRepo = join(root, "source");
   const out = resolve(options.out ?? join(root, "proposal-run"));
@@ -92,7 +106,9 @@ export async function runExternalPatchTrial(options: ExternalPatchTrialOptions):
     operatorInstructions,
     outcome: proposal.outcome,
     verificationPassed: proposal.verificationPassed,
-    originalRepoMutationVerdict: proposal.originalRepoMutationVerdict
+    originalRepoMutationVerdict: proposal.originalRepoMutationVerdict,
+    failureMode: "controlled_fixture",
+    validationCommand: "node verify.js"
   };
 }
 
@@ -127,6 +143,7 @@ export async function recordExternalPatchDecision(options: ExternalRecordDecisio
     repo,
     decision: options.decision,
     finalOutcome,
+    reason: options.reason ?? (finalOutcome === "rejected" && options.decision === "accepted" ? "validation_failed_after_apply" : ""),
     notes: options.notes ?? "",
     validation: {
       packet: validation.packetDir,
@@ -136,6 +153,11 @@ export async function recordExternalPatchDecision(options: ExternalRecordDecisio
     },
     manualApplyRequired: true,
     manualApplyVerifiedByRerun: validationPassed,
+    apply: {
+      mode: options.applyMode ?? "operator_simulated_manual_apply",
+      appliedTo: options.appliedTo ?? "disposable_copy",
+      originalRepoMutated: false as const
+    },
     runforgeAppliedPatch: false as const,
     originalExternalRepoProtected: true,
     noPushAttempted: true,
@@ -167,7 +189,15 @@ export async function recordExternalPatchDecision(options: ExternalRecordDecisio
 
 export function renderExternalPatchTrialSummary(result: ExternalPatchTrialResult): string {
   return [
-    `Patch trial fixture: ${result.sourceRepo}`,
+    `Patch trial source: ${result.sourceRepo}`,
+    ...(result.originalRepo ? [
+      `Original repo: ${result.originalRepo}`,
+      `Original repo HEAD before: ${result.originalRepoHeadBefore ?? "unknown"}`,
+      `Original repo HEAD after: ${result.originalRepoHeadAfter ?? "unknown"}`,
+      `Original repo status before: ${result.originalRepoStatusBefore || "(clean)"}`,
+      `Original repo status after: ${result.originalRepoStatusAfter || "(clean)"}`,
+      `Failure mode: ${result.failureMode}`
+    ] : []),
     `Proposal packet: ${result.proposalPacket}`,
     `Proposal patch: ${result.proposalPatch}`,
     `Operator instructions: ${result.operatorInstructions}`,
@@ -231,18 +261,24 @@ async function execGit(args: string[], cwd: string): Promise<void> {
   await execFileAsync("git", args, { cwd, maxBuffer: 10_000_000 });
 }
 
-function renderOperatorInstructions(input: { sourceRepo: string; proposalPacket: string; proposalPatch: string; root: string }): string {
+function renderOperatorInstructions(input: { sourceRepo: string; proposalPacket: string; proposalPatch: string; root: string; title?: string; validationCommand?: string; originalRepo?: string }): string {
   const operatorRepo = join(input.root, "operator-worktree");
+  const validationCommand = input.validationCommand ?? "node verify.js";
   return [
-    "# Alpha-21 Operator Patch Trial",
+    `# ${input.title ?? "Alpha-21 Operator Patch Trial"}`,
     "",
     "RunForge generated a proposal packet and did not apply the patch to the source repository.",
+    ...(input.originalRepo ? [
+      "",
+      `Original external repo: ${input.originalRepo}`,
+      "The failure was injected only into the disposable source copy for this trial."
+    ] : []),
     "",
     "Manual operator loop:",
     "",
     `1. Create a disposable operator worktree, for example: \`cp -R ${input.sourceRepo} ${operatorRepo}\``,
     `2. Apply the proposal manually in that disposable worktree: \`cd ${operatorRepo} && git apply ${input.proposalPatch}\``,
-    "3. Rerun validation manually or through the record-decision command: `node verify.js`",
+    `3. Rerun validation manually or through the record-decision command: \`${validationCommand}\``,
     "4. Record the accepted or rejected decision with `runforge external record-decision`.",
     "",
     "Safety boundary:",
@@ -269,6 +305,8 @@ function renderDecisionMarkdown(record: {
   finalOutcome: "accepted" | "rejected";
   validation: { packet: string; status: ExternalCheckStatus; passed: boolean; commands: Array<{ command: string; status: string; exitCode: number | null }> };
   runforgeAppliedPatch: false;
+  reason?: string;
+  apply?: { mode: string; appliedTo: string; originalRepoMutated: false };
   repoMutationVerdictDuringDecision: string;
   notes: string;
 }): string {
@@ -280,10 +318,14 @@ function renderDecisionMarkdown(record: {
     `Decision repo: ${record.repo}`,
     `Requested decision: ${record.decision}`,
     `Final outcome: ${record.finalOutcome}`,
+    `Reason: ${record.reason || "none"}`,
     `Validation packet: ${record.validation.packet}`,
     `Validation status: ${record.validation.status}`,
     `Validation passed: ${record.validation.passed}`,
     `RunForge applied patch: ${record.runforgeAppliedPatch}`,
+    `Apply mode: ${record.apply?.mode ?? "operator_simulated_manual_apply"}`,
+    `Applied to: ${record.apply?.appliedTo ?? "disposable_copy"}`,
+    `Original repo mutated: ${String(record.apply?.originalRepoMutated ?? false)}`,
     `Repo mutation verdict during decision rerun: ${record.repoMutationVerdictDuringDecision}`,
     "",
     "## Commands",
