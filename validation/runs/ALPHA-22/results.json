@@ -1,6 +1,6 @@
 {
   "schemaVersion": "alpha-22-real-repo-operator-trial",
-  "generatedAt": "2026-07-07T04:49:59.692Z",
+  "generatedAt": "2026-07-07T05:46:52.712Z",
   "trialRoot": "/tmp/runforge-alpha22-real-repo-trial/factory",
   "originalRepo": {
     "path": "/Users/evgeny/Documents/projects/factory",
@@ -115,7 +115,7 @@
     "(cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)",
     "(cd /Users/evgeny/Documents/projects/factory && git status --short)",
     "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha22-real-repo-trial/factory/index --dashboard-seed",
-    "# stdout: Indexed 9 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stdout: Indexed 11 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
     "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha22-real-repo-trial/factory/index --dashboard-seed",
     "pnpm dev dashboard build --seed /tmp/runforge-alpha22-real-repo-trial/factory/index/dashboard-seed.json --out /tmp/runforge-alpha22-real-repo-trial/factory/dashboard",
     "# stdout: Dashboard written: /tmp/runforge-alpha22-real-repo-trial/factory/dashboard/index.html",

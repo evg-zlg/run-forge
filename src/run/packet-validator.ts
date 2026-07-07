@@ -1,5 +1,6 @@
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { validateOperatorDecisionRecord } from "./operator-decision-summary.js";
 
 export interface PacketValidationResult {
   checked: boolean;
@@ -187,6 +188,9 @@ export async function validatePacket(packet: string): Promise<PacketValidationRe
       const providerSafety = await readRequiredJson(join(packetDir, "provider-safety-report.json"), "provider-safety-report.json", errors);
       validateProviderAudit(providerSafety?.providerAudit, "provider-safety-report.json providerAudit", errors);
     }
+    if (await artifactExists(join(packetDir, "operator-decision.json"))) {
+      errors.push(...await validateOperatorDecisionRecord(join(packetDir, "operator-decision.json")));
+    }
   }
 
   if (taskType === "unknown") errors.push("run.json missing taskType");
@@ -198,6 +202,15 @@ export async function validatePacket(packet: string): Promise<PacketValidationRe
     packetType: taskType,
     errors
   };
+}
+
+async function artifactExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function requireArtifact(packetDir: string, artifact: string, errors: string[]): Promise<void> {

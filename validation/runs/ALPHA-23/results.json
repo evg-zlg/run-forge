@@ -1,0 +1,156 @@
+{
+  "schemaVersion": "alpha-23-operator-patch-ux",
+  "generatedAt": "2026-07-07T05:47:03.792Z",
+  "trialRoot": "/tmp/runforge-alpha23-operator-patch-ux/factory",
+  "originalRepo": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "beforeHead": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "beforeStatus": "",
+    "afterHead": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "afterStatus": "",
+    "mutationVerdict": "unchanged"
+  },
+  "disposable": {
+    "sourceRepo": "/tmp/runforge-alpha23-operator-patch-ux/factory/source-copy",
+    "acceptedOperatorWorktree": "/tmp/runforge-alpha23-operator-patch-ux/factory/operator-accepted-worktree",
+    "rejectedOperatorWorktree": "/tmp/runforge-alpha23-operator-patch-ux/factory/operator-rejected-worktree",
+    "failureMode": "injected_into_disposable_copy",
+    "validationCommand": "node runforge-alpha22-verify.cjs"
+  },
+  "proposalPacket": "/tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet",
+  "proposalPatch": "/tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet/proposal.patch",
+  "operatorSummary": "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-23/operator-summary.md",
+  "decisions": {
+    "accepted": "/tmp/runforge-alpha23-operator-patch-ux/factory/accepted-decision/accepted-operator-decision.json",
+    "rejected": "/tmp/runforge-alpha23-operator-patch-ux/factory/rejected-decision/operator-decision.json"
+  },
+  "summaries": {
+    "accepted": "/tmp/runforge-alpha23-operator-patch-ux/factory/accepted-decision/operator-summary.md",
+    "acceptedJson": "/tmp/runforge-alpha23-operator-patch-ux/factory/accepted-decision/accepted-operator-summary.json",
+    "rejected": "/tmp/runforge-alpha23-operator-patch-ux/factory/rejected-decision/operator-summary.md"
+  },
+  "validationPackets": {
+    "accepted": "/tmp/runforge-alpha23-operator-patch-ux/factory/accepted-decision/validation-rerun/packet",
+    "rejected": "/tmp/runforge-alpha23-operator-patch-ux/factory/rejected-decision/validation-rerun/packet"
+  },
+  "attempts": [
+    {
+      "id": "factory-disposable-accepted",
+      "repo": "/Users/evgeny/Documents/projects/factory",
+      "decision": "accepted",
+      "operatorDecision": "accepted",
+      "reason": "validation_passed_after_operator_apply",
+      "packet": "/tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet",
+      "viewer": "/tmp/runforge-alpha23-operator-patch-ux/factory/viewer/index.html",
+      "outcome": "workflow_succeeded_operator_accepted",
+      "providerStatus": "disabled",
+      "filesChanged": [
+        "runforge-alpha22/math.cjs"
+      ],
+      "externalRepoHeadBefore": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "externalRepoHeadAfter": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "manualApply": true,
+      "appliedTo": "disposable_copy",
+      "originalRepoMutated": false,
+      "validationBefore": "failed",
+      "validationAfter": "passed",
+      "proposalPatch": "/tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet/proposal.patch"
+    },
+    {
+      "id": "factory-disposable-rejected",
+      "repo": "/Users/evgeny/Documents/projects/factory",
+      "decision": "rejected",
+      "operatorDecision": "rejected",
+      "reason": "operator_declined",
+      "packet": "/tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet",
+      "viewer": "/tmp/runforge-alpha23-operator-patch-ux/factory/viewer/index.html",
+      "outcome": "workflow_succeeded_operator_rejected",
+      "providerStatus": "disabled",
+      "filesChanged": [
+        "runforge-alpha22/math.cjs"
+      ],
+      "externalRepoHeadBefore": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "externalRepoHeadAfter": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "manualApply": false,
+      "appliedTo": "disposable_copy",
+      "originalRepoMutated": false,
+      "validationBefore": "failed",
+      "validationAfter": "failed",
+      "proposalPatch": "/tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet/proposal.patch"
+    }
+  ],
+  "safety": {
+    "noOriginalExternalRepoMutation": true,
+    "noAutoApplyByRunForge": true,
+    "runforgeApplyMode": "none",
+    "acceptedApplyMode": "operator_simulated_manual_apply",
+    "rejectedApplyMode": "operator_declined",
+    "acceptedAppliedTo": "disposable_copy",
+    "rejectedAppliedTo": "disposable_copy",
+    "noProviderCalls": true,
+    "noNetworkRequired": true,
+    "noDbAccess": true,
+    "noPushMergeDeploy": true,
+    "safetyLint": {
+      "passed": true,
+      "cases": [
+        "accepted_original_mutation",
+        "accepted_missing_after_validation",
+        "accepted_failed_after_validation",
+        "rejected_without_reason",
+        "missing_auto_apply_false",
+        "missing_applied_to",
+        "applied_to_original_repo",
+        "missing_packet_link",
+        "missing_safety_summary"
+      ],
+      "errors": []
+    }
+  },
+  "visibility": {
+    "operatorSummary": "validation/runs/ALPHA-23/operator-summary.md",
+    "evidenceResults": "validation/runs/ALPHA-23/results.json",
+    "evidenceSummary": "validation/runs/ALPHA-23/summary.md",
+    "lifecycleReport": "validation/runs/ALPHA-23/lifecycle-report.json",
+    "packetIndex": "/tmp/runforge-alpha23-operator-patch-ux/factory/index/index.json",
+    "dashboard": "/tmp/runforge-alpha23-operator-patch-ux/factory/dashboard/index.html",
+    "packetViewer": "/tmp/runforge-alpha23-operator-patch-ux/factory/viewer/index.html"
+  },
+  "limitations": [
+    "The real repo source was Factory, but the failure was intentionally injected only into the disposable copy.",
+    "Alpha-23 improves operator UX and safety lint; it still does not authorize auto-apply to protected repositories."
+  ],
+  "commandsRun": [
+    "(cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)",
+    "(cd /Users/evgeny/Documents/projects/factory && git status --short)",
+    "pnpm dev external patch-trial --repo /Users/evgeny/Documents/projects/factory --mode real-repo-disposable --out /tmp/runforge-alpha23-operator-patch-ux/factory --run-id alpha23-operator-patch-ux",
+    "# stdout: Patch trial source: /tmp/runforge-alpha23-operator-patch-ux/factory/source-copy",
+    "# stderr: $ tsx src/cli/index.ts external patch-trial --repo /Users/evgeny/Documents/projects/factory --mode real-repo-disposable --out /tmp/runforge-alpha23-operator-patch-ux/factory --run-id alpha23-operator-patch-ux",
+    "(cd /tmp/runforge-alpha23-operator-patch-ux/factory/source-copy && node runforge-alpha22-verify.cjs)",
+    "(cd /tmp/runforge-alpha23-operator-patch-ux/factory/operator-accepted-worktree && git apply /tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet/proposal.patch)",
+    "(cd /tmp/runforge-alpha23-operator-patch-ux/factory/operator-accepted-worktree && node runforge-alpha22-verify.cjs)",
+    "pnpm dev external record-decision --proposal-packet /tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet --repo /tmp/runforge-alpha23-operator-patch-ux/factory/operator-accepted-worktree --command node runforge-alpha22-verify.cjs --decision accepted --out /tmp/runforge-alpha23-operator-patch-ux/factory/accepted-decision --run-id alpha23-operator-accepted --reason validation_passed_after_operator_apply --apply-mode operator_simulated_manual_apply --applied-to disposable_copy --notes Alpha-23 accepted path manually applied proposal.patch only in the disposable accepted operator worktree.",
+    "# stdout: Operator decision recorded: accepted",
+    "# stderr: $ tsx src/cli/index.ts external record-decision --proposal-packet /tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet --repo /tmp/runforge-alpha23-operator-patch-ux/factory/operator-accepted-worktree --command 'node runforge-alpha22-verify.cjs' --decision accepted --out /tmp/runforge-alpha23-operator-patch-ux/factory/accepted-decision --run-id alpha23-operator-accepted --reason validation_passed_after_operator_apply --apply-mode operator_simulated_manual_apply --applied-to disposable_copy --notes 'Alpha-23 accepted path manually applied proposal.patch only in the disposable accepted operator worktree.'",
+    "(cd /tmp/runforge-alpha23-operator-patch-ux/factory/operator-rejected-worktree && node runforge-alpha22-verify.cjs)",
+    "pnpm dev external record-decision --proposal-packet /tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet --repo /tmp/runforge-alpha23-operator-patch-ux/factory/operator-rejected-worktree --command node runforge-alpha22-verify.cjs --decision rejected --out /tmp/runforge-alpha23-operator-patch-ux/factory/rejected-decision --run-id alpha23-operator-rejected --reason operator_declined --apply-mode operator_declined --applied-to disposable_copy --notes Alpha-23 rejection path intentionally did not apply proposal.patch; validation remains failed only in the disposable rejected worktree.",
+    "# stdout: Operator decision recorded: rejected",
+    "# stderr: $ tsx src/cli/index.ts external record-decision --proposal-packet /tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet --repo /tmp/runforge-alpha23-operator-patch-ux/factory/operator-rejected-worktree --command 'node runforge-alpha22-verify.cjs' --decision rejected --out /tmp/runforge-alpha23-operator-patch-ux/factory/rejected-decision --run-id alpha23-operator-rejected --reason operator_declined --apply-mode operator_declined --applied-to disposable_copy --notes 'Alpha-23 rejection path intentionally did not apply proposal.patch; validation remains failed only in the disposable rejected worktree.'",
+    "pnpm dev packet inspect --packet /tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet --validate",
+    "# stdout: Run ID: alpha23-operator-patch-ux",
+    "# stderr: $ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet --validate",
+    "pnpm dev packet view --packet /tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet --out /tmp/runforge-alpha23-operator-patch-ux/factory/viewer",
+    "# stdout: Packet viewer written: /tmp/runforge-alpha23-operator-patch-ux/factory/viewer/index.html",
+    "# stderr: $ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha23-operator-patch-ux/factory/proposal-run/packet --out /tmp/runforge-alpha23-operator-patch-ux/factory/viewer",
+    "(cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)",
+    "(cd /Users/evgeny/Documents/projects/factory && git status --short)",
+    "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha23-operator-patch-ux/factory/index --dashboard-seed",
+    "# stdout: Indexed 11 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha23-operator-patch-ux/factory/index --dashboard-seed",
+    "pnpm dev dashboard build --seed /tmp/runforge-alpha23-operator-patch-ux/factory/index/dashboard-seed.json --out /tmp/runforge-alpha23-operator-patch-ux/factory/dashboard",
+    "# stdout: Dashboard written: /tmp/runforge-alpha23-operator-patch-ux/factory/dashboard/index.html",
+    "# stderr: $ tsx src/cli/index.ts dashboard build --seed /tmp/runforge-alpha23-operator-patch-ux/factory/index/dashboard-seed.json --out /tmp/runforge-alpha23-operator-patch-ux/factory/dashboard"
+  ],
+  "errors": [],
+  "finalVerdict": "passed"
+}

@@ -1,6 +1,6 @@
 # RunForge Alpha-21 Operator Accepted Patch Trial
 
-Generated at: 2026-07-07T04:08:32.556Z
+Generated at: 2026-07-07T05:46:41.586Z
 Trial root: /tmp/runforge-alpha21-operator-trial
 
 ## Outcome
@@ -28,7 +28,7 @@ Final verdict: passed
 ## Commands Run
 
 - pnpm dev external patch-trial --root /tmp/runforge-alpha21-operator-trial --out /tmp/runforge-alpha21-operator-trial/proposal-run --run-id alpha21-operator-patch-trial
-- # stdout: Patch trial fixture: /tmp/runforge-alpha21-operator-trial/source
+- # stdout: Patch trial source: /tmp/runforge-alpha21-operator-trial/source
 - # stderr: $ tsx src/cli/index.ts external patch-trial --root /tmp/runforge-alpha21-operator-trial --out /tmp/runforge-alpha21-operator-trial/proposal-run --run-id alpha21-operator-patch-trial
 - (cd /tmp/runforge-alpha21-operator-trial/source && node verify.js)
 - (cd /tmp/runforge-alpha21-operator-trial/operator-worktree && git apply /tmp/runforge-alpha21-operator-trial/proposal-run/packet/proposal.patch)
@@ -46,7 +46,7 @@ Final verdict: passed
 - (cd /tmp/runforge-alpha21-operator-trial/source && git rev-parse HEAD)
 - (cd /tmp/runforge-alpha21-operator-trial/source && git rev-parse HEAD)
 - pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha21-operator-trial/index --dashboard-seed
-- # stdout: Indexed 7 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
+- # stdout: Indexed 11 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
 - # stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha21-operator-trial/index --dashboard-seed
 - pnpm dev dashboard build --seed /tmp/runforge-alpha21-operator-trial/index/dashboard-seed.json --out /tmp/runforge-alpha21-operator-trial/dashboard
 - # stdout: Dashboard written: /tmp/runforge-alpha21-operator-trial/dashboard/index.html

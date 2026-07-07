@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-07T03:34:34.756Z",
+  "generatedAt": "2026-07-07T05:45:41.229Z",
   "repoRoot": "/Users/evgeny/Documents/projects/RunForge",
   "sources": {
     "runs": "validation/runs",
@@ -10,8 +10,8 @@
   "sourceCounts": {
     "okfFiles": 33,
     "skills": 0,
-    "validationRuns": 35,
-    "evidenceFiles": 54
+    "validationRuns": 40,
+    "evidenceFiles": 64
   },
   "okfEntryCounts": {
     "candidate": 1,
@@ -34,8 +34,8 @@
     "retired": 0
   },
   "lifecycleStatusCounts": {
-    "candidate": 33,
-    "active": 19,
+    "candidate": 35,
+    "active": 22,
     "needs_review": 0,
     "stale": 16,
     "duplicate": 0,
@@ -49,14 +49,21 @@
   "recommendations": [
     "Keep packets and dashboard/index records as runtime truth; use OKF as portable memory.",
     "Review candidate knowledge and skills before promotion.",
-    "Next milestone: Alpha-21 Operator Accepted Patch Trial with manual apply decisions only."
+    "Next milestone: harden the operator patch trial UX around proposal packets, patches, validation, decisions, dashboard rows, and lifecycle entries."
   ],
   "milestoneComparison": [
     "Alpha-17 run evidence is not present as validation/runs/ALPHA-17; Alpha-17 OKF and skills artifacts are covered through generated export, validation, inventory, and curator outputs.",
     "Alpha-19 added setup policy acceptance evidence across packets, dashboard data, and multi-repo validation.",
-    "Alpha-20 connects those artifacts into a lifecycle report with deterministic status counts, findings, recommendations, and safety summary."
+    "Alpha-20 connects those artifacts into a lifecycle report with deterministic status counts, findings, recommendations, and safety summary.",
+    "Alpha-21 records a manual operator accepted-patch trial with validation rerun evidence and no RunForge auto-apply.",
+    "Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately.",
+    "Alpha-23 hardens operator patch trial UX with decision summaries, safety lint, and accepted/rejected visibility."
   ],
   "evidenceLinks": [
+    "validation/runs/ADMIN-UI-2/results.json",
+    "validation/runs/ADMIN-UI-2/summary.md",
+    "validation/runs/ADMIN-UI-3/results.json",
+    "validation/runs/ADMIN-UI-3/summary.md",
     "validation/runs/ADMIN-UI-ALPHA/results.json",
     "validation/runs/ADMIN-UI-ALPHA/summary.md",
     "validation/runs/ALPHA-10/results.json",
@@ -79,6 +86,12 @@
     "validation/runs/ALPHA-19/results.json",
     "validation/runs/ALPHA-19/summary.md",
     "validation/runs/ALPHA-20/summary.md",
+    "validation/runs/ALPHA-21/results.json",
+    "validation/runs/ALPHA-21/summary.md",
+    "validation/runs/ALPHA-22/results.json",
+    "validation/runs/ALPHA-22/summary.md",
+    "validation/runs/ALPHA-23/results.json",
+    "validation/runs/ALPHA-23/summary.md",
     "validation/runs/ALPHA-3/results.json",
     "validation/runs/ALPHA-3/summary.md",
     "validation/runs/ALPHA-3A/score.json",
@@ -86,17 +99,7 @@
     "validation/runs/ALPHA-4/summary.md",
     "validation/runs/ALPHA-5/results.json",
     "validation/runs/ALPHA-5/summary.md",
-    "validation/runs/ALPHA-6/results.json",
-    "validation/runs/ALPHA-6/summary.md",
-    "validation/runs/ALPHA-7/results.json",
-    "validation/runs/ALPHA-7/summary.md",
-    "validation/runs/ALPHA-8/results.json",
-    "validation/runs/ALPHA-8/summary.md",
-    "validation/runs/ALPHA-9/results.json",
-    "validation/runs/ALPHA-9/summary.md",
-    "validation/runs/PACKET-VALIDATION/results.json",
-    "validation/runs/PACKET-VALIDATION/summary.md",
-    "validation/runs/RF-REAL-001/score.json"
+    "validation/runs/ALPHA-6/results.json"
   ],
   "validation": {
     "ok": true,
@@ -108,6 +111,12 @@
     "networkRequired": false,
     "providerCalls": false
   },
+  "operatorTrialCounts": {
+    "accepted": 3,
+    "rejected": 2,
+    "missingDecision": 2,
+    "unsafeMutation": 0
+  },
   "items": [
     {
       "id": "okf:index",
@@ -116,6 +125,8 @@
       "status": "active",
       "path": "validation/runs/ALPHA-20/generated/okf/index.md",
       "evidenceLinks": [
+        "milestones/admin-ui-2.md",
+        "milestones/admin-ui-3.md",
         "milestones/admin-ui-alpha.md",
         "milestones/alpha-3.md",
         "milestones/alpha-3a.md",
@@ -135,6 +146,9 @@
         "milestones/alpha-18.md",
         "milestones/alpha-19.md",
         "milestones/alpha-20.md",
+        "milestones/alpha-21.md",
+        "milestones/alpha-22.md",
+        "milestones/alpha-23.md",
         "milestones/case-001.md",
         "milestones/case-002.md",
         "milestones/case-003.md",
@@ -166,6 +180,10 @@
       "path": "validation/runs/ALPHA-20/generated/okf/log.md",
       "evidenceLinks": [
         "/Users/evgeny/Documents/projects/RunForge/validation/runs",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-2/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-2/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-3/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-3/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-ALPHA/summary.md",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-ALPHA/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-3/summary.md",
@@ -204,6 +222,12 @@
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-19/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-20/summary.md",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-20/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-21/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-21/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-22/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-22/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-23/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-23/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-001/summary.md",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-001/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-002/summary.md",
@@ -683,6 +707,30 @@
       "findings": []
     },
     {
+      "id": "evidence:ADMIN-UI-2",
+      "kind": "evidence",
+      "title": "ADMIN-UI-2",
+      "status": "candidate",
+      "path": "validation/runs/ADMIN-UI-2",
+      "evidenceLinks": [
+        "validation/runs/ADMIN-UI-2/summary.md",
+        "validation/runs/ADMIN-UI-2/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ADMIN-UI-3",
+      "kind": "evidence",
+      "title": "ADMIN-UI-3",
+      "status": "candidate",
+      "path": "validation/runs/ADMIN-UI-3",
+      "evidenceLinks": [
+        "validation/runs/ADMIN-UI-3/summary.md",
+        "validation/runs/ADMIN-UI-3/results.json"
+      ],
+      "findings": []
+    },
+    {
       "id": "evidence:ADMIN-UI-ALPHA",
       "kind": "evidence",
       "title": "ADMIN-UI-ALPHA",
@@ -907,6 +955,42 @@
       "evidenceLinks": [
         "validation/runs/ALPHA-20/summary.md",
         "validation/runs/ALPHA-20/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-21",
+      "kind": "evidence",
+      "title": "ALPHA-21",
+      "status": "active",
+      "path": "validation/runs/ALPHA-21",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-21/summary.md",
+        "validation/runs/ALPHA-21/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-22",
+      "kind": "evidence",
+      "title": "ALPHA-22",
+      "status": "active",
+      "path": "validation/runs/ALPHA-22",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-22/summary.md",
+        "validation/runs/ALPHA-22/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-23",
+      "kind": "evidence",
+      "title": "ALPHA-23",
+      "status": "active",
+      "path": "validation/runs/ALPHA-23",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-23/summary.md",
+        "validation/runs/ALPHA-23/results.json"
       ],
       "findings": []
     },

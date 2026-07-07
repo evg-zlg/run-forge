@@ -1,0 +1,88 @@
+{
+  "schemaVersion": "alpha-23-compact-lifecycle-report",
+  "generatedAt": "2026-07-07T05:47:04.599Z",
+  "validation": {
+    "ok": true,
+    "errors": []
+  },
+  "sourceCounts": {
+    "okfFiles": 33,
+    "skills": 0,
+    "validationRuns": 40,
+    "evidenceFiles": 63
+  },
+  "lifecycleStatusCounts": {
+    "candidate": 35,
+    "active": 22,
+    "needs_review": 0,
+    "stale": 16,
+    "duplicate": 0,
+    "missing_evidence": 0,
+    "unsafe": 0,
+    "retired": 0
+  },
+  "operatorTrialCounts": {
+    "accepted": 3,
+    "rejected": 2,
+    "missingDecision": 2,
+    "unsafeMutation": 0
+  },
+  "alpha23": {
+    "status": "active",
+    "realExternalRepoSource": "/Users/evgeny/Documents/projects/factory",
+    "disposableTrialRoot": "/tmp/runforge-alpha23-operator-patch-ux/factory",
+    "acceptedDecisions": 1,
+    "rejectedDecisions": 1,
+    "missingDecisions": 0,
+    "unsafeMutations": 0,
+    "originalRepoMutationVerdict": "unchanged",
+    "visibility": {
+      "operatorSummary": "validation/runs/ALPHA-23/operator-summary.md",
+      "evidenceResults": "validation/runs/ALPHA-23/results.json",
+      "evidenceSummary": "validation/runs/ALPHA-23/summary.md",
+      "lifecycleReport": "validation/runs/ALPHA-23/lifecycle-report.json",
+      "packetIndex": "/tmp/runforge-alpha23-operator-patch-ux/factory/index/index.json",
+      "dashboard": "/tmp/runforge-alpha23-operator-patch-ux/factory/dashboard/index.html",
+      "packetViewer": "/tmp/runforge-alpha23-operator-patch-ux/factory/viewer/index.html"
+    },
+    "safety": {
+      "noOriginalExternalRepoMutation": true,
+      "noAutoApplyByRunForge": true,
+      "runforgeApplyMode": "none",
+      "acceptedApplyMode": "operator_simulated_manual_apply",
+      "rejectedApplyMode": "operator_declined",
+      "acceptedAppliedTo": "disposable_copy",
+      "rejectedAppliedTo": "disposable_copy",
+      "noProviderCalls": true,
+      "noNetworkRequired": true,
+      "noDbAccess": true,
+      "noPushMergeDeploy": true,
+      "safetyLint": {
+        "passed": true,
+        "cases": [
+          "accepted_original_mutation",
+          "accepted_missing_after_validation",
+          "accepted_failed_after_validation",
+          "rejected_without_reason",
+          "missing_auto_apply_false",
+          "missing_applied_to",
+          "applied_to_original_repo",
+          "missing_packet_link",
+          "missing_safety_summary"
+        ],
+        "errors": []
+      }
+    }
+  },
+  "milestoneComparison": [
+    "Alpha-21 records a manual operator accepted-patch trial with validation rerun evidence and no RunForge auto-apply.",
+    "Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately.",
+    "Alpha-23 hardens operator patch trial UX with decision summaries, safety lint, and accepted/rejected visibility."
+  ],
+  "findings": [
+    "16 lifecycle items reference older milestones and should be reviewed."
+  ],
+  "recommendations": [
+    "Next milestone: Alpha-24 Real Operator Handoff Packet."
+  ]
+}
