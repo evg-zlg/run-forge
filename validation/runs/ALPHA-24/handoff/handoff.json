@@ -1,0 +1,59 @@
+{
+  "schemaVersion": "alpha-24-operator-handoff",
+  "trialId": "alpha24-operator-handoff",
+  "generatedAt": "2026-07-07T06:20:32.839Z",
+  "sourceRepo": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "headBefore": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "headAfter": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "statusBefore": "",
+    "statusAfter": "",
+    "originalRepoMutated": false,
+    "mutationVerdict": "unchanged"
+  },
+  "worktree": {
+    "path": "/tmp/runforge-alpha24-operator-handoff/factory/operator-accepted-worktree",
+    "type": "disposable_operator_worktree"
+  },
+  "failure": {
+    "command": "node runforge-alpha22-verify.cjs",
+    "status": "failed",
+    "summary": "Validation command failed before the proposal: node runforge-alpha22-verify.cjs."
+  },
+  "proposal": {
+    "outcome": "proposal_ready_verified",
+    "patchPath": "proposal.patch",
+    "autoAppliedByRunForge": false,
+    "operatorReviewRequired": true
+  },
+  "manualApply": {
+    "allowedTarget": "disposable_operator_worktree",
+    "forbiddenTarget": "original_repo",
+    "instructionsPath": "apply-instructions.md"
+  },
+  "validation": {
+    "command": "node runforge-alpha22-verify.cjs",
+    "instructionsPath": "validation.md"
+  },
+  "rollback": {
+    "instructionsPath": "rollback.md"
+  },
+  "decisionForms": {
+    "accepted": "decision-form.accepted.json",
+    "rejected": "decision-form.rejected.json"
+  },
+  "safety": {
+    "providerUsed": false,
+    "networkUsed": false,
+    "dbUsed": false,
+    "deployUsed": false,
+    "pushUsed": false,
+    "mergeUsed": false
+  },
+  "evidence": {
+    "packetPath": "/tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet",
+    "operatorSummaryPath": "/tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet/operator-summary.md",
+    "lifecycleReportPath": "/tmp/runforge-alpha24-operator-handoff/factory/lifecycle-report.json",
+    "evidenceLinksPath": "evidence-links.json"
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "alpha-24-operator-decision-template",
+  "decision": "accepted",
+  "finalOutcome": "accepted",
+  "reason": "validation_passed_after_operator_apply",
+  "appliedBy": "operator_manual",
+  "appliedTo": "disposable_copy",
+  "originalRepoMutated": false,
+  "afterValidation": "passed",
+  "proposalPacket": "/tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet",
+  "proposalPatch": "proposal.patch",
+  "apply": {
+    "mode": "operator_manual",
+    "appliedTo": "disposable_copy",
+    "originalRepoMutated": false
+  },
+  "validation": {
+    "command": "node runforge-alpha22-verify.cjs",
+    "passed": true,
+    "status": "passed"
+  },
+  "runforgeAppliedPatch": false,
+  "safety": {
+    "providerUsed": false,
+    "networkUsed": false,
+    "dbUsed": false,
+    "deployUsed": false,
+    "pushUsed": false,
+    "mergeUsed": false
+  }
+}

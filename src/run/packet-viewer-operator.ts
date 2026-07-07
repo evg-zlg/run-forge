@@ -14,6 +14,15 @@ export function renderOperatorDecision(record: Record<string, unknown> | null): 
   </div>`;
 }
 
+export function renderOperatorHandoff(record: Record<string, unknown> | null): string {
+  if (!record) return '<div class="meta">No operator handoff packet linked for this packet.</div>';
+  return `<div class="grid">
+    ${fact("Handoff README", String(record.readmePath ?? "unknown"))}
+    ${fact("Handoff JSON", String(record.handoffJsonPath ?? "unknown"))}
+    ${fact("Handoff dir", String(record.handoffDir ?? "unknown"))}
+  </div>`;
+}
+
 function fact(label: string, value: string): string {
   return `<div class="item"><div class="label">${escapeHtml(label)}</div><div class="value">${escapeHtml(value)}</div></div>`;
 }

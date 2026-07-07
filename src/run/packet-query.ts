@@ -37,6 +37,8 @@ export interface PacketQueryRecord {
   validationBefore: string;
   validationAfter: string;
   originalRepoMutated: boolean | null;
+  handoffReadmePath: string;
+  handoffJsonPath: string;
   notes: string;
 }
 
@@ -104,6 +106,8 @@ export interface DashboardSeedRecord {
   validationEvidencePath?: string;
   providerAuditPath?: string;
   proposalPatchPath?: string;
+  handoffReadmePath?: string;
+  handoffJsonPath?: string;
   humanReviewPath?: string;
   notes?: string;
   setupNetworkIntent?: string;
@@ -264,6 +268,8 @@ function toQueryRecord(entry: PacketIndexEntry): PacketQueryRecord {
     validationBefore: entry.validationBefore,
     validationAfter: entry.validationAfter,
     originalRepoMutated: entry.originalRepoMutated,
+    handoffReadmePath: entry.handoffReadmePath,
+    handoffJsonPath: entry.handoffJsonPath,
     notes: entry.notes
   };
 }
@@ -292,6 +298,8 @@ function toDashboardSeedRecord(entry: PacketIndexEntry, root: string): Dashboard
     validationEvidencePath: milestoneSummary,
     providerAuditPath: packetArtifact("provider-safety-report.json"),
     proposalPatchPath: entry.proposalPatchPath !== "unknown" ? entry.proposalPatchPath : packetArtifact("proposal.patch"),
+    handoffReadmePath: entry.handoffReadmePath !== "unknown" ? entry.handoffReadmePath : undefined,
+    handoffJsonPath: entry.handoffJsonPath !== "unknown" ? entry.handoffJsonPath : undefined,
     humanReviewPath: packetArtifact("human-review.md"),
     notes: entry.notes,
     setupNetworkIntent: setupNetworkIntent(entry),

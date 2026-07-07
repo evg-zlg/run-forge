@@ -19,6 +19,8 @@ export function renderDetails(record: DashboardRecord): string {
         ${artifactRow("Validation evidence path", record.validationEvidencePath)}
         ${artifactRow("Provider audit path", record.providerAuditPath)}
         ${artifactRow("Proposal patch path", record.proposalPatchPath)}
+        ${artifactRow("Handoff README path", record.handoffReadmePath)}
+        ${artifactRow("Handoff JSON path", record.handoffJsonPath)}
         ${artifactRow("Human review path", record.humanReviewPath)}
       </div>
       <p><strong>Safety notes:</strong> ${escapeHtml(record.safetyLabels.join(", ") || "none")}</p>
