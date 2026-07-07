@@ -3,7 +3,8 @@ import type {
   CommandPolicy,
   CommandResult,
   ExternalCheckStatus,
-  MutationVerdict
+  MutationVerdict,
+  SetupPolicy
 } from "./external-command-check-types.js";
 import { externalCheckSchemaVersion } from "./external-command-check-types.js";
 import type { WorkspaceChangeSummary } from "./external-command-check-git.js";
@@ -15,6 +16,7 @@ export function buildMetrics(input: {
   mainCommandsRequested: number;
   setupResults: CommandResult[];
   commandResults: CommandResult[];
+  setupPolicy: SetupPolicy;
   status: ExternalCheckStatus;
   workspaceChangeSummary: WorkspaceChangeSummary;
   originalBefore: { status: string | null };
@@ -32,6 +34,10 @@ export function buildMetrics(input: {
     setupCommandsFailed: input.setupResults.filter((result) => result.status === "failed").length,
     setupCommandsTimedOut: input.setupResults.filter((result) => result.status === "timed_out").length,
     setupDurationMs: input.setupResults.reduce((sum, result) => sum + result.durationMs, 0),
+    setupPolicy: input.setupPolicy,
+    setupNetworkIntent: input.setupPolicy.networkIntent,
+    continueAfterSetupFailure: input.setupPolicy.continueAfterSetupFailure,
+    mainCommandsSkippedOnSetupFailure: input.setupPolicy.mainCommandsSkippedOnSetupFailure,
     commandsRequested: input.mainCommandsRequested,
     commandsRun: input.commandResults.filter((result) => result.status !== "blocked").length,
     commandsPassed: input.commandResults.filter((result) => result.status === "passed").length,
@@ -83,6 +89,7 @@ export function renderSummary(input: {
   workspaceChangeSummary: WorkspaceChangeSummary;
   cliExitPolicy: CliExitPolicy;
   commandPolicy: CommandPolicy;
+  setupPolicy: SetupPolicy;
 }): string {
   const allResults = [...input.setupResults, ...input.commandResults];
   const truncated = allResults.some((result) => result.stdoutTruncated || result.stderrTruncated);
@@ -101,6 +108,11 @@ Workspace diff: ${input.workspaceChangeSummary.method}, ${input.workspaceChangeS
 Workspace changes: added ${input.workspaceChangeSummary.counts.added}, modified ${input.workspaceChangeSummary.counts.modified}, deleted ${input.workspaceChangeSummary.counts.deleted}
 ${renderWorkspaceFiles(input.workspaceChangeSummary)}
 
+Setup policy:
+- Network intent: ${input.setupPolicy.networkIntent}
+- Continue after setup failure: ${input.setupPolicy.continueAfterSetupFailure ? "yes" : "no"}
+- Main commands skipped on setup failure: ${input.setupPolicy.mainCommandsSkippedOnSetupFailure ? "yes" : "no"}
+
 Setup:
 ${input.setupResults.length > 0 ? input.setupResults.map(renderCommand).join("\n") : "No setup commands requested."}
 
@@ -109,6 +121,7 @@ ${input.commandResults.length > 0 ? input.commandResults.map(renderCommand).join
 
 ${input.status === "setup_failed" ? "Setup next action: inspect setup stdout/stderr logs, adjust dependency preparation or setup command, then rerun before attempting a code proposal." : ""}
 ${input.status === "setup_timed_out" ? "Setup timeout next action: inspect setup logs, then rerun with a larger --timeout-ms or narrower setup command if the duration was expected." : ""}
+${input.status.startsWith("setup_failed_main_") ? "Diagnostic mode: main commands ran despite setup failure.\nOperator caution: do not treat this as a clean verification environment." : ""}
 ${input.status === "timed_out" ? "Timeout next action: inspect the timed-out command logs, then rerun with a larger --timeout-ms or a narrower command if the timeout was expected." : ""}
 ${truncated ? "Warning: one or more command logs were truncated by --max-log-bytes. Inspect truncation flags before drawing conclusions from missing log tail content." : ""}
 
@@ -144,6 +157,9 @@ function suggestedNextAction(status: ExternalCheckStatus): string {
   if (status === "passed") return "Review summary.md and preserve this packet as evidence.";
   if (status === "setup_failed" || status === "setup_timed_out" || status === "setup_error") {
     return "Inspect the setup logs and rerun with corrected setup/preflight commands before failure triage or proposal work.";
+  }
+  if (status === "setup_failed_main_passed" || status === "setup_failed_main_failed") {
+    return "Fix setup/preflight first, then rerun a clean verification; diagnostic main-command logs are supporting evidence only.";
   }
   return "Inspect the command stderr/stdout logs and run failure triage when ready.";
 }

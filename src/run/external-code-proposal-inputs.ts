@@ -36,6 +36,8 @@ export async function createSourceReadinessPacket(
   const result = await runExternalProposalReadiness({
     repo: options.repo,
     setupCommands: options.setupCommands,
+    setupNetworkIntent: options.setupNetworkIntent,
+    continueAfterSetupFailure: options.continueAfterSetupFailure,
     commands: options.commands,
     out: readinessOut,
     timeoutMs: options.timeoutMs,

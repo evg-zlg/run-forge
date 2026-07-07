@@ -152,6 +152,7 @@ async function readViewerFiles(packetDir: string): Promise<Record<string, unknow
     "packet-manifest.json",
     "summary.md",
     "proposal-status.json",
+    "setup-results.json",
     "command-results.json",
     "verification-results.json",
     "safety-report.json",
@@ -177,7 +178,10 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
   const metrics = asRecord(files["metrics.json"]);
   const manifest = asRecord(files["packet-manifest.json"]);
   const proposalStatus = asRecord(files["proposal-status.json"]);
+  const run = asRecord(files["run.json"]);
+  const setupPolicy = asRecord(run?.setupPolicy);
   const safety = asRecord(files["provider-safety-report.json"]) ?? asRecord(files["safety-report.json"]);
+  const setupResults = asRecord(files["setup-results.json"]);
   const commandResults = asRecord(files["command-results.json"]) ?? asRecord(files["verification-results.json"]);
   const artifacts = Array.isArray(manifest?.artifacts) ? manifest.artifacts as Array<Record<string, unknown>> : inspection.artifacts;
   return `<!doctype html>
@@ -227,6 +231,8 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
         ${fact("Validation", inspection.validation?.passed ? "passed" : "failed")}
         ${fact("Reviewer", String(proposalStatus?.reviewerDecision ?? "n/a"))}
         ${fact("Outcome", String(proposalStatus?.outcome ?? inspection.status))}
+        ${fact("Setup network", String(setupPolicy?.networkIntent ?? "n/a"))}
+        ${fact("Setup mode", setupMode(setupPolicy))}
       </div>
     </section>
 
@@ -242,6 +248,9 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
 
     <section>
       <h2>Command Results</h2>
+      <h3>Setup</h3>
+      ${renderCommands(setupResults)}
+      <h3>Main</h3>
       ${renderCommands(commandResults)}
     </section>
 
@@ -297,6 +306,11 @@ function fact(label: string, value: string): string {
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null;
+}
+
+function setupMode(policy: Record<string, unknown> | null): string {
+  if (!policy) return "n/a";
+  return policy.continueAfterSetupFailure === true ? "diagnostic continue" : "gate main commands";
 }
 
 function escapeHtml(value: string): string {

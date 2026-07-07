@@ -69,7 +69,18 @@ const requiredByTaskType: Record<string, string[]> = {
 const requiredRunFields = ["schemaVersion", "runId", "taskType", "status"];
 const taskTypes = new Set(Object.keys(requiredByTaskType));
 const statusEnums: Record<string, Set<string>> = {
-  external_command_check: new Set(["passed", "failed", "timed_out", "error", "blocked", "setup_failed", "setup_timed_out", "setup_error"]),
+  external_command_check: new Set([
+    "passed",
+    "failed",
+    "timed_out",
+    "error",
+    "blocked",
+    "setup_failed",
+    "setup_timed_out",
+    "setup_error",
+    "setup_failed_main_passed",
+    "setup_failed_main_failed"
+  ]),
   external_failure_triage: new Set(["triaged", "no_failure_observed", "needs_more_context"]),
   external_proposal_readiness: new Set(["ready_for_code_proposal", "needs_more_context", "research_only", "blocked_by_safety", "no_failure_observed"]),
   external_code_proposal: new Set([
@@ -126,6 +137,13 @@ export async function validatePacket(packet: string): Promise<PacketValidationRe
   validateEvents(events, errors);
 
   if (taskType === "external_command_check") {
+    validateSetupPolicy(run?.setupPolicy, "run.json setupPolicy", errors);
+    validateSetupPolicy(metrics?.setupPolicy, "metrics.json setupPolicy", errors);
+    validateSetupPolicy(safety?.setupPolicy, "safety-report.json setupPolicy", errors);
+    if (metrics?.setupNetworkIntent !== undefined && !isSetupNetworkIntent(metrics.setupNetworkIntent)) {
+      errors.push("metrics.json setupNetworkIntent must be none, expected, or unknown");
+    }
+    if (safety?.setupNetworkIntentEnforced !== undefined) requireBoolean(safety, "safety-report.json", "setupNetworkIntentEnforced", errors);
     const commandResults = await readRequiredJson(join(packetDir, "command-results.json"), "command-results.json", errors);
     if (!Array.isArray(commandResults?.commands)) errors.push("command-results.json missing commands");
     requireString(commandResults, "command-results.json", "schemaVersion", errors);
@@ -245,6 +263,27 @@ function requireNumber(object: JsonObject | null, label: string, field: string, 
 function requireBoolean(object: JsonObject | null, label: string, field: string, errors: string[]): void {
   if (!object || object[field] === undefined || object[field] === null) return;
   if (typeof object[field] !== "boolean") errors.push(`${label} ${field} must be a boolean`);
+}
+
+function validateSetupPolicy(value: unknown, label: string, errors: string[]): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    errors.push(`${label} missing setup policy object`);
+    return;
+  }
+  const policy = value as JsonObject;
+  for (const field of ["setupCommandsProvided", "continueAfterSetupFailure", "mainCommandsSkippedOnSetupFailure"]) {
+    requireField(policy, label, field, errors);
+    requireBoolean(policy, label, field, errors);
+  }
+  requireField(policy, label, "networkIntent", errors);
+  requireString(policy, label, "networkIntent", errors);
+  if (policy.networkIntent !== undefined && !isSetupNetworkIntent(policy.networkIntent)) {
+    errors.push(`${label} networkIntent must be none, expected, or unknown`);
+  }
+}
+
+function isSetupNetworkIntent(value: unknown): boolean {
+  return value === "none" || value === "expected" || value === "unknown";
 }
 
 async function validateManifest(packetDir: string, manifest: JsonObject | null, errors: string[]): Promise<void> {

@@ -5,7 +5,16 @@ import { ensureDir, writeJson, writeText } from "../core/artifact-store.js";
 import { createRunId } from "../core/trajectory.js";
 import { runExternalFailureTriage } from "./external-failure-triage.js";
 import type { FailureTriageCategory, FailureTriageConfidence } from "./external-failure-triage-types.js";
+import type { SetupNetworkIntent, SetupPolicy } from "./external-command-check-types.js";
 import { artifactTypeFor, writePacketManifest, type ArtifactRecord } from "./external-command-check-packet.js";
+import {
+  decideReadiness,
+  type ProposalReadinessOutcome,
+  type ReadinessDecision,
+  type ReadinessSafetyReport,
+  type ReadinessTriageRun,
+  type ReadinessRootCause
+} from "./external-proposal-readiness-decision.js";
 import {
   renderExternalProposalReadinessCliSummary,
   renderMissingContext,
@@ -16,18 +25,14 @@ import {
 import { buildProposalContract } from "./external-proposal-readiness-contract.js";
 
 export const externalProposalReadinessSchemaVersion = "alpha-3b";
-
-export type ProposalReadinessOutcome =
-  | "ready_for_code_proposal"
-  | "needs_more_context"
-  | "research_only"
-  | "blocked_by_safety"
-  | "no_failure_observed";
+export type { ProposalReadinessOutcome, ReadinessDecision } from "./external-proposal-readiness-decision.js";
 
 export interface ExternalProposalReadinessOptions {
   fromTriagePacket?: string;
   repo?: string;
   setupCommands?: string[];
+  setupNetworkIntent?: SetupNetworkIntent;
+  continueAfterSetupFailure?: boolean;
   commands?: string[];
   out?: string;
   timeoutMs?: number;
@@ -46,31 +51,18 @@ export interface ExternalProposalReadinessResult {
   recommendedNextAction: string;
 }
 
-export interface TriageRootCause {
+export interface TriageRootCause extends ReadinessRootCause {
   sourceCheckPacket?: string;
-  category?: FailureTriageCategory;
-  confidence?: FailureTriageConfidence;
   requiresMoreContext?: boolean;
   readyForCodeProposal?: boolean;
-  safeNextAction?: string;
   evidenceBasis?: string[];
 }
 
-interface TriageRun {
-  status?: string;
-  sourceCheckStatus?: string;
-  category?: FailureTriageCategory;
-  confidence?: FailureTriageConfidence;
+interface TriageRun extends ReadinessTriageRun {
+  setupPolicy?: SetupPolicy;
 }
 
-interface TriageSafetyReport {
-  blockedCommands?: Array<{ reason?: string }>;
-  originalRepoMutationVerdict?: string;
-  noPushAttempted?: boolean;
-  noMergeAttempted?: boolean;
-  noDeployAttempted?: boolean;
-  noApplyToOriginalRepoAttempted?: boolean;
-}
+type TriageSafetyReport = ReadinessSafetyReport;
 
 export async function runExternalProposalReadiness(options: ExternalProposalReadinessOptions): Promise<ExternalProposalReadinessResult> {
   validateOptions(options);
@@ -241,6 +233,8 @@ async function createSourceTriagePacket(
   const result = await runExternalFailureTriage({
     repo: options.repo,
     setupCommands: options.setupCommands,
+    setupNetworkIntent: options.setupNetworkIntent,
+    continueAfterSetupFailure: options.continueAfterSetupFailure,
     commands: options.commands,
     out: triageOut,
     timeoutMs: options.timeoutMs,
@@ -263,87 +257,6 @@ async function readOptionalJson<T>(path: string): Promise<T | null> {
   }
 }
 
-export interface ReadinessDecision {
-  readinessOutcome: ProposalReadinessOutcome;
-  canAttemptCodeProposal: boolean;
-  failureCategory: FailureTriageCategory;
-  confidence: FailureTriageConfidence;
-  missingContext: string[];
-  recommendedNextAction: string;
-}
-function decideReadiness(rootCause: TriageRootCause, triageRun: TriageRun | null, safety: TriageSafetyReport | null): ReadinessDecision {
-  const failureCategory = rootCause.category ?? triageRun?.category ?? "unknown_failure";
-  const confidence = rootCause.confidence ?? triageRun?.confidence ?? "low";
-  if (hasSafetyBlocker(safety)) {
-    return {
-      readinessOutcome: "blocked_by_safety",
-      canAttemptCodeProposal: false,
-      failureCategory,
-      confidence,
-      missingContext: ["Safety report indicates a blocked command or original repository mutation risk."],
-      recommendedNextAction: "Resolve the safety blocker before attempting any code proposal."
-    };
-  }
-  if (failureCategory === "no_failure_observed" || triageRun?.status === "no_failure_observed") {
-    return {
-      readinessOutcome: "no_failure_observed",
-      canAttemptCodeProposal: false,
-      failureCategory: "no_failure_observed",
-      confidence: "high",
-      missingContext: [],
-      recommendedNextAction: "No code proposal is needed because the source packet did not observe a failure."
-    };
-  }
-  if (failureCategory === "timeout") {
-    return {
-      readinessOutcome: "research_only",
-      canAttemptCodeProposal: false,
-      failureCategory,
-      confidence,
-      missingContext: ["The timeout evidence does not identify a deterministic source edit."],
-      recommendedNextAction: "Research the timeout with narrower commands or larger timeout limits before proposing code."
-    };
-  }
-  if (failureCategory === "dependency_missing" || failureCategory === "environment_error" || failureCategory === "configuration_error" || failureCategory === "command_not_found") {
-    return {
-      readinessOutcome: "needs_more_context",
-      canAttemptCodeProposal: false,
-      failureCategory,
-      confidence,
-      missingContext: [`${failureCategory} requires dependency, tool, or environment setup before source edits are safe to consider.`],
-      recommendedNextAction: setupRecommendedNextAction(rootCause.safeNextAction)
-    };
-  }
-  if (failureCategory === "test_assertion_failure" || failureCategory === "typecheck_error" || failureCategory === "lint_error" || failureCategory === "build_error") {
-    return {
-      readinessOutcome: "ready_for_code_proposal",
-      canAttemptCodeProposal: true,
-      failureCategory,
-      confidence: confidence === "low" ? "medium" : confidence,
-      missingContext: [],
-      recommendedNextAction: "Create a proposal patch in a disposable workspace and verify it there; human review remains required."
-    };
-  }
-  return {
-    readinessOutcome: "needs_more_context",
-    canAttemptCodeProposal: false,
-    failureCategory,
-    confidence,
-    missingContext: [`${failureCategory} is not deterministic enough for the current proposal engine.`],
-    recommendedNextAction: rootCause.safeNextAction ?? "Collect more focused failure evidence before attempting a code proposal."
-  };
-}
-
-function setupRecommendedNextAction(fallback?: string): string {
-  return fallback ?? "Install or prepare dependencies in the disposable workspace, or provide an explicit setup command, then rerun the failing command before attempting a code proposal.";
-}
-
-function hasSafetyBlocker(safety: TriageSafetyReport | null): boolean {
-  if (!safety) return false;
-  if ((safety.blockedCommands?.length ?? 0) > 0) return true;
-  if (safety.originalRepoMutationVerdict === "changed") return true;
-  return safety.noPushAttempted === false || safety.noMergeAttempted === false || safety.noDeployAttempted === false || safety.noApplyToOriginalRepoAttempted === false;
-}
 function defaultOutDir(): string {
   return join(process.cwd(), "artifacts", "external-proposal-readiness");
 }

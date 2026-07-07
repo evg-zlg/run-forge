@@ -1,4 +1,5 @@
 import type { CommandResult } from "./external-command-check-types.js";
+import type { SetupNetworkIntent, SetupPolicy } from "./external-command-check-types.js";
 
 export const externalFailureTriageSchemaVersion = "alpha-3a";
 
@@ -22,6 +23,8 @@ export interface ExternalFailureTriageOptions {
   fromCheckPacket?: string;
   repo?: string;
   setupCommands?: string[];
+  setupNetworkIntent?: SetupNetworkIntent;
+  continueAfterSetupFailure?: boolean;
   commands?: string[];
   out?: string;
   timeoutMs?: number;
@@ -50,6 +53,7 @@ export interface ExternalFailureTriageSourceRun {
   runId?: string;
   taskType?: string;
   status?: string;
+  setupPolicy?: SetupPolicy;
   repo?: { path?: string };
   commands?: CommandResult[];
 }

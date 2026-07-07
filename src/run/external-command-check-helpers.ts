@@ -43,12 +43,16 @@ export function finalStatus(
   current: ExternalCheckStatus,
   setupResults: CommandResult[],
   commandResults: CommandResult[],
-  mutationVerdict: string
+  mutationVerdict: string,
+  continueAfterSetupFailure = false
 ): ExternalCheckStatus {
   if (mutationVerdict === "changed") return "error";
   if (current === "blocked") return "blocked";
   const setupFailure = setupPhaseStatus(setupResults);
-  if (setupResults.length > 0 && setupFailure !== "setup_passed") return setupFailure;
+  if (setupResults.length > 0 && setupFailure !== "setup_passed") {
+    if (!continueAfterSetupFailure) return setupFailure;
+    return mainCommandsPassed(commandResults) ? "setup_failed_main_passed" : "setup_failed_main_failed";
+  }
   if (commandResults.some((result) => result.status === "timed_out")) return "timed_out";
   if (commandResults.some((result) => result.status === "error")) return "error";
   if (commandResults.some((result) => result.status === "failed")) return "failed";
@@ -80,4 +84,8 @@ function blockedExternalCommandReason(command: string): string | undefined {
   if (/\bgit\s+merge\b/.test(command)) return "Blocked external check command: git merge is not allowed.";
   if (/\bdeploy\b/.test(command)) return "Blocked external check command: deploy commands are not allowed.";
   return undefined;
+}
+
+function mainCommandsPassed(commandResults: CommandResult[]): boolean {
+  return commandResults.length > 0 && commandResults.every((result) => result.status === "passed");
 }
