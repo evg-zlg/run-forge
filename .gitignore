@@ -41,6 +41,10 @@ validation/runs/*/*
 !validation/runs/ALPHA-19/
 !validation/runs/ALPHA-19/summary.md
 !validation/runs/ALPHA-19/results.json
+!validation/runs/ALPHA-21/
+!validation/runs/ALPHA-21/summary.md
+!validation/runs/ALPHA-21/results.json
+!validation/runs/ALPHA-21/lifecycle-report.json
 !validation/runs/ADMIN-UI-ALPHA/
 !validation/runs/ADMIN-UI-ALPHA/summary.md
 !validation/runs/ADMIN-UI-ALPHA/results.json

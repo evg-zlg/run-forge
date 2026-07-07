@@ -4,6 +4,12 @@ import { renderExternalCommandCheckCliSummary, runExternalCommandCheck } from ".
 import { buildExternalDocsProposalSpec, renderExternalDocsProposalSummary, runExternalDocsProposalPacket } from "../../run/external-docs-proposal.js";
 import { renderExternalProposalReadinessCliSummary, runExternalProposalReadiness } from "../../run/external-proposal-readiness.js";
 import { renderExternalCodeProposalCliSummary, runExternalCodeProposal } from "../../run/external-code-proposal.js";
+import {
+  recordExternalPatchDecision,
+  renderExternalPatchTrialSummary,
+  renderExternalRecordDecisionSummary,
+  runExternalPatchTrial
+} from "../../run/external-operator-patch-trial.js";
 
 export function externalCommand(): Command {
   const external = new Command("external").description("Run safe packet-producing workflows for explicitly declared external local repositories.");
@@ -11,6 +17,8 @@ export function externalCommand(): Command {
   external.addCommand(failureTriageCommand());
   external.addCommand(proposalReadinessCommand());
   external.addCommand(codeProposalCommand());
+  external.addCommand(patchTrialCommand());
+  external.addCommand(recordDecisionCommand());
   external.addCommand(docsProposalCommand());
   return external;
 }
@@ -158,6 +166,58 @@ function codeProposalCommand(): Command {
     });
 }
 
+function patchTrialCommand(): Command {
+  return new Command("patch-trial")
+    .description("Create a controlled failing fixture and generate a proposal-only operator patch trial packet.")
+    .option("--root <path>", "trial root directory (default: /tmp/runforge-alpha21-operator-trial)")
+    .option("--out <artifact-dir>", "proposal artifact output directory")
+    .option("--run-id <id>", "run id recorded in the proposal packet")
+    .action(async (opts) => {
+      try {
+        const result = await runExternalPatchTrial({
+          root: opts.root as string | undefined,
+          out: opts.out as string | undefined,
+          runId: opts.runId as string | undefined
+        });
+        console.log(renderExternalPatchTrialSummary(result));
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+function recordDecisionCommand(): Command {
+  return new Command("record-decision")
+    .description("Rerun validation against a manually patched disposable repo and record the operator acceptance decision.")
+    .requiredOption("--proposal-packet <packet-dir>", "proposal packet directory that contains proposal.patch")
+    .requiredOption("--repo <path>", "operator-controlled repo/worktree to validate")
+    .requiredOption("--command <command>", "validation command to rerun; repeatable", collect, [])
+    .requiredOption("--decision <decision>", "operator decision: accepted or rejected", parseOperatorDecision)
+    .option("--out <artifact-dir>", "decision artifact output directory")
+    .option("--run-id <id>", "run id recorded in decision artifacts")
+    .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger)
+    .option("--max-log-bytes <bytes>", "maximum captured bytes per stdout/stderr log", parsePositiveInteger)
+    .option("--notes <text>", "operator decision notes")
+    .action(async (opts) => {
+      try {
+        const result = await recordExternalPatchDecision({
+          proposalPacket: opts.proposalPacket as string,
+          repo: opts.repo as string,
+          commands: opts.command as string[],
+          decision: opts.decision as "accepted" | "rejected",
+          out: opts.out as string | undefined,
+          runId: opts.runId as string | undefined,
+          timeoutMs: opts.timeoutMs as number | undefined,
+          maxLogBytes: opts.maxLogBytes as number | undefined,
+          notes: opts.notes as string | undefined
+        });
+        console.log(renderExternalRecordDecisionSummary(result));
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
 function docsProposalCommand(): Command {
   return new Command("docs-proposal")
     .description("Create a proposal-only external docs packet from CLI flags.")
@@ -228,4 +288,9 @@ function parseSetupNetworkIntent(value: string): "none" | "expected" | "unknown"
 function parseProvider(value: string): "cli" {
   if (value === "cli") return value;
   throw new InvalidArgumentError("--provider must be cli.");
+}
+
+function parseOperatorDecision(value: string): "accepted" | "rejected" {
+  if (value === "accepted" || value === "rejected") return value;
+  throw new InvalidArgumentError("--decision must be accepted or rejected.");
 }

@@ -9,6 +9,7 @@ export async function buildEvidenceBasedCodeProposal(
   evidence?: DeterministicCodeProposalEvidence
 ): Promise<DeterministicCodeProposal | null> {
   return await buildLiteralMismatchProposal(spec, evidence)
+    ?? await buildArithmeticOffByOneSourceProposal(spec, evidence)
     ?? await buildMissingExportAliasProposal(spec, evidence)
     ?? await buildImportPathRewriteProposal(spec, evidence)
     ?? await buildConfigLiteralMismatchProposal(spec, evidence)
@@ -36,6 +37,25 @@ async function buildLiteralMismatchProposal(spec: RunSpec, evidence?: Determinis
   };
 }
 
+async function buildArithmeticOffByOneSourceProposal(spec: RunSpec, evidence?: DeterministicCodeProposalEvidence): Promise<DeterministicCodeProposal | null> {
+  if (evidence?.failureCategory && evidence.failureCategory !== "test_assertion_failure") return null;
+  const mismatch = parseExpectedReceived(evidence?.evidenceText ?? "");
+  if (!mismatch) return null;
+  const expected = Number(mismatch.expected);
+  const received = Number(mismatch.received);
+  if (!Number.isFinite(expected) || !Number.isFinite(received) || Math.abs(expected - received) !== 1) return null;
+  const candidates = await listRepoFiles(spec.repoPath, (file) => /\.(?:[cm]?js|[cm]?ts)$/.test(file) && !/\.(?:test|spec)\./.test(file));
+  const replacement = await findSingleArithmeticOffsetReplacement(spec.repoPath, candidates, received > expected ? "remove_plus_one" : "remove_minus_one");
+  if (!replacement) return null;
+  return {
+    taskSummary: spec.goal ?? "Fix the source arithmetic offset.",
+    filesChanged: [replacement.file],
+    rationale: `The failure evidence reports a one-unit arithmetic mismatch: expected ${expected} but received ${received}. Exactly one source return expression has the matching offset, so the proposal removes only that offset.`,
+    patch: renderUnifiedDiff(replacement.file, replacement.before, replacement.after),
+    strategy: "source_arithmetic_off_by_one", evidenceFiles: [replacement.file],
+    evidenceSummary: [`Failure evidence contained Expected/Received numeric literals: ${expected} -> ${received}.`]
+  };
+}
 async function buildMissingExportAliasProposal(spec: RunSpec, evidence?: DeterministicCodeProposalEvidence): Promise<DeterministicCodeProposal | null> {
   if (evidence?.failureCategory && evidence.failureCategory !== "typecheck_error") return null;
   const parsed = parseMissingExport(evidence?.evidenceText ?? "");
@@ -150,6 +170,22 @@ async function findSingleLiteralReplacement(repoPath: string, files: string[], e
     const replacement = [{ from: JSON.stringify(expected), to: JSON.stringify(received) }, { from: `'${expected}'`, to: `'${received}'` }, { from: expected, to: received }]
       .find((candidate) => countOccurrences(before, candidate.from) === 1);
     if (replacement) matches.push({ file, before, after: before.replace(replacement.from, replacement.to) });
+  }
+  return matches.length === 1 ? matches[0]! : null;
+}
+
+async function findSingleArithmeticOffsetReplacement(repoPath: string, files: string[], mode: "remove_plus_one" | "remove_minus_one"): Promise<{ file: string; before: string; after: string } | null> {
+  const patterns = mode === "remove_plus_one" ? [/return\s+([^;\n]+?)\s*\+\s*1\s*;/g, /return\s+1\s*\+\s*([^;\n]+?)\s*;/g] : [/return\s+([^;\n]+?)\s*-\s*1\s*;/g];
+  const matches: Array<{ file: string; before: string; after: string }> = [];
+  for (const file of files) {
+    const before = await readOptionalRepoFile(repoPath, file);
+    if (!before) continue;
+    for (const pattern of patterns) {
+      const found = [...before.matchAll(pattern)]
+        .filter((match) => typeof match[1] === "string" && match[1]!.trim().length > 0);
+      if (found.length !== 1) continue;
+      matches.push({ file, before, after: before.replace(found[0]![0], `return ${found[0]![1]!.trim()};`) });
+    }
   }
   return matches.length === 1 ? matches[0]! : null;
 }
