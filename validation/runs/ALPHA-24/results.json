@@ -1,0 +1,114 @@
+{
+  "schemaVersion": "alpha-24-operator-handoff",
+  "generatedAt": "2026-07-07T06:20:35.415Z",
+  "trialRoot": "/tmp/runforge-alpha24-operator-handoff/factory",
+  "originalRepo": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "beforeHead": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "beforeStatus": "",
+    "afterHead": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "afterStatus": "",
+    "mutationVerdict": "unchanged"
+  },
+  "disposable": {
+    "sourceRepo": "/tmp/runforge-alpha24-operator-handoff/factory/source-copy",
+    "acceptedOperatorWorktree": "/tmp/runforge-alpha24-operator-handoff/factory/operator-accepted-worktree",
+    "rejectedOperatorWorktree": "/tmp/runforge-alpha24-operator-handoff/factory/operator-rejected-worktree",
+    "failureMode": "injected_into_disposable_copy",
+    "validationCommand": "node runforge-alpha22-verify.cjs"
+  },
+  "proposalPacket": "/tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet",
+  "proposalPatch": "/tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet/proposal.patch",
+  "handoff": {
+    "dir": "/tmp/runforge-alpha24-operator-handoff/factory/handoff",
+    "readme": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/README.md",
+    "json": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/handoff.json",
+    "trackedReadme": "validation/runs/ALPHA-24/handoff/README.md",
+    "trackedJson": "validation/runs/ALPHA-24/handoff/handoff.json",
+    "applyInstructions": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/apply-instructions.md",
+    "validationInstructions": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/validation.md",
+    "rollbackInstructions": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/rollback.md",
+    "acceptedDecisionForm": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/decision-form.accepted.json",
+    "rejectedDecisionForm": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/decision-form.rejected.json"
+  },
+  "attempts": [
+    {
+      "id": "factory-disposable-handoff",
+      "repo": "/Users/evgeny/Documents/projects/factory",
+      "decision": "handoff_generated",
+      "packet": "/tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet",
+      "viewer": "/tmp/runforge-alpha24-operator-handoff/factory/viewer/index.html",
+      "outcome": "operator_handoff_generated",
+      "providerStatus": "disabled",
+      "filesChanged": [
+        "runforge-alpha22/math.cjs"
+      ],
+      "externalRepoHeadBefore": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "externalRepoHeadAfter": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "manualApply": false,
+      "appliedTo": "disposable_copy",
+      "originalRepoMutated": false,
+      "validationBefore": "failed",
+      "validationAfter": "pending_operator",
+      "proposalPatch": "/tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet/proposal.patch",
+      "handoffReadme": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/README.md",
+      "handoffJson": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/handoff.json"
+    }
+  ],
+  "safety": {
+    "noOriginalExternalRepoMutation": true,
+    "noAutoApplyByRunForge": true,
+    "noProviderCalls": true,
+    "noNetworkRequired": true,
+    "noDbAccess": true,
+    "noPushMergeDeploy": true,
+    "handoffValidation": {
+      "passed": true,
+      "errors": []
+    }
+  },
+  "visibility": {
+    "packetIndex": "/tmp/runforge-alpha24-operator-handoff/factory/index/index.json",
+    "dashboard": "/tmp/runforge-alpha24-operator-handoff/factory/dashboard/index.html",
+    "packetViewer": "/tmp/runforge-alpha24-operator-handoff/factory/viewer/index.html",
+    "lifecycleReport": "validation/runs/ALPHA-24/lifecycle-report.json"
+  },
+  "limitations": [
+    "The real repo source was Factory, but the failure was intentionally injected only into the disposable copy.",
+    "Alpha-24 creates an operator handoff bundle; it still does not auto-apply to protected repositories."
+  ],
+  "commandsRun": [
+    "(cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)",
+    "(cd /Users/evgeny/Documents/projects/factory && git status --short)",
+    "pnpm dev external patch-trial --repo /Users/evgeny/Documents/projects/factory --mode real-repo-disposable --out /tmp/runforge-alpha24-operator-handoff/factory --run-id alpha24-operator-handoff",
+    "# stdout: Patch trial source: /tmp/runforge-alpha24-operator-handoff/factory/source-copy",
+    "# stderr: $ tsx src/cli/index.ts external patch-trial --repo /Users/evgeny/Documents/projects/factory --mode real-repo-disposable --out /tmp/runforge-alpha24-operator-handoff/factory --run-id alpha24-operator-handoff",
+    "(cd /tmp/runforge-alpha24-operator-handoff/factory/operator-accepted-worktree && git apply /tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet/proposal.patch)",
+    "(cd /tmp/runforge-alpha24-operator-handoff/factory/operator-accepted-worktree && node runforge-alpha22-verify.cjs)",
+    "pnpm dev external handoff-packet --trial /tmp/runforge-alpha24-operator-handoff/factory --out /tmp/runforge-alpha24-operator-handoff/factory/handoff --operator-worktree /tmp/runforge-alpha24-operator-handoff/factory/operator-accepted-worktree --validation-command node runforge-alpha22-verify.cjs --trial-id alpha24-operator-handoff",
+    "# stdout: Operator handoff packet: /tmp/runforge-alpha24-operator-handoff/factory/handoff",
+    "# stderr: $ tsx src/cli/index.ts external handoff-packet --trial /tmp/runforge-alpha24-operator-handoff/factory --out /tmp/runforge-alpha24-operator-handoff/factory/handoff --operator-worktree /tmp/runforge-alpha24-operator-handoff/factory/operator-accepted-worktree --validation-command 'node runforge-alpha22-verify.cjs' --trial-id alpha24-operator-handoff",
+    "pnpm dev external record-decision --proposal-packet /tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet --repo /tmp/runforge-alpha24-operator-handoff/factory/operator-accepted-worktree --command node runforge-alpha22-verify.cjs --decision accepted --out /tmp/runforge-alpha24-operator-handoff/factory/accepted-decision --run-id alpha24-operator-accepted --reason validation_passed_after_operator_apply --apply-mode operator_manual --applied-to disposable_copy --notes Alpha-24 accepted evidence used the handoff decision template and disposable operator worktree.",
+    "# stdout: Operator decision recorded: accepted",
+    "# stderr: $ tsx src/cli/index.ts external record-decision --proposal-packet /tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet --repo /tmp/runforge-alpha24-operator-handoff/factory/operator-accepted-worktree --command 'node runforge-alpha22-verify.cjs' --decision accepted --out /tmp/runforge-alpha24-operator-handoff/factory/accepted-decision --run-id alpha24-operator-accepted --reason validation_passed_after_operator_apply --apply-mode operator_manual --applied-to disposable_copy --notes 'Alpha-24 accepted evidence used the handoff decision template and disposable operator worktree.'",
+    "pnpm dev external record-decision --proposal-packet /tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet --repo /tmp/runforge-alpha24-operator-handoff/factory/operator-rejected-worktree --command node runforge-alpha22-verify.cjs --decision rejected --out /tmp/runforge-alpha24-operator-handoff/factory/rejected-decision --run-id alpha24-operator-rejected --reason operator_declined --apply-mode operator_declined --applied-to disposable_copy --notes Alpha-24 rejected evidence declined the handoff proposal and left the disposable worktree failing.",
+    "# stdout: Operator decision recorded: rejected",
+    "# stderr: $ tsx src/cli/index.ts external record-decision --proposal-packet /tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet --repo /tmp/runforge-alpha24-operator-handoff/factory/operator-rejected-worktree --command 'node runforge-alpha22-verify.cjs' --decision rejected --out /tmp/runforge-alpha24-operator-handoff/factory/rejected-decision --run-id alpha24-operator-rejected --reason operator_declined --apply-mode operator_declined --applied-to disposable_copy --notes 'Alpha-24 rejected evidence declined the handoff proposal and left the disposable worktree failing.'",
+    "pnpm dev packet inspect --packet /tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet --validate",
+    "# stdout: Run ID: alpha24-operator-handoff",
+    "# stderr: $ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet --validate",
+    "pnpm dev packet view --packet /tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet --out /tmp/runforge-alpha24-operator-handoff/factory/viewer",
+    "# stdout: Packet viewer written: /tmp/runforge-alpha24-operator-handoff/factory/viewer/index.html",
+    "# stderr: $ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet --out /tmp/runforge-alpha24-operator-handoff/factory/viewer",
+    "(cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)",
+    "(cd /Users/evgeny/Documents/projects/factory && git status --short)",
+    "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha24-operator-handoff/factory/index --dashboard-seed",
+    "# stdout: Indexed 12 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha24-operator-handoff/factory/index --dashboard-seed",
+    "pnpm dev dashboard build --seed /tmp/runforge-alpha24-operator-handoff/factory/index/dashboard-seed.json --out /tmp/runforge-alpha24-operator-handoff/factory/dashboard",
+    "# stdout: Dashboard written: /tmp/runforge-alpha24-operator-handoff/factory/dashboard/index.html",
+    "# stderr: $ tsx src/cli/index.ts dashboard build --seed /tmp/runforge-alpha24-operator-handoff/factory/index/dashboard-seed.json --out /tmp/runforge-alpha24-operator-handoff/factory/dashboard"
+  ],
+  "errors": [],
+  "finalVerdict": "passed"
+}

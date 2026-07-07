@@ -2,7 +2,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { inspectPacket } from "./packet-inspector.js";
 import type { PacketIndexResult } from "./packet-indexer.js";
-import { renderOperatorDecision } from "./packet-viewer-operator.js";
+import { renderOperatorDecision, renderOperatorHandoff } from "./packet-viewer-operator.js";
 
 interface ViewerOptions {
   packet: string;
@@ -161,6 +161,8 @@ async function readViewerFiles(packetDir: string): Promise<Record<string, unknow
     "human-review.md",
     "operator-decision.json",
     "operator-summary.md",
+    "operator-handoff.json",
+    "operator-handoff.md",
     "proposal.patch"
   ];
   const files: Record<string, unknown> = {};
@@ -187,6 +189,7 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
   const setupResults = asRecord(files["setup-results.json"]);
   const commandResults = asRecord(files["command-results.json"]) ?? asRecord(files["verification-results.json"]);
   const operatorDecision = asRecord(files["operator-decision.json"]);
+  const operatorHandoff = asRecord(files["operator-handoff.json"]);
   const artifacts = Array.isArray(manifest?.artifacts) ? manifest.artifacts as Array<Record<string, unknown>> : inspection.artifacts;
   return `<!doctype html>
 <html lang="en">
@@ -239,17 +242,14 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
         ${fact("Setup mode", setupMode(setupPolicy))}
       </div>
     </section>
-
     <section>
       <h2>Validation Errors</h2>
       ${renderValidationErrors(inspection.validation?.errors ?? [])}
     </section>
-
     <section>
       <h2>Worker Graph</h2>
       <div class="graph">${renderGraph(inspection.route)}</div>
     </section>
-
     <section>
       <h2>Command Results</h2>
       <h3>Setup</h3>
@@ -276,6 +276,11 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
     <section>
       <h2>Operator Decision</h2>
       ${renderOperatorDecision(operatorDecision)}
+    </section>
+
+    <section><h2>Operator Handoff</h2>
+      ${renderOperatorHandoff(operatorHandoff)}
+      <pre>${escapeHtml(String(files["operator-handoff.md"] ?? ""))}</pre>
     </section>
 
     <section>

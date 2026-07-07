@@ -67,7 +67,9 @@ describe("packet indexer", () => {
         outcome: "provider_rejected",
         providerStatus: "rejected",
         filesChanged: [],
-        manualApply: false
+        manualApply: false,
+        handoffReadme: "/tmp/runforge-alpha9/handoff/README.md",
+        handoffJson: "/tmp/runforge-alpha9/handoff/handoff.json"
       }]
     }), "utf8");
 
@@ -78,7 +80,9 @@ describe("packet indexer", () => {
     expect(index.entries[0].milestone).toBe("ALPHA-9");
     expect(index.entries[0].decision).toBe("provider_rejected");
     expect(index.entries[0].externalRepoMutationVerdict).toBe("unchanged");
+    expect(index.entries[0].handoffReadmePath).toBe("/tmp/runforge-alpha9/handoff/README.md");
     expect(markdown).toContain("smartsql-provider-reject");
+    expect(markdown).toContain("/tmp/runforge-alpha9/handoff/README.md");
   });
 
   it("queries packet indexes with filters and renders clear empty output", async () => {

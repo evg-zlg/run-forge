@@ -39,6 +39,8 @@ export function searchableRecordText(record: DashboardSeedRecord): string {
     record.mutationVerdict,
     typeof raw.setupNetworkIntent === "string" ? raw.setupNetworkIntent : "",
     typeof raw.setupDiagnosticMode === "string" ? raw.setupDiagnosticMode : "",
+    typeof raw.handoffReadmePath === "string" ? raw.handoffReadmePath : "",
+    typeof raw.handoffJsonPath === "string" ? raw.handoffJsonPath : "",
     ...(Array.isArray(record.tags) ? record.tags : []),
     typeof raw.notes === "string" ? raw.notes : ""
   ].join(" ").toLowerCase();

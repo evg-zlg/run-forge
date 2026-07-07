@@ -4,10 +4,7 @@ import { renderPacketIndexMarkdown } from "./packet-index-renderer.js";
 
 export { renderPacketIndexMarkdown, renderPacketIndexText } from "./packet-index-renderer.js";
 
-export interface PacketIndexOptions {
-  root: string;
-  out?: string;
-}
+export interface PacketIndexOptions { root: string; out?: string; }
 
 export interface PacketIndexEntry {
   milestone: string;
@@ -28,16 +25,13 @@ export interface PacketIndexEntry {
   validationBefore: string;
   validationAfter: string;
   proposalPatchPath: string;
+  handoffReadmePath: string;
+  handoffJsonPath: string;
   originalRepoMutated: boolean | null;
   notes: string;
 }
 
-export interface PacketIndexResult {
-  schemaVersion: "packet-index-v1";
-  generatedAt: string;
-  root: string;
-  entries: PacketIndexEntry[];
-}
+export interface PacketIndexResult { schemaVersion: "packet-index-v1"; generatedAt: string; root: string; entries: PacketIndexEntry[]; }
 
 interface DogfoodIndexEntry {
   repo?: string;
@@ -57,6 +51,8 @@ interface DogfoodIndexEntry {
   validationBefore?: string;
   validationAfter?: string;
   proposalPatchPath?: string;
+  handoffReadmePath?: string;
+  handoffJsonPath?: string;
   originalRepoMutated?: boolean | null;
 }
 
@@ -77,56 +73,34 @@ interface ResultsAttempt {
   validationBefore?: string;
   validationAfter?: string;
   proposalPatch?: string;
+  handoffReadme?: string;
+  handoffJson?: string;
 }
 
-interface ResultsJson {
-  externalRepo?: RepoState;
-  originalRepo?: RepoState;
-  attempts?: ResultsAttempt[];
-}
+interface ResultsJson { externalRepo?: RepoState; originalRepo?: RepoState; attempts?: ResultsAttempt[]; }
 
 interface RepoState { beforeHead?: string | null; afterHead?: string | null; mutationVerdict?: string; }
 
 interface RunJson {
   taskType?: string;
   status?: string;
-  setupPolicy?: {
-    networkIntent?: string;
-    continueAfterSetupFailure?: boolean;
-    mainCommandsSkippedOnSetupFailure?: boolean;
-  };
-  repo?: {
-    path?: string;
-    mutationVerdict?: string;
-    headBefore?: string | null;
-    headAfter?: string | null;
-  } | null;
+  setupPolicy?: { networkIntent?: string; continueAfterSetupFailure?: boolean; mainCommandsSkippedOnSetupFailure?: boolean };
+  repo?: { path?: string; mutationVerdict?: string; headBefore?: string | null; headAfter?: string | null } | null;
 }
 
-interface ProposalStatus {
-  outcome?: string;
-  providerStatus?: string;
-  filesChanged?: string[];
-  reviewerDecision?: string;
-  diagnostics?: string[];
-}
+interface ProposalStatus { outcome?: string; providerStatus?: string; filesChanged?: string[]; reviewerDecision?: string; diagnostics?: string[]; }
 
 interface OperatorDecisionRecord {
   decision?: string;
   finalOutcome?: string;
-  validation?: {
-    status?: string;
-    passed?: boolean;
-    packet?: string;
-  };
-  apply?: {
-    appliedTo?: string;
-    originalRepoMutated?: boolean;
-  };
+  validation?: { status?: string; passed?: boolean; packet?: string };
+  apply?: { appliedTo?: string; originalRepoMutated?: boolean };
   runforgeAppliedPatch?: boolean;
   manualApplyRequired?: boolean;
   proposalPatch?: string;
 }
+
+interface OperatorHandoffLink { readmePath?: string; handoffJsonPath?: string; }
 
 export async function buildPacketIndex(options: PacketIndexOptions): Promise<PacketIndexResult> {
   const root = resolve(options.root);
@@ -202,6 +176,8 @@ async function entriesFromResults(root: string): Promise<PacketIndexEntry[]> {
         validationBefore: attempt.validationBefore,
         validationAfter: attempt.validationAfter,
         proposalPatchPath: attempt.proposalPatch,
+        handoffReadmePath: attempt.handoffReadme,
+        handoffJsonPath: attempt.handoffJson,
         originalRepoMutated: attempt.originalRepoMutated,
         notes: attempt.manualApply === false ? "Patch was not manually applied to the external repo." : undefined
       }));
@@ -218,6 +194,7 @@ async function entriesFromPackets(root: string): Promise<PacketIndexEntry[]> {
     const run = await readJson<RunJson>(runPath);
     const status = await readOptionalJson<ProposalStatus>(join(packetPath, "proposal-status.json"));
     const operatorDecision = await readOptionalJson<OperatorDecisionRecord>(join(packetPath, "operator-decision.json"));
+    const handoff = await readOptionalJson<OperatorHandoffLink>(join(packetPath, "operator-handoff.json"));
     entries.push(normalizeEntry(milestoneFor(root, packetPath), scenarioFor(root, packetPath), {
       repo: run.repo?.path,
       outcome: status?.outcome ?? run.status,
@@ -233,6 +210,8 @@ async function entriesFromPackets(root: string): Promise<PacketIndexEntry[]> {
       autoAppliedByRunForge: operatorDecision?.runforgeAppliedPatch ?? null,
       validationAfter: operatorDecision ? (operatorDecision.validation?.passed ? "passed" : operatorDecision.validation?.status ?? "unknown") : undefined,
       proposalPatchPath: operatorDecision?.proposalPatch,
+      handoffReadmePath: handoff?.readmePath,
+      handoffJsonPath: handoff?.handoffJsonPath,
       originalRepoMutated: operatorDecision?.apply?.originalRepoMutated ?? null,
       notes: [status?.diagnostics?.join("; "), setupPolicyNote(run), operatorDecisionNote(operatorDecision)].filter(Boolean).join("; "),
       packetType: run.taskType?.replace(/^external_/, "")
@@ -278,6 +257,8 @@ function normalizeEntry(milestone: string, scenario: string, input: Partial<Pack
     validationBefore: input.validationBefore ?? "unknown",
     validationAfter: input.validationAfter ?? "unknown",
     proposalPatchPath: input.proposalPatchPath ?? "unknown",
+    handoffReadmePath: input.handoffReadmePath ?? "unknown",
+    handoffJsonPath: input.handoffJsonPath ?? "unknown",
     originalRepoMutated: input.originalRepoMutated ?? null,
     notes: input.notes ?? ""
   };

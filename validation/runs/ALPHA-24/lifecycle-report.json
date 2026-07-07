@@ -1,0 +1,81 @@
+{
+  "schemaVersion": "alpha-24-compact-lifecycle-report",
+  "generatedAt": "2026-07-07T06:20:35.438Z",
+  "validation": {
+    "ok": true,
+    "errors": []
+  },
+  "sourceCounts": {
+    "okfFiles": 33,
+    "skills": 0,
+    "validationRuns": 41,
+    "evidenceFiles": 65
+  },
+  "lifecycleStatusCounts": {
+    "candidate": 35,
+    "active": 23,
+    "needs_review": 0,
+    "stale": 16,
+    "duplicate": 0,
+    "missing_evidence": 0,
+    "unsafe": 0,
+    "retired": 0
+  },
+  "operatorTrialCounts": {
+    "accepted": 3,
+    "rejected": 2,
+    "missingDecision": 3,
+    "unsafeMutation": 0
+  },
+  "handoffPacketCounts": {
+    "generated": 1,
+    "missingReadme": 0,
+    "unsafe": 0
+  },
+  "alpha24": {
+    "status": "active",
+    "realExternalRepoSource": "/Users/evgeny/Documents/projects/factory",
+    "disposableTrialRoot": "/tmp/runforge-alpha24-operator-handoff/factory",
+    "handoffPacket": {
+      "dir": "/tmp/runforge-alpha24-operator-handoff/factory/handoff",
+      "readme": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/README.md",
+      "json": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/handoff.json",
+      "trackedReadme": "validation/runs/ALPHA-24/handoff/README.md",
+      "trackedJson": "validation/runs/ALPHA-24/handoff/handoff.json",
+      "applyInstructions": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/apply-instructions.md",
+      "validationInstructions": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/validation.md",
+      "rollbackInstructions": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/rollback.md",
+      "acceptedDecisionForm": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/decision-form.accepted.json",
+      "rejectedDecisionForm": "/tmp/runforge-alpha24-operator-handoff/factory/handoff/decision-form.rejected.json"
+    },
+    "originalRepoMutationVerdict": "unchanged",
+    "visibility": {
+      "packetIndex": "/tmp/runforge-alpha24-operator-handoff/factory/index/index.json",
+      "dashboard": "/tmp/runforge-alpha24-operator-handoff/factory/dashboard/index.html",
+      "packetViewer": "/tmp/runforge-alpha24-operator-handoff/factory/viewer/index.html",
+      "lifecycleReport": "validation/runs/ALPHA-24/lifecycle-report.json"
+    },
+    "safety": {
+      "noOriginalExternalRepoMutation": true,
+      "noAutoApplyByRunForge": true,
+      "noProviderCalls": true,
+      "noNetworkRequired": true,
+      "noDbAccess": true,
+      "noPushMergeDeploy": true,
+      "handoffValidation": {
+        "passed": true,
+        "errors": []
+      }
+    }
+  },
+  "milestoneComparison": [
+    "Alpha-23 hardens operator patch trial UX with decision summaries, safety lint, and accepted/rejected visibility.",
+    "Alpha-24 generates a portable real-operator handoff packet with manual apply, validation, rollback, decisions, and evidence links."
+  ],
+  "findings": [
+    "16 lifecycle items reference older milestones and should be reviewed."
+  ],
+  "recommendations": [
+    "Next milestone: Alpha-25 Operator Handoff Replay / Audit."
+  ]
+}

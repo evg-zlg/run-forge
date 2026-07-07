@@ -1,0 +1,8 @@
+diff --git a/runforge-alpha22/math.cjs b/runforge-alpha22/math.cjs
+--- a/runforge-alpha22/math.cjs
++++ b/runforge-alpha22/math.cjs
+@@ -1,3 +1,3 @@
+ function add(a, b) {
++  return a + b;
+-  return a + b + 1;
+ }

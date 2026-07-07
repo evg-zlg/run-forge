@@ -10,6 +10,7 @@ import {
   renderExternalRecordDecisionSummary,
   runExternalPatchTrial
 } from "../../run/external-operator-patch-trial.js";
+import { generateOperatorHandoffPacket, renderOperatorHandoffSummary } from "../../run/external-operator-handoff.js";
 
 export function externalCommand(): Command {
   const external = new Command("external").description("Run safe packet-producing workflows for explicitly declared external local repositories.");
@@ -18,9 +19,35 @@ export function externalCommand(): Command {
   external.addCommand(proposalReadinessCommand());
   external.addCommand(codeProposalCommand());
   external.addCommand(patchTrialCommand());
+  external.addCommand(handoffPacketCommand());
   external.addCommand(recordDecisionCommand());
   external.addCommand(docsProposalCommand());
   return external;
+}
+
+function handoffPacketCommand(): Command {
+  return new Command("handoff-packet")
+    .description("Generate a self-contained operator handoff bundle for a proposal-only patch trial.")
+    .requiredOption("--trial <trial-output-root>", "trial output root containing proposal-run/packet")
+    .requiredOption("--out <handoff-output-root>", "handoff bundle output directory")
+    .option("--operator-worktree <path>", "designated disposable/operator worktree path")
+    .option("--validation-command <command>", "validation command operators should run")
+    .option("--trial-id <id>", "trial id recorded in the handoff packet")
+    .action(async (opts) => {
+      try {
+        const result = await generateOperatorHandoffPacket({
+          trial: opts.trial as string,
+          out: opts.out as string,
+          operatorWorktree: opts.operatorWorktree as string | undefined,
+          validationCommand: opts.validationCommand as string | undefined,
+          trialId: opts.trialId as string | undefined
+        });
+        console.log(renderOperatorHandoffSummary(result));
+        if (!result.validation.passed) process.exitCode = 1;
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
 }
 
 function checkCommand(): Command {

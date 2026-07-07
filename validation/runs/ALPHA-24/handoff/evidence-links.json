@@ -1,0 +1,15 @@
+{
+  "schemaVersion": "alpha-24-handoff-evidence-links",
+  "trialId": "alpha24-operator-handoff",
+  "handoffReadme": "README.md",
+  "handoffJson": "handoff.json",
+  "proposalPatch": "proposal.patch",
+  "proposalPacket": "/tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet",
+  "operatorSummary": "/tmp/runforge-alpha24-operator-handoff/factory/proposal-run/packet/operator-summary.md",
+  "lifecycleReport": "/tmp/runforge-alpha24-operator-handoff/factory/lifecycle-report.json",
+  "applyInstructions": "apply-instructions.md",
+  "validationInstructions": "validation.md",
+  "rollbackInstructions": "rollback.md",
+  "acceptedDecisionForm": "decision-form.accepted.json",
+  "rejectedDecisionForm": "decision-form.rejected.json"
+}
