@@ -2,6 +2,7 @@ import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { hasFrontmatterWithType, renderMarkdown, type Frontmatter } from "./markdown-frontmatter.js";
 import { findSecretLikeContent } from "./okf-secret-scan.js";
+import { lifecycleStatuses, type LifecycleStatus } from "./lifecycle-status.js";
 
 export interface OkfExportOptions {
   root: string;
@@ -68,7 +69,7 @@ export async function exportOkfBundle(options: OkfExportOptions): Promise<OkfExp
   await writePage(out, files, "decisions/alpha-15-factory-trial.md", fm("Factory Trial Environment Failure", "Missing dependencies in disposable workspace should not be treated as proposal-ready typecheck failure.", ["runforge", "factory", "environment", "readiness"]), decisionBody("ALPHA-15"));
   await writePage(out, files, "decisions/alpha-16-setup-preflight.md", fm("Alpha-16 Setup Preflight", "Setup commands run only in disposable workspaces and gate main commands by default.", ["runforge", "alpha-16", "setup", "preflight"]), decisionBody("ALPHA-16"));
   await writePage(out, files, "decisions/alpha-18-setup-policy.md", fm("Alpha-18 Setup Policy", "Setup network intent is audit-only, and diagnostic continuation does not make verification clean.", ["runforge", "alpha-18", "setup", "policy", "diagnostic"]), decisionBody("ALPHA-18"));
-  await writePage(out, files, "skill-candidates/index.md", fm("Skill Candidate Index", "Candidate operational skills derived from RunForge evidence.", ["runforge", "skills", "lifecycle"]), skillCandidateBody());
+  await writePage(out, files, "skill-candidates/index.md", fm("Skill Candidate Index", "Candidate operational skills derived from RunForge evidence.", ["runforge", "skills", "lifecycle"], "candidate"), skillCandidateBody());
 
   return { out, files };
 }
@@ -77,12 +78,23 @@ export async function validateOkfBundle(bundle: string): Promise<{ ok: boolean; 
   const root = resolve(bundle);
   const files = (await collectMarkdown(root)).sort();
   const errors: string[] = [];
+  const ids = new Set<string>();
   for (const required of ["index.md", "log.md", "concepts", "playbooks", "milestones"]) {
     if (!files.some((file) => file === required || file.startsWith(`${required}/`))) errors.push(`missing ${required}`);
   }
   for (const file of files) {
     const content = await readFile(join(root, file), "utf8");
     if (!hasFrontmatterWithType(content)) errors.push(`${file} missing frontmatter type`);
+    const id = content.match(/^id:\s*(.+)$/m)?.[1]?.trim() ?? file.replace(/\.md$/, "");
+    if (ids.has(id)) errors.push(`${file} duplicate id/slug ${id}`);
+    ids.add(id);
+    const lifecycle = content.match(/^lifecycle:\s*(.+)$/m)?.[1]?.trim();
+    if (lifecycle && !lifecycleStatuses.includes(lifecycle as LifecycleStatus)) errors.push(`${file} invalid lifecycle status ${lifecycle}`);
+    if (!/Source Evidence|Evidence References|Evidence:/i.test(content)) errors.push(`${file} missing evidence/source links`);
+    for (const path of localEvidencePaths(content)) {
+      if (path.includes("\0") || path.includes("..\\") || /^[A-Za-z]:\\/.test(path)) errors.push(`${file} malformed local path ${path}`);
+    }
+    if (/\b(?:obsolete|retired|superseded)\b[\s\S]{0,80}\bALPHA-(?:[1-9]|1[0-6])\b/i.test(content)) errors.push(`${file} stale milestone reference`);
     for (const pattern of findSecretLikeContent(content)) errors.push(`${file} contains secret-like pattern ${pattern}`);
   }
   return { ok: errors.length === 0, errors, files };
@@ -105,8 +117,8 @@ async function writePage(out: string, files: string[], file: string, frontmatter
   files.push(file);
 }
 
-function fm(title: string, description: string, tags: string[]): Frontmatter {
-  return { type: inferType(title), title, description, tags, generated: true };
+function fm(title: string, description: string, tags: string[], lifecycle = "active"): Frontmatter {
+  return { type: inferType(title), title, description, tags, lifecycle, generated: true };
 }
 
 function inferType(title: string): string {
@@ -147,6 +159,12 @@ function decisionBody(milestone: string): string {
 
 function skillCandidateBody(): string {
   return `# Skill Candidates\n\n## Summary\nCandidate skills are lifecycle inventory items only. They are not active skills and require human/PR review.\n\n## Candidate Areas\n- Setup/preflight diagnosis\n- Provider patch review\n- External operator trial\n- Packet/dashboard operator review\n- OKF knowledge export\n\n## Related Concepts\n- [Setup preflight](../concepts/setup-preflight.md)\n- [Provider rejected](../concepts/provider-rejected.md)\n\n## Curator Report\nRun \`pnpm dev skills curator-report --runs validation/runs --out /tmp/runforge-skill-curator\` to generate the latest candidate report.`;
+}
+
+function localEvidencePaths(content: string): string[] {
+  return [...content.matchAll(/`([^`]*(?:validation\/runs|summary\.md|results\.json|packet)[^`]*)`/g)]
+    .map((match) => match[1])
+    .filter((path) => !/^(?:https?:|git@)/.test(path));
 }
 
 async function collectMarkdown(root: string, prefix = ""): Promise<string[]> {

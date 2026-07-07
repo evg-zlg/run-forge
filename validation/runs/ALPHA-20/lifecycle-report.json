@@ -1,0 +1,1106 @@
+{
+  "generatedAt": "2026-07-07T03:34:34.756Z",
+  "repoRoot": "/Users/evgeny/Documents/projects/RunForge",
+  "sources": {
+    "runs": "validation/runs",
+    "okfBundle": "validation/runs/ALPHA-20/generated/okf",
+    "skillsInventory": "validation/runs/ALPHA-20/generated/skills/skills-inventory.json",
+    "curatorReport": "validation/runs/ALPHA-20/generated/curator/skill-candidates.json"
+  },
+  "sourceCounts": {
+    "okfFiles": 33,
+    "skills": 0,
+    "validationRuns": 35,
+    "evidenceFiles": 54
+  },
+  "okfEntryCounts": {
+    "candidate": 1,
+    "active": 16,
+    "needs_review": 0,
+    "stale": 16,
+    "duplicate": 0,
+    "missing_evidence": 0,
+    "unsafe": 0,
+    "retired": 0
+  },
+  "skillsCounts": {
+    "candidate": 0,
+    "active": 0,
+    "needs_review": 0,
+    "stale": 0,
+    "duplicate": 0,
+    "missing_evidence": 0,
+    "unsafe": 0,
+    "retired": 0
+  },
+  "lifecycleStatusCounts": {
+    "candidate": 33,
+    "active": 19,
+    "needs_review": 0,
+    "stale": 16,
+    "duplicate": 0,
+    "missing_evidence": 0,
+    "unsafe": 0,
+    "retired": 0
+  },
+  "findings": [
+    "16 lifecycle items reference older milestones and should be reviewed."
+  ],
+  "recommendations": [
+    "Keep packets and dashboard/index records as runtime truth; use OKF as portable memory.",
+    "Review candidate knowledge and skills before promotion.",
+    "Next milestone: Alpha-21 Operator Accepted Patch Trial with manual apply decisions only."
+  ],
+  "milestoneComparison": [
+    "Alpha-17 run evidence is not present as validation/runs/ALPHA-17; Alpha-17 OKF and skills artifacts are covered through generated export, validation, inventory, and curator outputs.",
+    "Alpha-19 added setup policy acceptance evidence across packets, dashboard data, and multi-repo validation.",
+    "Alpha-20 connects those artifacts into a lifecycle report with deterministic status counts, findings, recommendations, and safety summary."
+  ],
+  "evidenceLinks": [
+    "validation/runs/ADMIN-UI-ALPHA/results.json",
+    "validation/runs/ADMIN-UI-ALPHA/summary.md",
+    "validation/runs/ALPHA-10/results.json",
+    "validation/runs/ALPHA-10/summary.md",
+    "validation/runs/ALPHA-11/results.json",
+    "validation/runs/ALPHA-11/summary.md",
+    "validation/runs/ALPHA-12/results.json",
+    "validation/runs/ALPHA-12/summary.md",
+    "validation/runs/ALPHA-13/results.json",
+    "validation/runs/ALPHA-13/summary.md",
+    "validation/runs/ALPHA-14/results.json",
+    "validation/runs/ALPHA-14/summary.md",
+    "validation/runs/ALPHA-15/operator-decisions.md",
+    "validation/runs/ALPHA-15/results.json",
+    "validation/runs/ALPHA-15/summary.md",
+    "validation/runs/ALPHA-16/results.json",
+    "validation/runs/ALPHA-16/summary.md",
+    "validation/runs/ALPHA-18/results.json",
+    "validation/runs/ALPHA-18/summary.md",
+    "validation/runs/ALPHA-19/results.json",
+    "validation/runs/ALPHA-19/summary.md",
+    "validation/runs/ALPHA-20/summary.md",
+    "validation/runs/ALPHA-3/results.json",
+    "validation/runs/ALPHA-3/summary.md",
+    "validation/runs/ALPHA-3A/score.json",
+    "validation/runs/ALPHA-4/results.json",
+    "validation/runs/ALPHA-4/summary.md",
+    "validation/runs/ALPHA-5/results.json",
+    "validation/runs/ALPHA-5/summary.md",
+    "validation/runs/ALPHA-6/results.json",
+    "validation/runs/ALPHA-6/summary.md",
+    "validation/runs/ALPHA-7/results.json",
+    "validation/runs/ALPHA-7/summary.md",
+    "validation/runs/ALPHA-8/results.json",
+    "validation/runs/ALPHA-8/summary.md",
+    "validation/runs/ALPHA-9/results.json",
+    "validation/runs/ALPHA-9/summary.md",
+    "validation/runs/PACKET-VALIDATION/results.json",
+    "validation/runs/PACKET-VALIDATION/summary.md",
+    "validation/runs/RF-REAL-001/score.json"
+  ],
+  "validation": {
+    "ok": true,
+    "errors": []
+  },
+  "safetySummary": {
+    "secretLikeFindings": 0,
+    "unsafeItems": 0,
+    "networkRequired": false,
+    "providerCalls": false
+  },
+  "items": [
+    {
+      "id": "okf:index",
+      "kind": "okf",
+      "title": "RunForge Knowledge Bundle",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/index.md",
+      "evidenceLinks": [
+        "milestones/admin-ui-alpha.md",
+        "milestones/alpha-3.md",
+        "milestones/alpha-3a.md",
+        "milestones/alpha-4.md",
+        "milestones/alpha-5.md",
+        "milestones/alpha-6.md",
+        "milestones/alpha-7.md",
+        "milestones/alpha-8.md",
+        "milestones/alpha-9.md",
+        "milestones/alpha-10.md",
+        "milestones/alpha-11.md",
+        "milestones/alpha-12.md",
+        "milestones/alpha-13.md",
+        "milestones/alpha-14.md",
+        "milestones/alpha-15.md",
+        "milestones/alpha-16.md",
+        "milestones/alpha-18.md",
+        "milestones/alpha-19.md",
+        "milestones/alpha-20.md",
+        "milestones/case-001.md",
+        "milestones/case-002.md",
+        "milestones/case-003.md",
+        "milestones/case-004.md",
+        "milestones/case-005.md",
+        "milestones/packet-validation.md",
+        "milestones/rf-real-001.md",
+        "milestones/rf-real-002.md",
+        "milestones/rf-real-003.md",
+        "milestones/rf-real-004.md",
+        "milestones/rf-real-005.md",
+        "milestones/rf-real-006.md",
+        "milestones/rf-real-007.md",
+        "milestones/rf-real-008.md",
+        "milestones/rf-real-009.md",
+        "milestones/rf-real-010.md",
+        "log.md",
+        "skill-candidates/index.md",
+        "concepts/setup-preflight.md",
+        "concepts/provider-rejected.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:log",
+      "kind": "okf",
+      "title": "RunForge Knowledge Export Log",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/log.md",
+      "evidenceLinks": [
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-ALPHA/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-ALPHA/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-3/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-3/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-3A/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-3A/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-4/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-4/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-5/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-5/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-6/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-6/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-7/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-7/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-8/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-8/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-9/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-9/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-10/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-10/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-11/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-11/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-12/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-12/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-13/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-13/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-14/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-14/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-15/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-15/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-16/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-16/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-18/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-18/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-19/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-19/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-20/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-20/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-001/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-001/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-002/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-002/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-003/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-003/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-004/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-004/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-005/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-005/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/PACKET-VALIDATION/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/PACKET-VALIDATION/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-001/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-001/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-002/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-002/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-003/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-003/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-004/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-004/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-005/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-005/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-006/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-006/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-007/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-007/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-008/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-008/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-009/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-009/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-010/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/RF-REAL-010/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:milestones/alpha-9",
+      "kind": "okf",
+      "title": "ALPHA-9 Validation",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/milestones/alpha-9.md",
+      "evidenceLinks": [
+        "../concepts/packet-validation.md",
+        "../concepts/provider-rejected.md",
+        "../concepts/setup-preflight.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-9/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-9/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-9/operator-decisions.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:milestones/alpha-10",
+      "kind": "okf",
+      "title": "ALPHA-10 Validation",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/milestones/alpha-10.md",
+      "evidenceLinks": [
+        "../concepts/packet-validation.md",
+        "../concepts/provider-rejected.md",
+        "../concepts/setup-preflight.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-10/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-10/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-10/operator-decisions.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:milestones/alpha-11",
+      "kind": "okf",
+      "title": "ALPHA-11 Validation",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/milestones/alpha-11.md",
+      "evidenceLinks": [
+        "../concepts/packet-validation.md",
+        "../concepts/provider-rejected.md",
+        "../concepts/setup-preflight.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-11/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-11/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-11/operator-decisions.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:milestones/alpha-12",
+      "kind": "okf",
+      "title": "ALPHA-12 Validation",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/milestones/alpha-12.md",
+      "evidenceLinks": [
+        "../concepts/packet-validation.md",
+        "../concepts/provider-rejected.md",
+        "../concepts/setup-preflight.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-12/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-12/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-12/operator-decisions.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:milestones/alpha-13",
+      "kind": "okf",
+      "title": "ALPHA-13 Validation",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/milestones/alpha-13.md",
+      "evidenceLinks": [
+        "../concepts/packet-validation.md",
+        "../concepts/provider-rejected.md",
+        "../concepts/setup-preflight.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-13/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-13/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-13/operator-decisions.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:milestones/alpha-14",
+      "kind": "okf",
+      "title": "ALPHA-14 Validation",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/milestones/alpha-14.md",
+      "evidenceLinks": [
+        "../concepts/packet-validation.md",
+        "../concepts/provider-rejected.md",
+        "../concepts/setup-preflight.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-14/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-14/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-14/operator-decisions.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:milestones/alpha-15",
+      "kind": "okf",
+      "title": "ALPHA-15 Validation",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/milestones/alpha-15.md",
+      "evidenceLinks": [
+        "../concepts/packet-validation.md",
+        "../concepts/provider-rejected.md",
+        "../concepts/setup-preflight.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-15/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-15/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-15/operator-decisions.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:milestones/alpha-16",
+      "kind": "okf",
+      "title": "ALPHA-16 Setup Preflight",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/milestones/alpha-16.md",
+      "evidenceLinks": [
+        "../concepts/packet-validation.md",
+        "../concepts/provider-rejected.md",
+        "../concepts/setup-preflight.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-16/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-16/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-16/operator-decisions.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:milestones/alpha-18",
+      "kind": "okf",
+      "title": "ALPHA-18 Validation",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/milestones/alpha-18.md",
+      "evidenceLinks": [
+        "../concepts/packet-validation.md",
+        "../concepts/provider-rejected.md",
+        "../concepts/setup-preflight.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-18/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-18/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-18/operator-decisions.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:repos/smartsql",
+      "kind": "okf",
+      "title": "Smartsql Repository Evidence",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/repos/smartsql.md",
+      "evidenceLinks": [
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-9/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-10/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-11/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-12/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-13/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-14/summary.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:repos/factory",
+      "kind": "okf",
+      "title": "Factory Repository Evidence",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/repos/factory.md",
+      "evidenceLinks": [
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-15/summary.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/provider-rejected",
+      "kind": "okf",
+      "title": "Provider Rejected",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/provider-rejected.md",
+      "evidenceLinks": [
+        "../milestones/alpha-9.md",
+        "../milestones/alpha-15.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/proposal-ready-verified",
+      "kind": "okf",
+      "title": "Proposal Ready Verified",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/proposal-ready-verified.md",
+      "evidenceLinks": [
+        "../milestones/alpha-11.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/verification-failed",
+      "kind": "okf",
+      "title": "Verification Failed",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/verification-failed.md",
+      "evidenceLinks": [
+        "../milestones/packet-validation.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/do-not-apply",
+      "kind": "okf",
+      "title": "Do Not Apply",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/do-not-apply.md",
+      "evidenceLinks": [
+        "../milestones/alpha-15.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/packet-validation",
+      "kind": "okf",
+      "title": "Packet Validation",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/packet-validation.md",
+      "evidenceLinks": [
+        "../milestones/packet-validation.md",
+        "../milestones/alpha-16.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/external-operator-trial",
+      "kind": "okf",
+      "title": "External Operator Trial",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/external-operator-trial.md",
+      "evidenceLinks": [
+        "../milestones/alpha-15.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/setup-preflight",
+      "kind": "okf",
+      "title": "Setup Preflight",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/setup-preflight.md",
+      "evidenceLinks": [
+        "../milestones/alpha-16.md",
+        "../milestones/alpha-18.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/setup-network-intent",
+      "kind": "okf",
+      "title": "Setup Network Intent",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/setup-network-intent.md",
+      "evidenceLinks": [
+        "../milestones/alpha-18.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/diagnostic-setup-mode",
+      "kind": "okf",
+      "title": "Diagnostic Setup Mode",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/diagnostic-setup-mode.md",
+      "evidenceLinks": [
+        "../milestones/alpha-18.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/dependency-missing",
+      "kind": "okf",
+      "title": "Dependency Missing",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/dependency-missing.md",
+      "evidenceLinks": [
+        "../milestones/alpha-15.md",
+        "../milestones/alpha-16.md",
+        "../milestones/alpha-18.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:concepts/environment-error",
+      "kind": "okf",
+      "title": "Environment Error",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/concepts/environment-error.md",
+      "evidenceLinks": [
+        "../milestones/alpha-15.md",
+        "../milestones/alpha-16.md",
+        "../milestones/alpha-18.md",
+        "../playbooks/provider-patch-review.md",
+        "../playbooks/setup-preflight-check.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:playbooks/external-dogfood-trial",
+      "kind": "okf",
+      "title": "External Dogfood Trial",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/playbooks/external-dogfood-trial.md",
+      "evidenceLinks": [
+        "../decisions/alpha-15-factory-trial.md",
+        "../decisions/alpha-16-setup-preflight.md",
+        "../concepts/do-not-apply.md",
+        "../concepts/packet-validation.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:playbooks/provider-patch-review",
+      "kind": "okf",
+      "title": "Provider Patch Review",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/playbooks/provider-patch-review.md",
+      "evidenceLinks": [
+        "../decisions/alpha-15-factory-trial.md",
+        "../decisions/alpha-16-setup-preflight.md",
+        "../concepts/do-not-apply.md",
+        "../concepts/packet-validation.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:playbooks/manual-patch-acceptance",
+      "kind": "okf",
+      "title": "Manual Patch Acceptance",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/playbooks/manual-patch-acceptance.md",
+      "evidenceLinks": [
+        "../decisions/alpha-15-factory-trial.md",
+        "../decisions/alpha-16-setup-preflight.md",
+        "../concepts/do-not-apply.md",
+        "../concepts/packet-validation.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:playbooks/setup-preflight-check",
+      "kind": "okf",
+      "title": "Setup Preflight Check",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/playbooks/setup-preflight-check.md",
+      "evidenceLinks": [
+        "../decisions/alpha-15-factory-trial.md",
+        "../decisions/alpha-16-setup-preflight.md",
+        "../concepts/do-not-apply.md",
+        "../concepts/packet-validation.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:playbooks/setup-policy-check",
+      "kind": "okf",
+      "title": "Setup Policy Check",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/playbooks/setup-policy-check.md",
+      "evidenceLinks": [
+        "../decisions/alpha-15-factory-trial.md",
+        "../decisions/alpha-16-setup-preflight.md",
+        "../concepts/do-not-apply.md",
+        "../concepts/packet-validation.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:decisions/alpha-15-factory-trial",
+      "kind": "okf",
+      "title": "Factory Trial Environment Failure",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/decisions/alpha-15-factory-trial.md",
+      "evidenceLinks": [
+        "../milestones/alpha-15.md",
+        "../concepts/dependency-missing.md",
+        "../concepts/environment-error.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:decisions/alpha-16-setup-preflight",
+      "kind": "okf",
+      "title": "Alpha-16 Setup Preflight",
+      "status": "stale",
+      "path": "validation/runs/ALPHA-20/generated/okf/decisions/alpha-16-setup-preflight.md",
+      "evidenceLinks": [
+        "../milestones/alpha-16.md",
+        "../concepts/dependency-missing.md",
+        "../concepts/environment-error.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:decisions/alpha-18-setup-policy",
+      "kind": "okf",
+      "title": "Alpha-18 Setup Policy",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20/generated/okf/decisions/alpha-18-setup-policy.md",
+      "evidenceLinks": [
+        "../milestones/alpha-18.md",
+        "../concepts/dependency-missing.md",
+        "../concepts/environment-error.md"
+      ],
+      "findings": []
+    },
+    {
+      "id": "okf:skill-candidates/index",
+      "kind": "okf",
+      "title": "Skill Candidate Index",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-20/generated/okf/skill-candidates/index.md",
+      "evidenceLinks": [
+        "../concepts/setup-preflight.md",
+        "../concepts/provider-rejected.md",
+        "pnpm dev skills curator-report --runs validation/runs --out /tmp/runforge-skill-curator"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ADMIN-UI-ALPHA",
+      "kind": "evidence",
+      "title": "ADMIN-UI-ALPHA",
+      "status": "candidate",
+      "path": "validation/runs/ADMIN-UI-ALPHA",
+      "evidenceLinks": [
+        "validation/runs/ADMIN-UI-ALPHA/summary.md",
+        "validation/runs/ADMIN-UI-ALPHA/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-3",
+      "kind": "evidence",
+      "title": "ALPHA-3",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-3",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-3/summary.md",
+        "validation/runs/ALPHA-3/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-3A",
+      "kind": "evidence",
+      "title": "ALPHA-3A",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-3A",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-3A/summary.md",
+        "validation/runs/ALPHA-3A/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-4",
+      "kind": "evidence",
+      "title": "ALPHA-4",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-4",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-4/summary.md",
+        "validation/runs/ALPHA-4/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-5",
+      "kind": "evidence",
+      "title": "ALPHA-5",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-5",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-5/summary.md",
+        "validation/runs/ALPHA-5/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-6",
+      "kind": "evidence",
+      "title": "ALPHA-6",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-6",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-6/summary.md",
+        "validation/runs/ALPHA-6/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-7",
+      "kind": "evidence",
+      "title": "ALPHA-7",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-7",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-7/summary.md",
+        "validation/runs/ALPHA-7/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-8",
+      "kind": "evidence",
+      "title": "ALPHA-8",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-8",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-8/summary.md",
+        "validation/runs/ALPHA-8/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-9",
+      "kind": "evidence",
+      "title": "ALPHA-9",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-9",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-9/summary.md",
+        "validation/runs/ALPHA-9/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-10",
+      "kind": "evidence",
+      "title": "ALPHA-10",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-10",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-10/summary.md",
+        "validation/runs/ALPHA-10/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-11",
+      "kind": "evidence",
+      "title": "ALPHA-11",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-11",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-11/summary.md",
+        "validation/runs/ALPHA-11/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-12",
+      "kind": "evidence",
+      "title": "ALPHA-12",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-12",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-12/summary.md",
+        "validation/runs/ALPHA-12/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-13",
+      "kind": "evidence",
+      "title": "ALPHA-13",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-13",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-13/summary.md",
+        "validation/runs/ALPHA-13/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-14",
+      "kind": "evidence",
+      "title": "ALPHA-14",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-14",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-14/summary.md",
+        "validation/runs/ALPHA-14/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-15",
+      "kind": "evidence",
+      "title": "ALPHA-15",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-15",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-15/summary.md",
+        "validation/runs/ALPHA-15/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-16",
+      "kind": "evidence",
+      "title": "ALPHA-16",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-16",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-16/summary.md",
+        "validation/runs/ALPHA-16/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-18",
+      "kind": "evidence",
+      "title": "ALPHA-18",
+      "status": "candidate",
+      "path": "validation/runs/ALPHA-18",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-18/summary.md",
+        "validation/runs/ALPHA-18/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-19",
+      "kind": "evidence",
+      "title": "ALPHA-19",
+      "status": "active",
+      "path": "validation/runs/ALPHA-19",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-19/summary.md",
+        "validation/runs/ALPHA-19/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-20",
+      "kind": "evidence",
+      "title": "ALPHA-20",
+      "status": "active",
+      "path": "validation/runs/ALPHA-20",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-20/summary.md",
+        "validation/runs/ALPHA-20/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:case-001",
+      "kind": "evidence",
+      "title": "case-001",
+      "status": "candidate",
+      "path": "validation/runs/case-001",
+      "evidenceLinks": [
+        "validation/runs/case-001/summary.md",
+        "validation/runs/case-001/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:case-002",
+      "kind": "evidence",
+      "title": "case-002",
+      "status": "candidate",
+      "path": "validation/runs/case-002",
+      "evidenceLinks": [
+        "validation/runs/case-002/summary.md",
+        "validation/runs/case-002/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:case-003",
+      "kind": "evidence",
+      "title": "case-003",
+      "status": "candidate",
+      "path": "validation/runs/case-003",
+      "evidenceLinks": [
+        "validation/runs/case-003/summary.md",
+        "validation/runs/case-003/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:case-004",
+      "kind": "evidence",
+      "title": "case-004",
+      "status": "candidate",
+      "path": "validation/runs/case-004",
+      "evidenceLinks": [
+        "validation/runs/case-004/summary.md",
+        "validation/runs/case-004/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:case-005",
+      "kind": "evidence",
+      "title": "case-005",
+      "status": "candidate",
+      "path": "validation/runs/case-005",
+      "evidenceLinks": [
+        "validation/runs/case-005/summary.md",
+        "validation/runs/case-005/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:PACKET-VALIDATION",
+      "kind": "evidence",
+      "title": "PACKET-VALIDATION",
+      "status": "active",
+      "path": "validation/runs/PACKET-VALIDATION",
+      "evidenceLinks": [
+        "validation/runs/PACKET-VALIDATION/summary.md",
+        "validation/runs/PACKET-VALIDATION/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-001",
+      "kind": "evidence",
+      "title": "RF-REAL-001",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-001",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-001/summary.md",
+        "validation/runs/RF-REAL-001/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-002",
+      "kind": "evidence",
+      "title": "RF-REAL-002",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-002",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-002/summary.md",
+        "validation/runs/RF-REAL-002/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-003",
+      "kind": "evidence",
+      "title": "RF-REAL-003",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-003",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-003/summary.md",
+        "validation/runs/RF-REAL-003/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-004",
+      "kind": "evidence",
+      "title": "RF-REAL-004",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-004",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-004/summary.md",
+        "validation/runs/RF-REAL-004/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-005",
+      "kind": "evidence",
+      "title": "RF-REAL-005",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-005",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-005/summary.md",
+        "validation/runs/RF-REAL-005/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-006",
+      "kind": "evidence",
+      "title": "RF-REAL-006",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-006",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-006/summary.md",
+        "validation/runs/RF-REAL-006/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-007",
+      "kind": "evidence",
+      "title": "RF-REAL-007",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-007",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-007/summary.md",
+        "validation/runs/RF-REAL-007/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-008",
+      "kind": "evidence",
+      "title": "RF-REAL-008",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-008",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-008/summary.md",
+        "validation/runs/RF-REAL-008/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-009",
+      "kind": "evidence",
+      "title": "RF-REAL-009",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-009",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-009/summary.md",
+        "validation/runs/RF-REAL-009/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:RF-REAL-010",
+      "kind": "evidence",
+      "title": "RF-REAL-010",
+      "status": "candidate",
+      "path": "validation/runs/RF-REAL-010",
+      "evidenceLinks": [
+        "validation/runs/RF-REAL-010/summary.md",
+        "validation/runs/RF-REAL-010/results.json"
+      ],
+      "findings": []
+    }
+  ]
+}

@@ -1,11 +1,15 @@
-import { mkdir, writeFile } from "node:fs/promises";
+import { access, mkdir, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
+import { findSecretLikeContent } from "./okf-secret-scan.js";
+import type { LifecycleStatus } from "./lifecycle-status.js";
 
 export interface SkillCandidate {
   name: string;
   trigger: string;
   evidence: string[];
   safetyBoundaries: string[];
+  lifecycleStatus: LifecycleStatus;
+  findings: string[];
   recommendedAction: string;
 }
 
@@ -20,7 +24,7 @@ export interface SkillCuratorResult {
 export async function buildSkillCuratorReport(options: { runs: string; out: string }): Promise<SkillCuratorResult> {
   const runs = resolve(options.runs);
   const out = resolve(options.out);
-  const candidates = candidateCatalog(runs);
+  const candidates = await candidateCatalog(runs);
   const result = {
     generatedAt: new Date().toISOString(),
     runs,
@@ -58,15 +62,20 @@ export function renderSkillCuratorReport(result: SkillCuratorResult): string {
       "Safety boundaries:",
       ...candidate.safetyBoundaries.map((item) => `- ${item}`),
       "",
+      `Lifecycle status: ${candidate.lifecycleStatus}`,
+      "",
+      "Findings:",
+      ...(candidate.findings.length > 0 ? candidate.findings.map((item) => `- ${item}`) : ["- ready for operator review"]),
+      "",
       `Recommended action: ${candidate.recommendedAction}`,
       ""
     ])
   ].join("\n");
 }
 
-function candidateCatalog(runs: string): SkillCandidate[] {
+async function candidateCatalog(runs: string): Promise<SkillCandidate[]> {
   const evidence = (path: string) => join(runs, path);
-  return [
+  const candidates = [
     {
       name: "external-operator-trial",
       trigger: "operator runs RunForge against an external repo and needs packet/dashboard evidence",
@@ -110,4 +119,43 @@ function candidateCatalog(runs: string): SkillCandidate[] {
       recommendedAction: "keep candidate under review after Alpha-17 validation"
     }
   ];
+  const names = candidates.map((candidate) => candidate.name);
+  return Promise.all(candidates.map(async (candidate) => enrichCandidate(candidate, names)));
+}
+
+async function enrichCandidate(candidate: Omit<SkillCandidate, "lifecycleStatus" | "findings">, names: string[]): Promise<SkillCandidate> {
+  const findings: string[] = [];
+  const missing = await missingEvidence(candidate.evidence);
+  if (missing.length > 0) findings.push(`missing evidence links: ${missing.join(", ")}`);
+  if (candidate.evidence.length === 0) findings.push("skill has no evidence links");
+  if (/\bALPHA-(?:[1-9]|1[0-6])\b/.test(candidate.evidence.join(" ")) && !/ALPHA-(?:17|18|19)/.test(candidate.evidence.join(" "))) findings.push("mentions older Alpha milestones without newer support");
+  if (overlaps(candidate.name, names).length > 0) findings.push(`possible duplicate or overlap: ${overlaps(candidate.name, names).join(", ")}`);
+  if (findSecretLikeContent([candidate.name, candidate.trigger, ...candidate.evidence, ...candidate.safetyBoundaries].join("\n")).length > 0) findings.push("forbidden or secret-like content");
+  if (candidate.trigger.split(/\s+/).length < 6 || candidate.safetyBoundaries.length < 2) findings.push("too vague to act on safely");
+  const lifecycleStatus = statusFor(findings);
+  return {
+    ...candidate,
+    lifecycleStatus,
+    findings,
+    recommendedAction: lifecycleStatus === "active" ? "promote to active after operator PR review" : lifecycleStatus === "unsafe" ? "retire or rewrite before use" : "review before promotion"
+  };
+}
+
+async function missingEvidence(evidence: string[]): Promise<string[]> {
+  const checks = await Promise.all(evidence.map(async (file) => access(file).then(() => undefined).catch(() => file)));
+  return checks.filter((file): file is string => Boolean(file));
+}
+
+function overlaps(name: string, names: string[]): string[] {
+  const tokens = new Set(name.split("-").filter((token) => token.length > 4));
+  return names.filter((other) => other !== name && other.split("-").some((token) => tokens.has(token)));
+}
+
+function statusFor(findings: string[]): LifecycleStatus {
+  if (findings.some((finding) => finding.includes("secret-like") || finding.includes("forbidden"))) return "unsafe";
+  if (findings.some((finding) => finding.includes("missing evidence"))) return "missing_evidence";
+  if (findings.some((finding) => finding.includes("duplicate") || finding.includes("overlap"))) return "duplicate";
+  if (findings.some((finding) => finding.includes("older Alpha"))) return "stale";
+  if (findings.some((finding) => finding.includes("vague"))) return "needs_review";
+  return "active";
 }
