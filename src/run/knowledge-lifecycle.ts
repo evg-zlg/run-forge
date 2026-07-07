@@ -5,6 +5,8 @@ import { findSecretLikeContent } from "./okf-secret-scan.js";
 import { buildSkillCuratorReport } from "./skill-curator-report.js";
 import { buildSkillInventory } from "./skill-inventory.js";
 import { lifecycleStatuses, type LifecycleStatus } from "./lifecycle-status.js";
+import { buildHandoffArchive, type HandoffArchiveCounts } from "./external-operator-handoff-archive.js";
+import { countHandoffPackets, type HandoffPacketCounts } from "./knowledge-lifecycle-handoff-counts.js";
 
 export interface KnowledgeLifecycleOptions {
   repoRoot: string;
@@ -23,8 +25,6 @@ export interface LifecycleItem {
   findings: string[];
 }
 
-type HandoffPacketCounts = { generated: number; missingReadme: number; unsafe: number; audited: number; auditPassed: number; auditFailed: number; unsafeRejected: number };
-
 export interface KnowledgeLifecycleReport {
   generatedAt: string;
   repoRoot: string;
@@ -41,6 +41,8 @@ export interface KnowledgeLifecycleReport {
   safetySummary: { secretLikeFindings: number; unsafeItems: number; networkRequired: false; providerCalls: false };
   operatorTrialCounts: { accepted: number; rejected: number; missingDecision: number; unsafeMutation: number };
   handoffPacketCounts: HandoffPacketCounts;
+  handoffArchiveCounts: HandoffArchiveCounts;
+  handoffArchiveRecommendations: string[];
   items: LifecycleItem[];
 }
 
@@ -76,6 +78,7 @@ export async function buildKnowledgeLifecycleReport(options: KnowledgeLifecycleO
   const findings = reportFindings(items, okfValidation.errors);
   const operatorTrialCounts = await countOperatorTrials(validationRuns.map((run) => join(runs, run, "results.json")));
   const handoffPacketCounts = await countHandoffPackets(validationRuns.map((run) => join(runs, run)));
+  const handoffArchive = await buildHandoffArchive({ root: runs });
   const report: KnowledgeLifecycleReport = {
     generatedAt: new Date().toISOString(),
     repoRoot,
@@ -97,6 +100,8 @@ export async function buildKnowledgeLifecycleReport(options: KnowledgeLifecycleO
     safetySummary: { secretLikeFindings: statusCounts.unsafe, unsafeItems: statusCounts.unsafe, networkRequired: false, providerCalls: false },
     operatorTrialCounts,
     handoffPacketCounts,
+    handoffArchiveCounts: handoffArchive.counts,
+    handoffArchiveRecommendations: handoffArchive.recommendations,
     items
   };
   await writeFile(join(out, "lifecycle-report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
@@ -146,6 +151,19 @@ export function renderLifecycleSummary(report: KnowledgeLifecycleReport): string
     `- audit passed/failed: ${report.handoffPacketCounts.auditPassed}/${report.handoffPacketCounts.auditFailed}`,
     `- unsafe handoff rejected: ${report.handoffPacketCounts.unsafeRejected}`,
     "",
+    "## Operator Handoff Archive",
+    "",
+    `- archived handoffs: ${report.handoffArchiveCounts.records}`,
+    `- audited handoffs: ${sumCounts(report.handoffArchiveCounts.byAuditStatus, ["passed", "failed"])}`,
+    `- accepted handoffs: ${report.handoffArchiveCounts.byDecision.accepted ?? 0}`,
+    `- rejected handoffs: ${report.handoffArchiveCounts.byDecision.rejected ?? 0}`,
+    `- unsafe rejected handoffs: ${report.handoffArchiveCounts.bySafetyStatus.unsafe ?? 0}`,
+    `- missing audit handoffs: ${report.handoffArchiveCounts.byAuditStatus.missing ?? 0}`,
+    "",
+    "## Archive Recommendations",
+    "",
+    ...report.handoffArchiveRecommendations.slice(0, 8).map((item) => `- ${item}`),
+    "",
     "## Alpha Comparison",
     "",
     ...report.milestoneComparison.map((item) => `- ${item}`),
@@ -179,7 +197,7 @@ function evidenceItem(repoRoot: string, runs: string, run: string): LifecycleIte
     id: `evidence:${run}`,
     kind: "evidence",
     title: run,
-    status: /^ALPHA-(?:17|19|20|21|22|23|24|25)$/.test(run) || run === "PACKET-VALIDATION" ? "active" : "candidate",
+    status: /^ALPHA-(?:17|19|20|21|22|23|24|25|26)$/.test(run) || run === "PACKET-VALIDATION" ? "active" : "candidate",
     path: rel(repoRoot, join(runs, run)),
     evidenceLinks: [summary, results].map((file) => rel(repoRoot, file)),
     findings: []
@@ -190,7 +208,7 @@ function itemStatus(content: string, links: string[], findings: string[], file: 
   if (findings.some((finding) => finding.includes("secret-like"))) return "unsafe";
   if (findings.some((finding) => finding.includes("missing evidence"))) return "missing_evidence";
   if (/\bretired\b/i.test(content)) return "retired";
-  if (/\bALPHA-(?:[1-9]|1[0-6])\b/.test(content) && !/ALPHA-(?:17|18|19|20|21|22|23|24|25)|PACKET-VALIDATION/.test(content)) return "stale";
+  if (/\bALPHA-(?:[1-9]|1[0-6])\b/.test(content) && !/ALPHA-(?:17|18|19|20|21|22|23|24|25|26)|PACKET-VALIDATION/.test(content)) return "stale";
   if (file.includes("skill-candidates/")) return "candidate";
   return links.length > 0 ? "active" : "needs_review";
 }
@@ -260,7 +278,8 @@ function milestoneComparison(runs: string[]): string[] {
     has("ALPHA-22") ? "Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately." : "Alpha-22 evidence is absent locally.",
     has("ALPHA-23") ? "Alpha-23 hardens operator patch trial UX with decision summaries, safety lint, and accepted/rejected visibility." : "Alpha-23 evidence is absent locally.",
     has("ALPHA-24") ? "Alpha-24 generates a portable real-operator handoff packet with manual apply, validation, rollback, decisions, and evidence links." : "Alpha-24 evidence is absent locally.",
-    has("ALPHA-25") ? "Alpha-25 replays and audits operator handoff packets in disposable worktrees, including unsafe-packet rejection evidence." : "Alpha-25 evidence is absent locally."
+    has("ALPHA-25") ? "Alpha-25 replays and audits operator handoff packets in disposable worktrees, including unsafe-packet rejection evidence." : "Alpha-25 evidence is absent locally.",
+    has("ALPHA-26") ? "Alpha-26 archives and searches handoff/audit evidence with lifecycle recommendations." : "Alpha-26 evidence is absent locally."
   ];
 }
 function localLinks(content: string): string[] {
@@ -295,55 +314,6 @@ async function countOperatorTrials(resultPaths: string[]): Promise<{ accepted: n
   return counts;
 }
 
-async function countHandoffPackets(runDirs: string[]): Promise<HandoffPacketCounts> {
-  const counts = { generated: 0, missingReadme: 0, unsafe: 0, audited: 0, auditPassed: 0, auditFailed: 0, unsafeRejected: 0 };
-  for (const runDir of runDirs) {
-    const paths = await collectHandoffJsonFiles(runDir);
-    for (const path of paths) {
-      counts.generated += 1;
-      const root = path.replace(/\/handoff\.json$/, "");
-      try {
-        await readFile(join(root, "README.md"), "utf8");
-      } catch {
-        counts.missingReadme += 1;
-      }
-      try {
-        const handoff = JSON.parse(await readFile(path, "utf8")) as { proposal?: { autoAppliedByRunForge?: boolean }; sourceRepo?: { originalRepoMutated?: boolean }; manualApply?: { allowedTarget?: string }; safety?: Record<string, unknown> };
-        const unsafe = handoff.proposal?.autoAppliedByRunForge !== false ||
-          handoff.sourceRepo?.originalRepoMutated !== false ||
-          handoff.manualApply?.allowedTarget === "original_repo" ||
-          ["providerUsed", "networkUsed", "dbUsed", "deployUsed", "pushUsed", "mergeUsed"].some((key) => handoff.safety?.[key] !== false);
-        if (unsafe) counts.unsafe += 1;
-      } catch {
-        counts.unsafe += 1;
-      }
-    }
-    const audits = await collectNamedFiles(runDir, "audit-result.json");
-    for (const auditPath of audits) {
-      counts.audited += 1;
-      try {
-        const audit = JSON.parse(await readFile(auditPath, "utf8")) as { status?: string; safety?: { unsafeInstructionsFound?: boolean; forbiddenTargetsFound?: boolean }; findings?: string[] };
-        if (audit.status === "passed") counts.auditPassed += 1;
-        else counts.auditFailed += 1;
-        const unsafeRejected = audit.status === "failed" && (audit.safety?.unsafeInstructionsFound === true || audit.safety?.forbiddenTargetsFound === true || (audit.findings ?? []).some((finding) => /unsafe|forbidden|original_repo|autoAppliedByRunForge/i.test(finding)));
-        if (unsafeRejected) counts.unsafeRejected += 1;
-      } catch {
-        counts.auditFailed += 1;
-      }
-    }
-  }
-  return counts;
-}
-async function collectHandoffJsonFiles(root: string): Promise<string[]> {
-  return collectNamedFiles(root, "handoff.json");
-}
-async function collectNamedFiles(root: string, name: string): Promise<string[]> {
-  const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
-  const nested = await Promise.all(entries.map(async (entry) => {
-    const child = join(root, entry.name);
-    if (entry.isDirectory()) return collectNamedFiles(child, name);
-    if (!entry.isFile()) return [];
-    return entry.name === name ? [child] : [];
-  }));
-  return nested.flat();
+function sumCounts(counts: Record<string, number>, keys: string[]): number {
+  return keys.reduce((sum, key) => sum + (counts[key] ?? 0), 0);
 }

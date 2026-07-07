@@ -1,0 +1,153 @@
+{
+  "schemaVersion": "alpha-26-handoff-archive-search",
+  "generatedAt": "2026-07-07T12:17:21.330Z",
+  "archiveRootsScanned": [
+    "/tmp/runforge-alpha26-handoff-archive/source"
+  ],
+  "archive": {
+    "path": "/tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json",
+    "trackedJson": "validation/runs/ALPHA-26/handoff-archive.json",
+    "trackedMarkdown": "validation/runs/ALPHA-26/handoff-archive.md",
+    "records": 2,
+    "counts": {
+      "records": 2,
+      "byRepo": {
+        "factory": 2
+      },
+      "byDecision": {
+        "accepted": 1,
+        "rejected": 1
+      },
+      "byAuditStatus": {
+        "failed": 1,
+        "passed": 1
+      },
+      "bySafetyStatus": {
+        "safe": 1,
+        "unsafe": 1
+      },
+      "byValidationAfter": {
+        "passed": 1,
+        "skipped": 1
+      }
+    },
+    "validation": {
+      "passed": true,
+      "errors": []
+    }
+  },
+  "searchExamples": {
+    "acceptedPassed": {
+      "command": "pnpm dev external handoff-search --archive /tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json --repo factory --decision accepted --audit-status passed",
+      "matchingCount": 1,
+      "ids": [
+        "ALPHA-26-DEMO__accepted-handoff"
+      ]
+    },
+    "zeroResults": {
+      "command": "pnpm dev external handoff-search --archive /tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json --repo missing-repo",
+      "matchingCount": 0
+    }
+  },
+  "negativeValidation": {
+    "passed": false,
+    "errors": [
+      "malformed missing handoff path",
+      "malformed audit passed but audit result path is missing",
+      "malformed accepted decision requires validationAfter=passed",
+      "malformed original repo mutated true",
+      "malformed unsafe status requires reasons",
+      "malformed patch path missing when proposal indicates a patch"
+    ]
+  },
+  "attempts": [
+    {
+      "id": "alpha26-handoff-archive-search",
+      "repo": "/tmp/runforge-alpha26-handoff-archive/repos/factory",
+      "decision": "handoff_archive_generated",
+      "packet": "unknown",
+      "viewer": "unknown",
+      "outcome": "handoff_archive_search_ready",
+      "providerStatus": "disabled",
+      "filesChanged": [],
+      "manualApply": false,
+      "appliedTo": "read_only_archive",
+      "originalRepoMutated": false,
+      "validationBefore": "failed",
+      "validationAfter": "passed",
+      "proposalPatch": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-handoff/proposal.patch",
+      "handoffReadme": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-handoff/README.md",
+      "handoffJson": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-handoff/handoff.json",
+      "handoffAuditStatus": "passed",
+      "handoffAuditReport": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-audit/audit-report.md",
+      "handoffAuditResult": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-audit/audit-result.json",
+      "handoffArchive": "/tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json",
+      "handoffArchiveRecordCount": 2
+    }
+  ],
+  "safety": {
+    "noOriginalExternalRepoMutation": true,
+    "readOnlyOverExistingArtifacts": true,
+    "noAutoApplyByRunForge": true,
+    "noProviderCalls": true,
+    "noNetworkRequired": true,
+    "noDbAccess": true,
+    "noPushMergeDeploy": true
+  },
+  "visibility": {
+    "packetIndex": "/tmp/runforge-alpha26-handoff-archive/index/index.json",
+    "lifecycleReport": "validation/runs/ALPHA-26/lifecycle-report.json",
+    "packetIndexHasArchive": true,
+    "lifecycleHasArchiveCounts": true,
+    "lifecycleArchiveCounts": {
+      "records": 9,
+      "byRepo": {
+        "factory": 7,
+        "smartsql": 1,
+        "source": 1
+      },
+      "byDecision": {
+        "accepted": 4,
+        "handoff_archive_generated": 1,
+        "handoff_generated": 1,
+        "rejected": 3
+      },
+      "byAuditStatus": {
+        "failed": 1,
+        "missing": 6,
+        "passed": 2
+      },
+      "bySafetyStatus": {
+        "safe": 4,
+        "unknown": 4,
+        "unsafe": 1
+      },
+      "byValidationAfter": {
+        "failed": 1,
+        "passed": 3,
+        "pending_operator": 1,
+        "skipped": 1,
+        "unknown": 3
+      }
+    }
+  },
+  "commandsRun": [
+    "pnpm dev external handoff-archive --root /tmp/runforge-alpha26-handoff-archive/source --out /tmp/runforge-alpha26-handoff-archive/archive",
+    "# stdout: # Operator Handoff Archive",
+    "# stderr: $ tsx src/cli/index.ts external handoff-archive --root /tmp/runforge-alpha26-handoff-archive/source --out /tmp/runforge-alpha26-handoff-archive/archive",
+    "pnpm dev external handoff-search --archive /tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json --repo factory --decision accepted --audit-status passed --out /tmp/runforge-alpha26-handoff-archive/search --format json",
+    "# stdout: {",
+    "# stderr: $ tsx src/cli/index.ts external handoff-search --archive /tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json --repo factory --decision accepted --audit-status passed --out /tmp/runforge-alpha26-handoff-archive/search --format json",
+    "pnpm dev external handoff-search --archive /tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json --repo missing-repo --out /tmp/runforge-alpha26-handoff-archive/search-zero --format json",
+    "# stdout: {",
+    "# stderr: $ tsx src/cli/index.ts external handoff-search --archive /tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json --repo missing-repo --out /tmp/runforge-alpha26-handoff-archive/search-zero --format json",
+    "pnpm dev external handoff-archive-validate --archive /tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json",
+    "# stdout: {",
+    "# stderr: $ tsx src/cli/index.ts external handoff-archive-validate --archive /tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json",
+    "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha26-handoff-archive/index --dashboard-seed",
+    "# stdout: Indexed 14 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha26-handoff-archive/index --dashboard-seed"
+  ],
+  "errors": [],
+  "finalVerdict": "passed"
+}

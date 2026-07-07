@@ -1,0 +1,44 @@
+{
+  "schemaVersion": "alpha-26-handoff-search",
+  "generatedAt": "2026-07-07T12:17:20.644Z",
+  "archivePath": "/tmp/runforge-alpha26-handoff-archive/archive/handoff-archive.json",
+  "matchingCount": 1,
+  "filters": {
+    "repo": "factory",
+    "decision": "accepted",
+    "auditStatus": "passed"
+  },
+  "records": [
+    {
+      "id": "ALPHA-26-DEMO__accepted-handoff",
+      "repoPath": "/tmp/runforge-alpha26-handoff-archive/repos/factory",
+      "repoName": "factory",
+      "handoffPath": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-handoff/handoff.json",
+      "handoffReadmePath": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-handoff/README.md",
+      "patchPath": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-handoff/proposal.patch",
+      "auditResultPath": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-audit/audit-result.json",
+      "auditReportPath": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-audit/audit-report.md",
+      "decisionPath": "unknown",
+      "operatorSummaryPath": "/tmp/runforge-alpha26-handoff-archive/source/ALPHA-26-DEMO/accepted-handoff/operator-summary.md",
+      "lifecycleReportPath": "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-26/lifecycle-report.json",
+      "auditStatus": "passed",
+      "decisionVerdict": "accepted",
+      "validationBefore": "failed",
+      "validationAfter": "passed",
+      "originalRepoMutated": false,
+      "safetyStatus": "safe",
+      "unsafeReasons": [],
+      "lifecycleRefs": [
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-26/lifecycle-report.json"
+      ],
+      "validationCommands": [
+        "node verify.cjs"
+      ],
+      "createdFromAlpha": "ALPHA-26-DEMO",
+      "findings": [],
+      "recommendations": [
+        "Candidate OKF lesson: accepted audited handoff flow works for repo factory."
+      ]
+    }
+  ]
+}

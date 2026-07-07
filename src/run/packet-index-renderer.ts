@@ -7,8 +7,8 @@ export function renderPacketIndexMarkdown(index: PacketIndexResult): string {
     `Generated at: ${index.generatedAt}`,
     `Root: ${index.root}`,
     "",
-    "| Milestone | Scenario | Packet type | Outcome | Decision | Validation | Applied to | Auto-apply | Mutation | Patch | Handoff | Audit | Packet | Viewer |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+    "| Milestone | Scenario | Packet type | Outcome | Decision | Validation | Applied to | Auto-apply | Mutation | Patch | Handoff | Audit | Archive | Packet | Viewer |",
+    "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
   ];
   for (const entry of index.entries) {
     lines.push([
@@ -24,6 +24,7 @@ export function renderPacketIndexMarkdown(index: PacketIndexResult): string {
       entry.proposalPatchPath,
       entry.handoffReadmePath,
       `${entry.handoffAuditStatus} ${entry.handoffAuditReportPath}`,
+      `${entry.handoffArchiveRecordCount} ${entry.handoffArchivePath}`,
       entry.packetPath,
       entry.viewerPath
     ].map(markdownCell).join(" | "));
