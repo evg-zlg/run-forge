@@ -1,11 +1,12 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
-import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readFile, stat } from "node:fs/promises";
+import { extname, join, resolve } from "node:path";
 import { buildAdminUi } from "./builder.js";
 import { diffAdminConfigs, loadConfigEditorPayload, saveAdminConfigDraft, validateAdminConfigDraft } from "./config-edit.js";
 import { draftStatus } from "./config-status.js";
 import { loadAdminConfig } from "./config.js";
-import { redactJson } from "./redaction.js";
+import { redactJson, redactSecrets } from "./redaction.js";
+import { artifactPathAllowed } from "./run-browser.js";
 
 export interface AdminServerOptions {
   host?: string;
@@ -71,6 +72,10 @@ export async function handleAdminRequest(request: IncomingMessage, response: Ser
     sendJson(response, 200, await loadConfigEditorPayload(options.config, options.repoRoot));
     return;
   }
+  if (request.method === "GET" && url.pathname === "/api/admin/artifact") {
+    await sendArtifact(url, response, options);
+    return;
+  }
   if (request.method === "POST" && url.pathname === "/api/admin/config/validate") {
     const body = await readJson(request);
     const validation = await validateAdminConfigDraft(body.draft ?? body, options.repoRoot);
@@ -129,4 +134,58 @@ function sendJson(response: ServerResponse, status: number, value: unknown): voi
     "cache-control": "no-store"
   });
   response.end(`${JSON.stringify(redactJson(value), null, 2)}\n`);
+}
+
+async function sendArtifact(url: URL, response: ServerResponse, options: Required<Pick<AdminServerOptions, "host" | "repoRoot" | "out">> & AdminServerOptions): Promise<void> {
+  const requested = url.searchParams.get("path") ?? "";
+  if (!requested || requested.includes("\0")) {
+    sendJson(response, 400, { error: "artifact_path_required" });
+    return;
+  }
+  const loaded = await loadAdminConfig(options.config);
+  const roots = loaded.config.runs.defaultRoots.map((root) => resolve(options.repoRoot, root));
+  const resolvedPath = resolve(requested);
+  if (!artifactPathAllowed(resolvedPath, roots)) {
+    sendJson(response, 403, { error: "artifact_path_not_allowed" });
+    return;
+  }
+  let info;
+  try {
+    info = await stat(resolvedPath);
+  } catch {
+    sendJson(response, 404, { error: "artifact_not_found" });
+    return;
+  }
+  if (!info.isFile()) {
+    sendJson(response, 400, { error: "artifact_must_be_file" });
+    return;
+  }
+  const contentType = artifactContentType(resolvedPath);
+  if (contentType.startsWith("text/") || contentType === "application/json") {
+    response.writeHead(200, {
+      "content-type": `${contentType}; charset=utf-8`,
+      "cache-control": "no-store",
+      "x-runforge-read-only": "true"
+    });
+    response.end(redactSecrets(await readFile(resolvedPath, "utf8")));
+    return;
+  }
+  response.writeHead(200, {
+    "content-type": contentType,
+    "cache-control": "no-store",
+    "x-runforge-read-only": "true"
+  });
+  response.end(await readFile(resolvedPath));
+}
+
+function artifactContentType(path: string): string {
+  const extension = extname(path).toLowerCase();
+  if (extension === ".json" || extension === ".jsonl") return "application/json";
+  if (extension === ".html" || extension === ".htm") return "text/html";
+  if (extension === ".md" || extension === ".txt" || extension === ".log") return "text/plain";
+  if (extension === ".css") return "text/css";
+  if (extension === ".js") return "text/javascript";
+  if (extension === ".svg") return "image/svg+xml";
+  if (extension === ".png") return "image/png";
+  return "application/octet-stream";
 }

@@ -7,18 +7,23 @@ export interface AdminGraphNode {
   label: string;
   status: string;
   detail: string;
+  timestamp: string;
+  durationMs: number | null;
 }
 
 export interface AdminRunDetail {
   packetPath: string;
   graph: AdminGraphNode[];
+  graphSource: "events" | "fallback";
   summary: string;
+  validationSummary: unknown | null;
   metrics: unknown | null;
   safety: unknown | null;
   artifacts: string[];
   setupPolicy: unknown | null;
   providerAudit: unknown | null;
   proposalStatus: unknown | null;
+  proposalReadiness: unknown | null;
 }
 
 const FALLBACK_GRAPH = [
@@ -37,7 +42,7 @@ const FALLBACK_GRAPH = [
 ];
 
 export async function buildRunDetail(packetPath: string): Promise<AdminRunDetail> {
-  const [events, run, metrics, safety, manifest, setupPolicy, providerAudit, proposalStatus] = await Promise.all([
+  const [events, run, metrics, safety, manifest, setupPolicy, providerAudit, proposalStatus, validationSummary, proposalReadiness] = await Promise.all([
     readEvents(packetPath),
     readOptionalJson(join(packetPath, "run.json")),
     readOptionalJson(join(packetPath, "metrics.json")),
@@ -45,19 +50,24 @@ export async function buildRunDetail(packetPath: string): Promise<AdminRunDetail
     readOptionalJson(join(packetPath, "packet-manifest.json")),
     readOptionalJson(join(packetPath, "setup-policy.json")),
     readOptionalJson(join(packetPath, "provider-safety-report.json")),
-    readOptionalJson(join(packetPath, "proposal-status.json"))
+    readOptionalJson(join(packetPath, "proposal-status.json")),
+    readOptionalJson(join(packetPath, "validation-summary.json")),
+    readOptionalJson(join(packetPath, "proposal-readiness.json"))
   ]);
 
   return {
     packetPath,
     graph: events.length > 0 ? graphFromEvents(events) : graphFromFallback(run),
+    graphSource: events.length > 0 ? "events" : "fallback",
     summary: summarizeRun(run, proposalStatus),
+    validationSummary,
     metrics,
     safety,
     artifacts: manifestArtifacts(manifest),
     setupPolicy,
     providerAudit,
-    proposalStatus
+    proposalStatus,
+    proposalReadiness
   };
 }
 
@@ -67,11 +77,14 @@ function graphFromEvents(events: Array<Record<string, unknown>>): AdminGraphNode
     const status = text(event.status) || text(event.outcome) || "observed";
     const command = text(event.command);
     const phase = text(event.phase);
+    const message = text(event.message) || text(event.detail) || text(event.error);
     return {
       id: `${index + 1}-${type}`,
       label: type,
       status,
-      detail: [phase, command].filter(Boolean).join(" | ")
+      detail: [phase, command, message].filter(Boolean).join(" | "),
+      timestamp: text(event.timestamp) || text(event.time) || text(event.createdAt) || "",
+      durationMs: numberOrNull(event.durationMs ?? event.duration_ms ?? event.elapsedMs)
     };
   });
 }
@@ -82,7 +95,9 @@ function graphFromFallback(run: unknown): AdminGraphNode[] {
     id: `${index + 1}-${label}`,
     label,
     status: index === FALLBACK_GRAPH.length - 1 ? status : "expected",
-    detail: "events.jsonl not found; showing canonical operator path"
+    detail: "events.jsonl not found; showing canonical operator path",
+    timestamp: "",
+    durationMs: null
   }));
 }
 
@@ -140,6 +155,10 @@ async function readOptionalJson(path: string): Promise<unknown | null> {
 
 function text(value: unknown): string {
   return typeof value === "string" ? value : "";
+}
+
+function numberOrNull(value: unknown): number | null {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
