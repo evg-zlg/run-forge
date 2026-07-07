@@ -90,6 +90,7 @@ export async function runExternalFailureTriage(options: ExternalFailureTriageOpt
     sourceCheckPacket,
     sourceCheckRunId: sourceRun.runId ?? null,
     sourceCheckStatus: sourceRun.status ?? "unknown",
+    setupPolicy: sourceRun.setupPolicy ?? null,
     category: analysis.category,
     confidence: analysis.confidence,
     probableRootCause: analysis.probableRootCause,
@@ -135,6 +136,7 @@ export async function runExternalFailureTriage(options: ExternalFailureTriageOpt
     sourceCheckPacket,
     sourceCheckRunId: sourceRun.runId ?? null,
     sourceCheckStatus: sourceRun.status ?? "unknown",
+    setupPolicy: sourceRun.setupPolicy ?? null,
     category: analysis.category,
     confidence: analysis.confidence,
     requiresMoreContext: analysis.requiresMoreContext,
@@ -154,6 +156,7 @@ export async function runExternalFailureTriage(options: ExternalFailureTriageOpt
     category: analysis.category,
     confidence: analysis.confidence,
     sourceCheckStatus: sourceRun.status ?? "unknown",
+    setupPolicy: sourceRun.setupPolicy ?? null,
     finalStatus: status,
     humanGateRequired: true
   });
@@ -253,6 +256,8 @@ async function createSourceCheckPacket(
   const result = await runExternalCommandCheck({
     repo: options.repo!,
     setupCommands: options.setupCommands,
+    setupNetworkIntent: options.setupNetworkIntent,
+    continueAfterSetupFailure: options.continueAfterSetupFailure,
     commands: options.commands!,
     out: checkOut,
     timeoutMs: options.timeoutMs,

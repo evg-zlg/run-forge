@@ -234,6 +234,7 @@ describe("external check CLI", () => {
       setupCommandsUserProvided: boolean;
       originalRepoMutationAllowed: boolean;
       setupMayUseNetwork: string;
+      setupPolicy: { networkIntent: string; continueAfterSetupFailure: boolean; mainCommandsSkippedOnSetupFailure: boolean };
       originalRepoMutationVerdict: string;
     };
     expect(safety).toMatchObject({
@@ -242,9 +243,55 @@ describe("external check CLI", () => {
       originalRepoMutationVerdict: "unchanged"
     });
     expect(["unknown", "yes", "no"]).toContain(safety.setupMayUseNetwork);
+    expect(safety.setupPolicy).toMatchObject({
+      networkIntent: "unknown",
+      continueAfterSetupFailure: false,
+      mainCommandsSkippedOnSetupFailure: true
+    });
     expect(await readFile(join(packetDir, "logs/command-001.stdout.log"), "utf8")).toContain("ready");
     await expect(access(join(repo, "prepared.txt"))).rejects.toThrow();
     expect(await gitStatus(repo)).toEqual(before);
+  });
+
+  it("records declared setup network intent in packet policy surfaces", async () => {
+    const repo = await createGitFixtureRepo();
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-external-check-setup-intent-"));
+
+    await runCli([
+      "external", "check",
+      "--repo", repo,
+      "--setup-command", "node -e \"console.log('setup ok')\"",
+      "--setup-network-intent", "expected",
+      "--command", "node -e \"console.log('main ok')\"",
+      "--out", outDir
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    const run = JSON.parse(await readFile(join(packetDir, "run.json"), "utf8")) as {
+      setupPolicy: { networkIntent: string; continueAfterSetupFailure: boolean; mainCommandsSkippedOnSetupFailure: boolean };
+    };
+    expect(run.setupPolicy).toMatchObject({
+      networkIntent: "expected",
+      continueAfterSetupFailure: false,
+      mainCommandsSkippedOnSetupFailure: true
+    });
+    const metrics = JSON.parse(await readFile(join(packetDir, "metrics.json"), "utf8")) as {
+      setupNetworkIntent: string;
+      setupPolicy: { networkIntent: string };
+    };
+    expect(metrics.setupNetworkIntent).toBe("expected");
+    expect(metrics.setupPolicy.networkIntent).toBe("expected");
+    const safety = JSON.parse(await readFile(join(packetDir, "safety-report.json"), "utf8")) as {
+      setupNetworkIntentEnforced: boolean;
+      setupPolicy: { networkIntent: string };
+      setupPolicyNotes: string[];
+    };
+    expect(safety.setupPolicy.networkIntent).toBe("expected");
+    expect(safety.setupNetworkIntentEnforced).toBe(false);
+    expect(safety.setupPolicyNotes.join("\n")).toContain("does not enforce network blocking");
+    const summary = await readFile(join(packetDir, "summary.md"), "utf8");
+    expect(summary).toContain("Setup policy:");
+    expect(summary).toContain("Network intent: expected");
   });
 
   it("records setup failure and skips main commands by default", async () => {
@@ -282,6 +329,39 @@ describe("external check CLI", () => {
     expect(metrics).toMatchObject({ commandsRequested: 1, commandsRun: 0 });
     expect(await gitStatus(repo)).toEqual(before);
     await expect(access(join(repo, "should-not-run.txt"))).rejects.toThrow();
+  });
+
+  it("runs main commands diagnostically after setup failure only when explicitly enabled", async () => {
+    const repo = await createGitFixtureRepo();
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-external-check-setup-diagnostic-"));
+
+    await runCli([
+      "external", "check",
+      "--repo", repo,
+      "--setup-command", "node -e \"console.error('setup failed'); process.exit(2)\"",
+      "--continue-after-setup-failure",
+      "--command", "node -e \"console.log('diagnostic main ran')\"",
+      "--out", outDir
+    ]);
+
+    const packetDir = join(outDir, "packet");
+    const run = JSON.parse(await readFile(join(packetDir, "run.json"), "utf8")) as {
+      status: string;
+      setupPolicy: { continueAfterSetupFailure: boolean; mainCommandsSkippedOnSetupFailure: boolean };
+      setupCommands: Array<{ status: string }>;
+      commands: Array<{ status: string }>;
+    };
+    expect(run.status).toBe("setup_failed_main_passed");
+    expect(run.setupPolicy).toMatchObject({ continueAfterSetupFailure: true, mainCommandsSkippedOnSetupFailure: false });
+    expect(run.setupCommands[0]).toMatchObject({ status: "failed" });
+    expect(run.commands[0]).toMatchObject({ status: "passed" });
+    expect(await readFile(join(packetDir, "logs/command-001.stdout.log"), "utf8")).toContain("diagnostic main ran");
+    const events = await readEvents(packetDir);
+    expect(events.some((event) => event.type === "setup_diagnostic_main_commands_started")).toBe(true);
+    expect(events.some((event) => event.type === "setup_skipped_main_commands")).toBe(false);
+    const summary = await readFile(join(packetDir, "summary.md"), "utf8");
+    expect(summary).toContain("Diagnostic mode: main commands ran despite setup failure.");
+    expect(summary).toContain("do not treat this as a clean verification environment");
   });
 
   it("records setup timeout separately from main command timeouts", async () => {
@@ -549,6 +629,43 @@ describe("external failure-triage CLI", () => {
     };
     expect(proposalStatus.outcome).toBe("not_ready");
     expect(proposalStatus.patchBytes).toBe(0);
+  });
+
+  it("keeps diagnostic setup-failure runs gated even when main commands pass", async () => {
+    const repo = await createGitFixtureRepo();
+    const outDir = await mkdtemp(join(tmpdir(), "runforge-external-diagnostic-readiness-"));
+
+    await runCli([
+      "external", "proposal-readiness",
+      "--repo", repo,
+      "--setup-command", "node -e \"console.error('setup dependency missing'); process.exit(1)\"",
+      "--continue-after-setup-failure",
+      "--command", "node -e \"console.log('main diagnostic passed')\"",
+      "--out", outDir
+    ]);
+
+    const readinessPacket = join(outDir, "packet");
+    const readinessRun = JSON.parse(await readFile(join(readinessPacket, "run.json"), "utf8")) as {
+      status: string;
+      canAttemptCodeProposal: boolean;
+    };
+    expect(readinessRun).toMatchObject({
+      status: "needs_more_context",
+      canAttemptCodeProposal: false
+    });
+    expect(await readFile(join(readinessPacket, "recommended-next-action.md"), "utf8")).toContain("Fix setup/preflight first");
+
+    const triagePacket = join(outDir, "triage-source", "packet");
+    const rootCause = JSON.parse(await readFile(join(triagePacket, "root-cause.json"), "utf8")) as {
+      sourceCheckStatus: string;
+      readyForCodeProposal: boolean;
+      setupPolicy: { continueAfterSetupFailure: boolean };
+    };
+    expect(rootCause).toMatchObject({
+      sourceCheckStatus: "setup_failed_main_passed",
+      readyForCodeProposal: false,
+      setupPolicy: { continueAfterSetupFailure: true }
+    });
   });
 
   it("reports no_failure_observed for a passed packet", async () => {

@@ -13,6 +13,7 @@ export function dashboardJs(): string {
     ["scenario", null],
     ["providerStatus", document.getElementById("provider-status-filter")],
     ["mutationVerdict", document.getElementById("mutation-verdict-filter")],
+    ["setupNetworkIntent", document.getElementById("setup-network-filter")],
     ["alpha", document.getElementById("alpha-filter")]
   ];
   const visibleRecords = document.getElementById("visible-records");

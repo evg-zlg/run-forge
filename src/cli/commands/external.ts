@@ -20,6 +20,8 @@ function checkCommand(): Command {
     .description("Run explicit local commands in a disposable external-repo workspace and write a trace packet.")
     .requiredOption("--repo <path>", "external local repository path")
     .option("--setup-command <command>", "setup/preflight command to run in the disposable workspace before main commands; repeatable", collect, [])
+    .option("--setup-network-intent <intent>", "declared setup network intent: none, expected, or unknown (default: unknown)", parseSetupNetworkIntent)
+    .option("--continue-after-setup-failure", "diagnostic mode: run main commands even when setup/preflight fails")
     .requiredOption("--command <command>", "command to run in the disposable workspace; repeatable", collect, [])
     .option("--out <artifact-dir>", "artifact output directory")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds (default: 120000)", parsePositiveInteger)
@@ -31,6 +33,8 @@ function checkCommand(): Command {
         const result = await runExternalCommandCheck({
           repo: opts.repo as string,
           setupCommands: opts.setupCommand as string[] | undefined,
+          setupNetworkIntent: opts.setupNetworkIntent as "none" | "expected" | "unknown" | undefined,
+          continueAfterSetupFailure: Boolean(opts.continueAfterSetupFailure),
           commands: opts.command as string[],
           out: opts.out as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,
@@ -52,6 +56,8 @@ function failureTriageCommand(): Command {
     .option("--from-check-packet <packet-dir>", "existing external check packet directory")
     .option("--repo <path>", "external local repository path; requires --command when --from-check-packet is omitted")
     .option("--setup-command <command>", "setup/preflight command passed to source external check; repeatable", collect, [])
+    .option("--setup-network-intent <intent>", "declared setup network intent passed to source external check: none, expected, or unknown (default: unknown)", parseSetupNetworkIntent)
+    .option("--continue-after-setup-failure", "diagnostic mode passed to source external check")
     .option("--command <command>", "command to run through external check before triage; repeatable", collect, [])
     .option("--out <artifact-dir>", "artifact output directory")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds when running a source check", parsePositiveInteger)
@@ -63,6 +69,8 @@ function failureTriageCommand(): Command {
           fromCheckPacket: opts.fromCheckPacket as string | undefined,
           repo: opts.repo as string | undefined,
           setupCommands: opts.setupCommand as string[] | undefined,
+          setupNetworkIntent: opts.setupNetworkIntent as "none" | "expected" | "unknown" | undefined,
+          continueAfterSetupFailure: Boolean(opts.continueAfterSetupFailure),
           commands: opts.command as string[] | undefined,
           out: opts.out as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,
@@ -82,6 +90,8 @@ function proposalReadinessCommand(): Command {
     .option("--from-triage-packet <packet-dir>", "existing external failure triage packet directory")
     .option("--repo <path>", "external local repository path; requires --command when --from-triage-packet is omitted")
     .option("--setup-command <command>", "setup/preflight command passed to source external check; repeatable", collect, [])
+    .option("--setup-network-intent <intent>", "declared setup network intent passed to source external check: none, expected, or unknown (default: unknown)", parseSetupNetworkIntent)
+    .option("--continue-after-setup-failure", "diagnostic mode passed to source external check")
     .option("--command <command>", "command to run through check and triage before readiness; repeatable", collect, [])
     .option("--out <artifact-dir>", "artifact output directory")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds when running source commands", parsePositiveInteger)
@@ -93,6 +103,8 @@ function proposalReadinessCommand(): Command {
           fromTriagePacket: opts.fromTriagePacket as string | undefined,
           repo: opts.repo as string | undefined,
           setupCommands: opts.setupCommand as string[] | undefined,
+          setupNetworkIntent: opts.setupNetworkIntent as "none" | "expected" | "unknown" | undefined,
+          continueAfterSetupFailure: Boolean(opts.continueAfterSetupFailure),
           commands: opts.command as string[] | undefined,
           out: opts.out as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,
@@ -112,6 +124,8 @@ function codeProposalCommand(): Command {
     .option("--from-readiness-packet <packet-dir>", "existing external proposal readiness packet directory")
     .option("--repo <path>", "external local repository path; requires --command when --from-readiness-packet is omitted")
     .option("--setup-command <command>", "setup/preflight command passed to source external check; repeatable", collect, [])
+    .option("--setup-network-intent <intent>", "declared setup network intent passed to source external check: none, expected, or unknown (default: unknown)", parseSetupNetworkIntent)
+    .option("--continue-after-setup-failure", "diagnostic mode passed to source external check")
     .option("--command <command>", "command to run through the combined flow and verification; repeatable", collect, [])
     .option("--out <artifact-dir>", "artifact output directory")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger)
@@ -126,6 +140,8 @@ function codeProposalCommand(): Command {
           fromReadinessPacket: opts.fromReadinessPacket as string | undefined,
           repo: opts.repo as string | undefined,
           setupCommands: opts.setupCommand as string[] | undefined,
+          setupNetworkIntent: opts.setupNetworkIntent as "none" | "expected" | "unknown" | undefined,
+          continueAfterSetupFailure: Boolean(opts.continueAfterSetupFailure),
           commands: opts.command as string[] | undefined,
           out: opts.out as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,
@@ -202,6 +218,11 @@ function parsePositiveInteger(value: string): number {
 function parseExitPolicy(value: string): "packet" | "command-status" {
   if (value === "packet" || value === "command-status") return value;
   throw new InvalidArgumentError("--exit-policy must be packet or command-status.");
+}
+
+function parseSetupNetworkIntent(value: string): "none" | "expected" | "unknown" {
+  if (value === "none" || value === "expected" || value === "unknown") return value;
+  throw new InvalidArgumentError("--setup-network-intent must be none, expected, or unknown.");
 }
 
 function parseProvider(value: string): "cli" {

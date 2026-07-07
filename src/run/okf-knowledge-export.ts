@@ -27,16 +27,19 @@ const concepts = [
   ["do-not-apply", "Do Not Apply", "Operator decision to leave original repositories untouched.", ["operator", "safety"], ["ALPHA-15"]],
   ["packet-validation", "Packet Validation", "RunForge packet artifacts are validated as durable evidence.", ["packet", "validation"], ["PACKET-VALIDATION", "ALPHA-16"]],
   ["external-operator-trial", "External Operator Trial", "Dogfood evidence from operating RunForge against external repositories.", ["dogfood", "external"], ["ALPHA-15"]],
-  ["setup-preflight", "Setup Preflight", "Explicit setup commands run in disposable workspaces before main checks.", ["setup", "preflight"], ["ALPHA-16"]],
-  ["dependency-missing", "Dependency Missing", "Missing dependencies are environment context, not source-code proposal readiness.", ["dependency", "readiness"], ["ALPHA-15", "ALPHA-16"]],
-  ["environment-error", "Environment Error", "Infrastructure or setup failures require context before code proposals.", ["environment", "triage"], ["ALPHA-15", "ALPHA-16"]]
+  ["setup-preflight", "Setup Preflight", "Explicit setup commands run in disposable workspaces before main checks.", ["setup", "preflight"], ["ALPHA-16", "ALPHA-18"]],
+  ["setup-network-intent", "Setup Network Intent", "Operators declare expected setup network use for packet audit and dashboard review.", ["setup", "network", "policy"], ["ALPHA-18"]],
+  ["diagnostic-setup-mode", "Diagnostic Setup Mode", "Operators may explicitly run main commands after setup failure while preserving conservative readiness.", ["setup", "diagnostic", "readiness"], ["ALPHA-18"]],
+  ["dependency-missing", "Dependency Missing", "Missing dependencies are environment context, not source-code proposal readiness.", ["dependency", "readiness"], ["ALPHA-15", "ALPHA-16", "ALPHA-18"]],
+  ["environment-error", "Environment Error", "Infrastructure or setup failures require context before code proposals.", ["environment", "triage"], ["ALPHA-15", "ALPHA-16", "ALPHA-18"]]
 ] as const;
 
 const playbooks = [
   ["external-dogfood-trial", "External Dogfood Trial", "Run packet-producing trials against disposable external workspaces.", ["dogfood", "packet"]],
   ["provider-patch-review", "Provider Patch Review", "Review provider proposals through safety reports before apply decisions.", ["provider", "review"]],
   ["manual-patch-acceptance", "Manual Patch Acceptance", "Require human review before applying generated patches.", ["manual", "safety"]],
-  ["setup-preflight-check", "Setup Preflight Check", "Use setup commands to separate dependency preparation from source verification.", ["setup", "preflight"]]
+  ["setup-preflight-check", "Setup Preflight Check", "Use setup commands to separate dependency preparation from source verification.", ["setup", "preflight"]],
+  ["setup-policy-check", "Setup Policy Check", "Record setup network intent and diagnostic continuation policy before interpreting verification evidence.", ["setup", "policy"]]
 ] as const;
 
 export async function exportOkfBundle(options: OkfExportOptions): Promise<OkfExportResult> {
@@ -49,7 +52,7 @@ export async function exportOkfBundle(options: OkfExportOptions): Promise<OkfExp
   await writePage(out, files, "index.md", fm("RunForge Knowledge Bundle", "RunForge OKF-compatible evidence export.", ["runforge", "okf"]), indexBody(evidence));
   await writePage(out, files, "log.md", fm("RunForge Knowledge Export Log", "Generated source evidence log.", ["runforge", "evidence"]), logBody(root, evidence));
 
-  for (const item of evidence.filter((entry) => /^ALPHA-(?:9|1[0-6])$/.test(entry.milestone))) {
+  for (const item of evidence.filter((entry) => /^ALPHA-(?:9|1[0-8])$/.test(entry.milestone))) {
     const slug = item.milestone.toLowerCase();
     await writePage(out, files, `milestones/${slug}.md`, fm(`${item.milestone} ${milestoneTitle(item.milestone)}`, `RunForge ${item.milestone} validation evidence.`, ["runforge", slug]), milestoneBody(item));
   }
@@ -64,6 +67,7 @@ export async function exportOkfBundle(options: OkfExportOptions): Promise<OkfExp
   }
   await writePage(out, files, "decisions/alpha-15-factory-trial.md", fm("Factory Trial Environment Failure", "Missing dependencies in disposable workspace should not be treated as proposal-ready typecheck failure.", ["runforge", "factory", "environment", "readiness"]), decisionBody("ALPHA-15"));
   await writePage(out, files, "decisions/alpha-16-setup-preflight.md", fm("Alpha-16 Setup Preflight", "Setup commands run only in disposable workspaces and gate main commands by default.", ["runforge", "alpha-16", "setup", "preflight"]), decisionBody("ALPHA-16"));
+  await writePage(out, files, "decisions/alpha-18-setup-policy.md", fm("Alpha-18 Setup Policy", "Setup network intent is audit-only, and diagnostic continuation does not make verification clean.", ["runforge", "alpha-18", "setup", "policy", "diagnostic"]), decisionBody("ALPHA-18"));
   await writePage(out, files, "skill-candidates/index.md", fm("Skill Candidate Index", "Candidate operational skills derived from RunForge evidence.", ["runforge", "skills", "lifecycle"]), skillCandidateBody());
 
   return { out, files };

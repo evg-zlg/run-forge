@@ -154,21 +154,30 @@ function setupFailureClassification(sourceRun: ExternalFailureTriageSourceRun, e
   const status = sourceRun.status ?? "";
   const setupEvidence = evidence.filter((item) => item.phase === "setup" || item.commandId.includes(":setup:"));
   if (!status.startsWith("setup_") && setupEvidence.length === 0) return null;
+  const diagnostic = status === "setup_failed_main_passed" || status === "setup_failed_main_failed" || sourceRun.setupPolicy?.continueAfterSetupFailure === true;
   const combined = setupEvidence.map((item) => `${item.command}\n${item.stdoutExcerpt}\n${item.stderrExcerpt}`).join("\n");
   const dependency = environmentSetupClassification(combined, setupEvidence);
   if (dependency) {
     return {
       ...dependency,
-      probableRootCause: `Setup/preflight failed before main commands ran. ${dependency.probableRootCause}`,
-      safeNextAction: "Inspect setup/preflight logs, correct the dependency preparation command, then rerun before attempting a code proposal."
+      probableRootCause: diagnostic
+        ? `Setup/preflight failed, then main commands ran in diagnostic mode. ${dependency.probableRootCause}`
+        : `Setup/preflight failed before main commands ran. ${dependency.probableRootCause}`,
+      safeNextAction: diagnostic
+        ? "Fix setup/preflight first, then rerun a clean verification. Treat diagnostic main-command logs as supporting evidence only."
+        : "Inspect setup/preflight logs, correct the dependency preparation command, then rerun before attempting a code proposal."
     };
   }
   return classification(
     "environment_error",
     "high",
-    "Setup/preflight failed before main commands ran, so the packet does not yet provide source-fix evidence.",
+    diagnostic
+      ? "Setup/preflight failed, and main commands ran only because diagnostic mode was explicitly enabled. The packet is not clean source-fix evidence."
+      : "Setup/preflight failed before main commands ran, so the packet does not yet provide source-fix evidence.",
     setupEvidence.length > 0 ? setupEvidence : evidence,
-    "Inspect setup/preflight logs, correct the setup command or disposable workspace environment, then rerun before attempting a code proposal.",
+    diagnostic
+      ? "Fix setup/preflight first, then rerun a clean verification. Treat diagnostic main-command logs as supporting evidence only."
+      : "Inspect setup/preflight logs, correct the setup command or disposable workspace environment, then rerun before attempting a code proposal.",
     true,
     false
   );

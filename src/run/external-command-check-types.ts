@@ -1,8 +1,19 @@
-export type ExternalCheckStatus = "passed" | "failed" | "timed_out" | "error" | "blocked" | "setup_failed" | "setup_timed_out" | "setup_error";
+export type ExternalCheckStatus =
+  | "passed"
+  | "failed"
+  | "timed_out"
+  | "error"
+  | "blocked"
+  | "setup_failed"
+  | "setup_timed_out"
+  | "setup_error"
+  | "setup_failed_main_passed"
+  | "setup_failed_main_failed";
 export type CommandStatus = "passed" | "failed" | "timed_out" | "error" | "blocked";
 export type CommandPhase = "setup" | "main";
 export type MutationVerdict = "unchanged" | "changed" | "unknown";
 export type CliExitPolicy = "packet" | "command-status";
+export type SetupNetworkIntent = "none" | "expected" | "unknown";
 
 export const externalCheckSchemaVersion = "alpha-2.1";
 
@@ -14,6 +25,8 @@ export interface CommandPolicy {
 export interface ExternalCommandCheckOptions {
   repo: string;
   setupCommands?: string[];
+  setupNetworkIntent?: SetupNetworkIntent;
+  continueAfterSetupFailure?: boolean;
   commands: string[];
   out?: string;
   timeoutMs?: number;
@@ -80,6 +93,9 @@ export interface SafetyReport {
   commandsUserProvidedViaCli: boolean;
   setupCommandsUserProvided: boolean;
   setupMayUseNetwork: "unknown" | "yes" | "no";
+  setupPolicy: SetupPolicy;
+  setupNetworkIntentEnforced: false;
+  setupPolicyNotes: string[];
   secretsHandling: {
     deliberateSecretPrinting: false;
     note: string;
@@ -89,4 +105,11 @@ export interface SafetyReport {
     note: string;
   };
   blockedCommands: Array<{ index: number; command: string; reason: string }>;
+}
+
+export interface SetupPolicy {
+  setupCommandsProvided: boolean;
+  networkIntent: SetupNetworkIntent;
+  continueAfterSetupFailure: boolean;
+  mainCommandsSkippedOnSetupFailure: boolean;
 }

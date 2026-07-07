@@ -6,7 +6,7 @@ import { buildFixtureCodeProposal, type DeterministicCodeProposal } from "./code
 import { validateCommandSafety } from "./command-safety.js";
 import { gitSnapshot, mutationVerdictFor, prepareWorkspace } from "./external-command-check-git.js";
 import { writePacketManifest } from "./external-command-check-packet.js";
-import type { CommandResult } from "./external-command-check-types.js";
+import type { CommandResult, SetupNetworkIntent } from "./external-command-check-types.js";
 import { createCodeProposalArtifactTracker } from "./external-code-proposal-artifacts.js";
 import {
   createSourceReadinessPacket,
@@ -42,6 +42,8 @@ export interface ExternalCodeProposalOptions {
   fromReadinessPacket?: string;
   repo?: string;
   setupCommands?: string[];
+  setupNetworkIntent?: SetupNetworkIntent;
+  continueAfterSetupFailure?: boolean;
   commands?: string[];
   out?: string;
   timeoutMs?: number;

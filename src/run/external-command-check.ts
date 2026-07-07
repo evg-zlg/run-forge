@@ -17,6 +17,7 @@ import {
 import {
   artifactTypeFor,
   buildSafetyReport,
+  buildSetupPolicy,
   writeArtifacts,
   writePacketManifest,
   type ArtifactRecord
@@ -45,10 +46,7 @@ export type { ExternalCommandCheckOptions, ExternalCommandCheckResult } from "./
 
 const defaultTimeoutMs = 120_000;
 const defaultMaxLogBytes = 1_000_000;
-const commandPolicy: CommandPolicy = {
-  onFailure: "continue",
-  finalStatusRule: "failed_if_any_command_failed_or_timed_out"
-};
+const commandPolicy: CommandPolicy = { onFailure: "continue", finalStatusRule: "failed_if_any_command_failed_or_timed_out" };
 
 export async function runExternalCommandCheck(options: ExternalCommandCheckOptions): Promise<ExternalCommandCheckResult> {
   validateOptions(options);
@@ -58,6 +56,7 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
   const timeoutMs = options.timeoutMs ?? defaultTimeoutMs;
   const maxLogBytes = options.maxLogBytes ?? defaultMaxLogBytes;
   const cliExitPolicy = options.exitPolicy ?? "packet";
+  const setupPolicy = buildSetupPolicy(options);
   const packetDir = join(resolve(options.out ?? defaultExternalCheckOutDir()), "packet");
   const logsDir = join(packetDir, "logs");
   await ensureDir(logsDir);
@@ -97,9 +96,10 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
   emit("task_received", {
     taskType: "external_command_check",
     setupCommandsRequested: options.setupCommands?.length ?? 0,
-    commandsRequested: options.commands.length
+    commandsRequested: options.commands.length,
+    setupPolicy
   });
-  emit("run_created", { packetDir, cliExitPolicy });
+  emit("run_created", { packetDir, cliExitPolicy, setupPolicy });
   emit("route_selected", { route: "external_command_check" });
 
   await assertDirectory(repoPath, "--repo");
@@ -169,7 +169,7 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
       });
     }
     const setupFailure = firstSetupFailure(setupResults);
-    if (setupFailure) {
+    if (setupFailure && !setupPolicy.continueAfterSetupFailure) {
       emit("setup_skipped_main_commands", {
         parentEventId: workerStartedEventId,
         workerId,
@@ -177,6 +177,15 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
         commandsSkipped: options.commands.length
       });
     } else {
+      if (setupFailure) {
+        emit("setup_diagnostic_main_commands_started", {
+          parentEventId: workerStartedEventId,
+          workerId,
+          reason: setupFailure.status,
+          commandsRequested: options.commands.length,
+          caution: "main commands are diagnostic because setup/preflight failed"
+        });
+      }
       for (let i = 0; i < options.commands.length; i += 1) {
         const index = i + 1;
         const command = options.commands[i]!;
@@ -207,7 +216,7 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
   const originalAfter = await gitSnapshot(repoPath);
   const mutationVerdict = mutationVerdictFor(originalBefore, originalAfter);
   const workspaceChangeSummary = await computeWorkspaceChangeSummary(workspacePath, workspaceBefore);
-  status = finalStatus(status, setupResults, commandResults, mutationVerdict);
+  status = finalStatus(status, setupResults, commandResults, mutationVerdict, setupPolicy.continueAfterSetupFailure);
   const finishedAt = new Date().toISOString();
   const durationMs = Date.parse(finishedAt) - Date.parse(startedAt);
   const cliExitCode = cliExitCodeFor(cliExitPolicy, status);
@@ -245,6 +254,7 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
     cliExitPolicy,
     cliExitCode,
     commandPolicy,
+    setupPolicy,
     setupResults,
     commandResults,
     safetyReport,
@@ -300,14 +310,13 @@ function validateOptions(options: ExternalCommandCheckOptions): void {
   if (!options.commands || options.commands.length === 0) throw new Error("At least one --command is required.");
   if (options.setupCommands?.some((command) => command.trim().length === 0)) throw new Error("--setup-command values must be non-empty.");
   if (options.commands.some((command) => command.trim().length === 0)) throw new Error("--command values must be non-empty.");
-  if (options.timeoutMs !== undefined && (!Number.isInteger(options.timeoutMs) || options.timeoutMs <= 0)) {
-    throw new Error("--timeout-ms must be a positive integer.");
-  }
-  if (options.maxLogBytes !== undefined && (!Number.isInteger(options.maxLogBytes) || options.maxLogBytes <= 0)) {
-    throw new Error("--max-log-bytes must be a positive integer.");
-  }
+  if (options.timeoutMs !== undefined && (!Number.isInteger(options.timeoutMs) || options.timeoutMs <= 0)) throw new Error("--timeout-ms must be a positive integer.");
+  if (options.maxLogBytes !== undefined && (!Number.isInteger(options.maxLogBytes) || options.maxLogBytes <= 0)) throw new Error("--max-log-bytes must be a positive integer.");
   if (options.exitPolicy !== undefined && !["packet", "command-status"].includes(options.exitPolicy)) {
     throw new Error("--exit-policy must be packet or command-status.");
+  }
+  if (options.setupNetworkIntent !== undefined && !["none", "expected", "unknown"].includes(options.setupNetworkIntent)) {
+    throw new Error("--setup-network-intent must be none, expected, or unknown.");
   }
 }
 

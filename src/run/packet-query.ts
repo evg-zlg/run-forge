@@ -95,6 +95,8 @@ export interface DashboardSeedRecord {
   proposalPatchPath?: string;
   humanReviewPath?: string;
   notes?: string;
+  setupNetworkIntent?: string;
+  setupDiagnosticMode?: string;
   tags: string[];
 }
 
@@ -271,6 +273,8 @@ function toDashboardSeedRecord(entry: PacketIndexEntry, root: string): Dashboard
     proposalPatchPath: packetArtifact("proposal.patch"),
     humanReviewPath: packetArtifact("human-review.md"),
     notes: entry.notes,
+    setupNetworkIntent: setupNetworkIntent(entry),
+    setupDiagnosticMode: setupDiagnosticMode(entry),
     tags: seedTags(entry)
   };
 }
@@ -280,7 +284,21 @@ function seedTags(entry: PacketIndexEntry): string[] {
   if (entry.outcome !== "unknown") tags.add(entry.outcome);
   if (entry.providerStatus !== "unknown") tags.add(`provider:${entry.providerStatus}`);
   if (entry.externalRepoMutationVerdict !== "unknown") tags.add(`mutation:${entry.externalRepoMutationVerdict}`);
+  const intent = setupNetworkIntent(entry);
+  if (intent) tags.add(`setup-network:${intent}`);
+  const diagnostic = setupDiagnosticMode(entry);
+  if (diagnostic) tags.add(`setup:${diagnostic}`);
   return [...tags].sort();
+}
+
+function setupNetworkIntent(entry: PacketIndexEntry): string | undefined {
+  return /setupNetworkIntent=([a-z]+)/.exec(entry.notes)?.[1];
+}
+
+function setupDiagnosticMode(entry: PacketIndexEntry): string | undefined {
+  if (entry.notes.includes("diagnostic-continue")) return "diagnostic-continue";
+  if (entry.notes.includes("setup-gates-main")) return "setup-gates-main";
+  return undefined;
 }
 
 function isDogfoodEvidence(entry: PacketIndexEntry): boolean {

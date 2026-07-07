@@ -71,6 +71,11 @@ interface ResultsJson {
 interface RunJson {
   taskType?: string;
   status?: string;
+  setupPolicy?: {
+    networkIntent?: string;
+    continueAfterSetupFailure?: boolean;
+    mainCommandsSkippedOnSetupFailure?: boolean;
+  };
   repo?: {
     path?: string;
     mutationVerdict?: string;
@@ -214,11 +219,17 @@ async function entriesFromPackets(root: string): Promise<PacketIndexEntry[]> {
       externalRepoHeadAfter: run.repo?.headAfter,
       externalRepoMutationVerdict: run.repo?.mutationVerdict,
       decision: status?.reviewerDecision,
-      notes: status?.diagnostics?.join("; "),
+      notes: [status?.diagnostics?.join("; "), setupPolicyNote(run)].filter(Boolean).join("; "),
       packetType: run.taskType?.replace(/^external_/, "")
     }));
   }
   return entries;
+}
+
+function setupPolicyNote(run: RunJson): string {
+  if (!run.setupPolicy) return "";
+  const diagnostic = run.setupPolicy.continueAfterSetupFailure ? "diagnostic-continue" : "setup-gates-main";
+  return `setupNetworkIntent=${run.setupPolicy.networkIntent ?? "unknown"} ${diagnostic}`;
 }
 
 function normalizeEntry(milestone: string, scenario: string, input: Partial<PacketIndexEntry>): PacketIndexEntry {

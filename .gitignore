@@ -38,6 +38,9 @@ validation/runs/*/*
 !validation/runs/ALPHA-15/results.json
 !validation/runs/ALPHA-15/operator-decisions.md
 !validation/runs/ALPHA-15/operator-decisions.json
+!validation/runs/ALPHA-19/
+!validation/runs/ALPHA-19/summary.md
+!validation/runs/ALPHA-19/results.json
 !validation/runs/PACKET-VALIDATION/summary.md
 !validation/runs/PACKET-VALIDATION/results.json
 .DS_Store

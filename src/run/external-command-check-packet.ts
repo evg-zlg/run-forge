@@ -8,7 +8,8 @@ import type {
   CommandResult,
   ExternalCheckStatus,
   ExternalCommandCheckOptions,
-  SafetyReport
+  SafetyReport,
+  SetupPolicy
 } from "./external-command-check-types.js";
 import { externalCheckSchemaVersion } from "./external-command-check-types.js";
 
@@ -40,6 +41,7 @@ export function buildSafetyReport(input: {
   workspacePath?: string;
   blockedCommands: Array<{ index: number; command: string; reason: string }>;
 }): SafetyReport {
+  const setupPolicy = buildSetupPolicy(input.options);
   return {
     schemaVersion: externalCheckSchemaVersion,
     runId: input.runId,
@@ -57,6 +59,13 @@ export function buildSafetyReport(input: {
     commandsUserProvidedViaCli: true,
     setupCommandsUserProvided: (input.options.setupCommands?.length ?? 0) > 0,
     setupMayUseNetwork: setupMayUseNetwork(input.options.setupCommands ?? []),
+    setupPolicy,
+    setupNetworkIntentEnforced: false,
+    setupPolicyNotes: [
+      "Setup commands are user-provided and run only in the disposable workspace.",
+      `Setup network intent was declared as ${setupPolicy.networkIntent}; RunForge records this intent but does not enforce network blocking.`,
+      "RunForge never applies setup or command side effects to the original repository."
+    ],
     secretsHandling: {
       deliberateSecretPrinting: false,
       note: "RunForge captures user-provided command stdout/stderr as evidence and does not deliberately print or expand secrets."
@@ -105,6 +114,7 @@ export async function writeArtifacts(input: {
   cliExitPolicy: CliExitPolicy;
   cliExitCode: number;
   commandPolicy: CommandPolicy;
+  setupPolicy: SetupPolicy;
   setupResults: CommandResult[];
   commandResults: CommandResult[];
   safetyReport: SafetyReport;
@@ -147,6 +157,7 @@ function buildRunJson(input: Parameters<typeof writeArtifacts>[0]) {
     cliExitPolicy: input.cliExitPolicy,
     cliExitCode: input.cliExitCode,
     commandPolicy: input.commandPolicy,
+    setupPolicy: input.setupPolicy,
     repo: {
       path: input.repoPath,
       headBefore: input.originalBefore.head,
@@ -170,6 +181,7 @@ function buildTrajectory(input: Parameters<typeof writeArtifacts>[0]) {
     schemaVersion: input.schemaVersion,
     runId: input.runId,
     taskType: "external_command_check",
+    setupPolicy: input.setupPolicy,
     commandPolicy: input.commandPolicy,
     steps: [
       { type: "route_selected", route: "external_command_check" },
@@ -206,6 +218,15 @@ function allUserCommands(options: ExternalCommandCheckOptions): string[] {
   return [...(options.setupCommands ?? []), ...options.commands];
 }
 
+export function buildSetupPolicy(options: ExternalCommandCheckOptions): SetupPolicy {
+  return {
+    setupCommandsProvided: (options.setupCommands?.length ?? 0) > 0,
+    networkIntent: options.setupNetworkIntent ?? "unknown",
+    continueAfterSetupFailure: Boolean(options.continueAfterSetupFailure),
+    mainCommandsSkippedOnSetupFailure: !options.continueAfterSetupFailure
+  };
+}
+
 function setupMayUseNetwork(setupCommands: string[]): "unknown" | "yes" | "no" {
   if (setupCommands.length === 0) return "no";
   return setupCommands.some((command) => /\b(install|add|update|fetch|curl|wget|corepack|npx|pnpm|npm|yarn|bun)\b/i.test(command))
@@ -214,7 +235,7 @@ function setupMayUseNetwork(setupCommands: string[]): "unknown" | "yes" | "no" {
 }
 
 function setupStepStatus(status: ExternalCheckStatus): string {
-  if (status === "setup_failed" || status === "setup_timed_out" || status === "setup_error") return status;
+  if (status === "setup_failed" || status === "setup_timed_out" || status === "setup_error" || status.startsWith("setup_failed_main_")) return status;
   return "setup_passed";
 }
 
