@@ -40,6 +40,8 @@ export interface AdminData {
   settings: {
     defaultRoots: string[];
     redactionPolicy: string;
+    config: AdminConfig;
+    serverWritable: boolean;
   };
 }
 
@@ -115,7 +117,9 @@ export async function buildAdminUi(options: AdminBuildOptions): Promise<AdminBui
     runDetails,
     settings: {
       defaultRoots: loadedConfig.config.runs.defaultRoots,
-      redactionPolicy: "API keys, bearer tokens, OpenRouter keys, .env-style secrets, and private keys are redacted before rendering."
+      redactionPolicy: "API keys, bearer tokens, OpenRouter keys, .env-style secrets, and private keys are redacted before rendering.",
+      config: loadedConfig.config,
+      serverWritable: false
     }
   } satisfies AdminData);
 
