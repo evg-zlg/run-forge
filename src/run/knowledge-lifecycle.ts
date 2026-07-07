@@ -37,6 +37,7 @@ export interface KnowledgeLifecycleReport {
   evidenceLinks: string[];
   validation: { ok: boolean; errors: string[] };
   safetySummary: { secretLikeFindings: number; unsafeItems: number; networkRequired: false; providerCalls: false };
+  operatorTrialCounts: { accepted: number; rejected: number; missingDecision: number; unsafeMutation: number };
   items: LifecycleItem[];
 }
 
@@ -70,6 +71,7 @@ export async function buildKnowledgeLifecycleReport(options: KnowledgeLifecycleO
   const okfEntryCounts = countStatuses(okfItems);
   const skillsCounts = countStatuses(skillItems);
   const findings = reportFindings(items, okfValidation.errors);
+  const operatorTrialCounts = await countOperatorTrials(validationRuns.map((run) => join(runs, run, "results.json")));
   const report: KnowledgeLifecycleReport = {
     generatedAt: new Date().toISOString(),
     repoRoot,
@@ -89,6 +91,7 @@ export async function buildKnowledgeLifecycleReport(options: KnowledgeLifecycleO
     evidenceLinks: evidenceFiles.slice(0, 40).map((file) => rel(repoRoot, file)),
     validation: { ok: okfValidation.ok && statusCounts.unsafe === 0, errors: okfValidation.errors },
     safetySummary: { secretLikeFindings: statusCounts.unsafe, unsafeItems: statusCounts.unsafe, networkRequired: false, providerCalls: false },
+    operatorTrialCounts,
     items
   };
   await writeFile(join(out, "lifecycle-report.json"), `${JSON.stringify(report, null, 2)}\n`, "utf8");
@@ -121,6 +124,13 @@ export function renderLifecycleSummary(report: KnowledgeLifecycleReport): string
     "## Recommendations",
     "",
     ...report.recommendations.map((item) => `- ${item}`),
+    "",
+    "## Operator Trials",
+    "",
+    `- accepted: ${report.operatorTrialCounts.accepted}`,
+    `- rejected: ${report.operatorTrialCounts.rejected}`,
+    `- missing decision: ${report.operatorTrialCounts.missingDecision}`,
+    `- unsafe mutation: ${report.operatorTrialCounts.unsafeMutation}`,
     "",
     "## Alpha Comparison",
     "",
@@ -155,7 +165,7 @@ function evidenceItem(repoRoot: string, runs: string, run: string): LifecycleIte
     id: `evidence:${run}`,
     kind: "evidence",
     title: run,
-    status: /^ALPHA-(?:17|19|20|21|22)$/.test(run) || run === "PACKET-VALIDATION" ? "active" : "candidate",
+    status: /^ALPHA-(?:17|19|20|21|22|23)$/.test(run) || run === "PACKET-VALIDATION" ? "active" : "candidate",
     path: rel(repoRoot, join(runs, run)),
     evidenceLinks: [summary, results].map((file) => rel(repoRoot, file)),
     findings: []
@@ -166,7 +176,7 @@ function itemStatus(content: string, links: string[], findings: string[], file: 
   if (findings.some((finding) => finding.includes("secret-like"))) return "unsafe";
   if (findings.some((finding) => finding.includes("missing evidence"))) return "missing_evidence";
   if (/\bretired\b/i.test(content)) return "retired";
-  if (/\bALPHA-(?:[1-9]|1[0-6])\b/.test(content) && !/ALPHA-(?:17|18|19|20|21|22)|PACKET-VALIDATION/.test(content)) return "stale";
+  if (/\bALPHA-(?:[1-9]|1[0-6])\b/.test(content) && !/ALPHA-(?:17|18|19|20|21|22|23)|PACKET-VALIDATION/.test(content)) return "stale";
   if (file.includes("skill-candidates/")) return "candidate";
   return links.length > 0 ? "active" : "needs_review";
 }
@@ -234,7 +244,8 @@ function milestoneComparison(runs: string[]): string[] {
     has("ALPHA-19") ? "Alpha-19 added setup policy acceptance evidence across packets, dashboard data, and multi-repo validation." : "Alpha-19 evidence is absent locally.",
     "Alpha-20 connects those artifacts into a lifecycle report with deterministic status counts, findings, recommendations, and safety summary.",
     has("ALPHA-21") ? "Alpha-21 records a manual operator accepted-patch trial with validation rerun evidence and no RunForge auto-apply." : "Alpha-21 evidence is absent locally.",
-    has("ALPHA-22") ? "Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately." : "Alpha-22 evidence is absent locally."
+    has("ALPHA-22") ? "Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately." : "Alpha-22 evidence is absent locally.",
+    has("ALPHA-23") ? "Alpha-23 hardens operator patch trial UX with decision summaries, safety lint, and accepted/rejected visibility." : "Alpha-23 evidence is absent locally."
   ];
 }
 
@@ -250,4 +261,24 @@ function title(content: string): string | undefined {
 
 function rel(root: string, path: string): string {
   return relative(root, resolve(path)) || ".";
+}
+
+async function countOperatorTrials(resultPaths: string[]): Promise<{ accepted: number; rejected: number; missingDecision: number; unsafeMutation: number }> {
+  const counts = { accepted: 0, rejected: 0, missingDecision: 0, unsafeMutation: 0 };
+  for (const path of resultPaths) {
+    let raw: { attempts?: Array<{ decision?: string; operatorDecision?: string; originalRepoMutated?: boolean }> };
+    try {
+      raw = JSON.parse(await readFile(path, "utf8")) as typeof raw;
+    } catch {
+      continue;
+    }
+    for (const attempt of raw.attempts ?? []) {
+      const decision = attempt.operatorDecision ?? attempt.decision ?? "";
+      if (decision === "accepted") counts.accepted += 1;
+      else if (decision === "rejected") counts.rejected += 1;
+      else counts.missingDecision += 1;
+      if (attempt.originalRepoMutated === true) counts.unsafeMutation += 1;
+    }
+  }
+  return counts;
 }

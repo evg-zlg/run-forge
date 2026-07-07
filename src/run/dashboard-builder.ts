@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import type { DashboardSeedRecord, DashboardSeedResult } from "./packet-query.js";
 import { dashboardCss, dashboardJs } from "./dashboard-assets.js";
+import { renderDetails } from "./dashboard-details.js";
 import { isDoNotApplyOrUnsafe, isFailedOrUnsafe, safetyLabels, searchableRecordText, stringField } from "./dashboard-record-utils.js";
 import { buildSummary, type AlphaComparisonSummary, type DashboardSummary } from "./dashboard-summary.js";
 
@@ -16,6 +17,11 @@ export interface DashboardRecord extends DashboardSeedRecord {
   providerAuditPath: string;
   proposalPatchPath: string;
   humanReviewPath: string;
+  decisionAppliedTo: string;
+  autoAppliedByRunForge: boolean | null;
+  validationBefore: string;
+  validationAfter: string;
+  originalRepoMutated: boolean | null;
 }
 
 export interface DashboardData {
@@ -79,6 +85,7 @@ async function readDashboardSeed(path: string): Promise<DashboardSeedResult> {
 type NormalizedDashboardSeedRecord = DashboardSeedRecord & {
   notes: string; setupNetworkIntent: string; setupDiagnosticMode: string;
   validationEvidencePath: string; providerAuditPath: string; proposalPatchPath: string; humanReviewPath: string;
+  decisionAppliedTo: string; autoAppliedByRunForge: boolean | null; validationBefore: string; validationAfter: string; originalRepoMutated: boolean | null;
 };
 
 function normalizeRecord(record: DashboardSeedRecord): NormalizedDashboardSeedRecord {
@@ -91,7 +98,12 @@ function normalizeRecord(record: DashboardSeedRecord): NormalizedDashboardSeedRe
     validationEvidencePath: stringField(record, "validationEvidencePath"),
     providerAuditPath: stringField(record, "providerAuditPath"),
     proposalPatchPath: stringField(record, "proposalPatchPath"),
-    humanReviewPath: stringField(record, "humanReviewPath")
+    humanReviewPath: stringField(record, "humanReviewPath"),
+    decisionAppliedTo: stringField(record, "decisionAppliedTo"),
+    autoAppliedByRunForge: typeof record.autoAppliedByRunForge === "boolean" ? record.autoAppliedByRunForge : null,
+    validationBefore: stringField(record, "validationBefore"),
+    validationAfter: stringField(record, "validationAfter"),
+    originalRepoMutated: typeof record.originalRepoMutated === "boolean" ? record.originalRepoMutated : null
   };
 }
 
@@ -136,6 +148,8 @@ function renderDashboardHtml(data: DashboardData): string {
     ${renderAlphaComparison(data.summary.byAlphaComparison)}
     ${renderCountSection("By provider status", data.summary.byProviderStatus)}
     ${renderGroup("Verified proposals", data.records.filter((record) => record.outcome === "proposal_ready_verified"))}
+    ${renderGroup("Accepted operator trials", data.records.filter((record) => record.operatorVerdict === "accepted"))}
+    ${renderGroup("Rejected operator trials", data.records.filter((record) => record.operatorVerdict === "rejected"))}
     ${renderGroup("Provider rejections", data.records.filter((record) => record.outcome === "provider_rejected" || record.providerStatus === "rejected"))}
     ${renderGroup("Failed / unsafe proposals", data.records.filter(isFailedOrUnsafe))}
     ${renderTable(data.records)}
@@ -232,6 +246,7 @@ function renderTable(records: DashboardRecord[]): string {
     <td>${providerStatus(record)}</td>
     <td>${operatorVerdict(record)}</td>
     <td>${mutationVerdict(record)}</td>
+    <td>${validationTransition(record)}</td>
     <td>${setupPolicy(record)}</td>
     <td>${labels(record.safetyLabels)}</td>
     <td>${artifactLink("Packet path", record.packetPath)}</td>
@@ -241,7 +256,7 @@ function renderTable(records: DashboardRecord[]): string {
     <td>${escapeHtml(record.tags.join(", "))}</td>
     <td>${escapeHtml(record.notes ?? "")}</td>
   </tr>`).join("");
-  return `<section><h2>Records</h2><table class="records" id="records-table"><thead><tr><th><button type="button" class="sort-button" data-sort="alpha">Alpha</button></th><th><button type="button" class="sort-button" data-sort="repo">Repo</button></th><th><button type="button" class="sort-button" data-sort="scenario">Scenario</button></th><th>Packet type</th><th><button type="button" class="sort-button" data-sort="outcome">Outcome</button></th><th><button type="button" class="sort-button" data-sort="providerStatus">Provider</button></th><th>Operator verdict</th><th><button type="button" class="sort-button" data-sort="mutationVerdict">Mutation</button></th><th>Setup</th><th>Safety</th><th>Packet</th><th>Viewer</th><th>Summary</th><th>Details</th><th>Tags</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table><p id="empty-state" class="empty-state" hidden>No records match the active filters. Reset filters or copy the current view URL to share this empty state.</p></section>`;
+  return `<section><h2>Records</h2><table class="records" id="records-table"><thead><tr><th><button type="button" class="sort-button" data-sort="alpha">Alpha</button></th><th><button type="button" class="sort-button" data-sort="repo">Repo</button></th><th><button type="button" class="sort-button" data-sort="scenario">Scenario</button></th><th>Packet type</th><th><button type="button" class="sort-button" data-sort="outcome">Outcome</button></th><th><button type="button" class="sort-button" data-sort="providerStatus">Provider</button></th><th>Operator verdict</th><th><button type="button" class="sort-button" data-sort="mutationVerdict">Mutation</button></th><th>Validation</th><th>Setup</th><th>Safety</th><th>Packet</th><th>Viewer</th><th>Summary</th><th>Details</th><th>Tags</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table><p id="empty-state" class="empty-state" hidden>No records match the active filters. Reset filters or copy the current view URL to share this empty state.</p></section>`;
 }
 
 function labels(values: string[]): string {
@@ -253,6 +268,12 @@ function setupPolicy(record: DashboardRecord): string {
   return values.length > 0 ? labels(values) : "n/a";
 }
 
+function validationTransition(record: DashboardRecord): string {
+  const before = record.validationBefore || "unknown";
+  const after = record.validationAfter || "unknown";
+  return `${escapeHtml(before)} -> ${escapeHtml(after)}`;
+}
+
 function artifactLink(label: string, path: string): string {
   if (!path || path === "unknown") return "unknown";
   const href = path.startsWith("/") ? `file://${path}` : path;
@@ -261,32 +282,6 @@ function artifactLink(label: string, path: string): string {
 
 function summaryMetric(label: string, value: string): string {
   return `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`;
-}
-
-function renderDetails(record: DashboardRecord): string {
-  return `<details>
-    <summary>Evidence drilldown</summary>
-    <div class="details-body">
-      <p><strong>Operator verdict:</strong> ${escapeHtml(operatorVerdictText(record.operatorVerdict))}</p>
-      <p><strong>Provider status:</strong> ${escapeHtml(record.providerStatus)}</p>
-      <p><strong>Reason:</strong> ${escapeHtml(reasonFor(record))}</p>
-      <div class="artifact-list">
-        ${artifactRow("Packet path", record.packetPath)}
-        ${artifactRow("Viewer path", record.viewerPath)}
-        ${artifactRow("Summary path", record.summaryPath)}
-        ${artifactRow("Validation evidence path", record.validationEvidencePath)}
-        ${artifactRow("Provider audit path", record.providerAuditPath)}
-        ${artifactRow("Proposal patch path", record.proposalPatchPath)}
-        ${artifactRow("Human review path", record.humanReviewPath)}
-      </div>
-      <p><strong>Safety notes:</strong> ${escapeHtml(record.safetyLabels.join(", ") || "none")}</p>
-      <pre>${escapeHtml(JSON.stringify(record, null, 2))}</pre>
-    </div>
-  </details>`;
-}
-
-function artifactRow(label: string, path: string): string {
-  return `<div><strong>${escapeHtml(label)}:</strong> ${artifactLink(label, path || "unknown")}</div>`;
 }
 
 function outcomeBadge(outcome: string): string {

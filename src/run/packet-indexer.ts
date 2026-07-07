@@ -1,5 +1,8 @@
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
+import { renderPacketIndexMarkdown } from "./packet-index-renderer.js";
+
+export { renderPacketIndexMarkdown, renderPacketIndexText } from "./packet-index-renderer.js";
 
 export interface PacketIndexOptions {
   root: string;
@@ -20,6 +23,12 @@ export interface PacketIndexEntry {
   externalRepoHeadAfter: string | null;
   externalRepoMutationVerdict: string;
   decision: string;
+  decisionAppliedTo: string;
+  autoAppliedByRunForge: boolean | null;
+  validationBefore: string;
+  validationAfter: string;
+  proposalPatchPath: string;
+  originalRepoMutated: boolean | null;
   notes: string;
 }
 
@@ -43,6 +52,12 @@ interface DogfoodIndexEntry {
   externalRepoMutationVerdict?: string;
   decision?: string;
   notes?: string;
+  decisionAppliedTo?: string;
+  autoAppliedByRunForge?: boolean | null;
+  validationBefore?: string;
+  validationAfter?: string;
+  proposalPatchPath?: string;
+  originalRepoMutated?: boolean | null;
 }
 
 interface ResultsAttempt {
@@ -57,16 +72,20 @@ interface ResultsAttempt {
   externalRepoHeadBefore?: string | null;
   externalRepoHeadAfter?: string | null;
   manualApply?: boolean;
+  appliedTo?: string;
+  originalRepoMutated?: boolean;
+  validationBefore?: string;
+  validationAfter?: string;
+  proposalPatch?: string;
 }
 
 interface ResultsJson {
-  externalRepo?: {
-    beforeHead?: string | null;
-    afterHead?: string | null;
-    mutationVerdict?: string;
-  };
+  externalRepo?: RepoState;
+  originalRepo?: RepoState;
   attempts?: ResultsAttempt[];
 }
+
+interface RepoState { beforeHead?: string | null; afterHead?: string | null; mutationVerdict?: string; }
 
 interface RunJson {
   taskType?: string;
@@ -100,8 +119,13 @@ interface OperatorDecisionRecord {
     passed?: boolean;
     packet?: string;
   };
+  apply?: {
+    appliedTo?: string;
+    originalRepoMutated?: boolean;
+  };
   runforgeAppliedPatch?: boolean;
   manualApplyRequired?: boolean;
+  proposalPatch?: string;
 }
 
 export async function buildPacketIndex(options: PacketIndexOptions): Promise<PacketIndexResult> {
@@ -126,40 +150,6 @@ export async function buildPacketIndex(options: PacketIndexOptions): Promise<Pac
   }
 
   return result;
-}
-
-export function renderPacketIndexMarkdown(index: PacketIndexResult): string {
-  const lines = [
-    "# RunForge Packet Index",
-    "",
-    `Generated at: ${index.generatedAt}`,
-    `Root: ${index.root}`,
-    "",
-    "| Milestone | Scenario | Packet type | Outcome | Provider | Repo | Mutation | Packet | Viewer |",
-    "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"
-  ];
-  for (const entry of index.entries) {
-    lines.push([
-      entry.milestone,
-      entry.scenario,
-      entry.packetType,
-      entry.outcome,
-      entry.providerStatus,
-      entry.repo,
-      entry.externalRepoMutationVerdict,
-      entry.packetPath,
-      entry.viewerPath
-    ].map(markdownCell).join(" | "));
-  }
-  lines.push("");
-  return `${lines.join("\n")}\n`;
-}
-
-export function renderPacketIndexText(index: PacketIndexResult): string {
-  return [
-    `Indexed ${index.entries.length} packet/run entries under ${index.root}.`,
-    ...index.entries.map((entry) => `${entry.milestone} ${entry.scenario}: ${entry.outcome} provider=${entry.providerStatus} mutation=${entry.externalRepoMutationVerdict}`)
-  ].join("\n");
 }
 
 async function entriesFromDogfoodIndexes(root: string): Promise<PacketIndexEntry[]> {
@@ -194,6 +184,7 @@ async function entriesFromResults(root: string): Promise<PacketIndexEntry[]> {
   for (const path of paths) {
     const milestone = basename(dirname(path));
     const result = await readJson<ResultsJson>(path);
+    const repoState = result.externalRepo ?? result.originalRepo;
     for (const attempt of result.attempts ?? []) {
       entries.push(normalizeEntry(milestone, attempt.id ?? "unknown", {
         repo: attempt.repo,
@@ -202,10 +193,16 @@ async function entriesFromResults(root: string): Promise<PacketIndexEntry[]> {
         patchTouchedFiles: attempt.filesChanged,
         packetPath: attempt.packet,
         viewerPath: attempt.viewer,
-        externalRepoHeadBefore: attempt.externalRepoHeadBefore ?? result.externalRepo?.beforeHead,
-        externalRepoHeadAfter: attempt.externalRepoHeadAfter ?? result.externalRepo?.afterHead,
-        externalRepoMutationVerdict: result.externalRepo?.mutationVerdict,
+        externalRepoHeadBefore: attempt.externalRepoHeadBefore ?? repoState?.beforeHead,
+        externalRepoHeadAfter: attempt.externalRepoHeadAfter ?? repoState?.afterHead,
+        externalRepoMutationVerdict: repoState?.mutationVerdict,
         decision: attempt.decision ?? (attempt.manualApply === false ? "no_apply" : undefined),
+        decisionAppliedTo: attempt.appliedTo,
+        autoAppliedByRunForge: attempt.manualApply === true ? false : null,
+        validationBefore: attempt.validationBefore,
+        validationAfter: attempt.validationAfter,
+        proposalPatchPath: attempt.proposalPatch,
+        originalRepoMutated: attempt.originalRepoMutated,
         notes: attempt.manualApply === false ? "Patch was not manually applied to the external repo." : undefined
       }));
     }
@@ -232,6 +229,11 @@ async function entriesFromPackets(root: string): Promise<PacketIndexEntry[]> {
       externalRepoHeadAfter: run.repo?.headAfter,
       externalRepoMutationVerdict: run.repo?.mutationVerdict,
       decision: operatorDecision?.finalOutcome ?? status?.reviewerDecision,
+      decisionAppliedTo: operatorDecision?.apply?.appliedTo,
+      autoAppliedByRunForge: operatorDecision?.runforgeAppliedPatch ?? null,
+      validationAfter: operatorDecision ? (operatorDecision.validation?.passed ? "passed" : operatorDecision.validation?.status ?? "unknown") : undefined,
+      proposalPatchPath: operatorDecision?.proposalPatch,
+      originalRepoMutated: operatorDecision?.apply?.originalRepoMutated ?? null,
       notes: [status?.diagnostics?.join("; "), setupPolicyNote(run), operatorDecisionNote(operatorDecision)].filter(Boolean).join("; "),
       packetType: run.taskType?.replace(/^external_/, "")
     }));
@@ -271,6 +273,12 @@ function normalizeEntry(milestone: string, scenario: string, input: Partial<Pack
     externalRepoHeadAfter: input.externalRepoHeadAfter ?? null,
     externalRepoMutationVerdict: input.externalRepoMutationVerdict ?? "unknown",
     decision: input.decision ?? "unknown",
+    decisionAppliedTo: input.decisionAppliedTo ?? "unknown",
+    autoAppliedByRunForge: input.autoAppliedByRunForge ?? null,
+    validationBefore: input.validationBefore ?? "unknown",
+    validationAfter: input.validationAfter ?? "unknown",
+    proposalPatchPath: input.proposalPatchPath ?? "unknown",
+    originalRepoMutated: input.originalRepoMutated ?? null,
     notes: input.notes ?? ""
   };
 }
@@ -336,8 +344,4 @@ async function readOptionalJson<T>(path: string): Promise<T | null> {
   } catch {
     return null;
   }
-}
-
-function markdownCell(value: string): string {
-  return ` ${value.replaceAll("|", "\\|")} `;
 }

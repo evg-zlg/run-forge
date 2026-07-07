@@ -45,6 +45,15 @@ validation/runs/*/*
 !validation/runs/ALPHA-21/summary.md
 !validation/runs/ALPHA-21/results.json
 !validation/runs/ALPHA-21/lifecycle-report.json
+!validation/runs/ALPHA-22/
+!validation/runs/ALPHA-22/summary.md
+!validation/runs/ALPHA-22/results.json
+!validation/runs/ALPHA-22/lifecycle-report.json
+!validation/runs/ALPHA-23/
+!validation/runs/ALPHA-23/summary.md
+!validation/runs/ALPHA-23/results.json
+!validation/runs/ALPHA-23/operator-summary.md
+!validation/runs/ALPHA-23/lifecycle-report.json
 !validation/runs/ADMIN-UI-ALPHA/
 !validation/runs/ADMIN-UI-ALPHA/summary.md
 !validation/runs/ADMIN-UI-ALPHA/results.json

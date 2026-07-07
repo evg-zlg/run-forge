@@ -2,6 +2,7 @@ import { access, mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { inspectPacket } from "./packet-inspector.js";
 import type { PacketIndexResult } from "./packet-indexer.js";
+import { renderOperatorDecision } from "./packet-viewer-operator.js";
 
 interface ViewerOptions {
   packet: string;
@@ -158,6 +159,8 @@ async function readViewerFiles(packetDir: string): Promise<Record<string, unknow
     "safety-report.json",
     "provider-safety-report.json",
     "human-review.md",
+    "operator-decision.json",
+    "operator-summary.md",
     "proposal.patch"
   ];
   const files: Record<string, unknown> = {};
@@ -183,6 +186,7 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
   const safety = asRecord(files["provider-safety-report.json"]) ?? asRecord(files["safety-report.json"]);
   const setupResults = asRecord(files["setup-results.json"]);
   const commandResults = asRecord(files["command-results.json"]) ?? asRecord(files["verification-results.json"]);
+  const operatorDecision = asRecord(files["operator-decision.json"]);
   const artifacts = Array.isArray(manifest?.artifacts) ? manifest.artifacts as Array<Record<string, unknown>> : inspection.artifacts;
   return `<!doctype html>
 <html lang="en">
@@ -270,8 +274,18 @@ function renderViewerHtml(input: { packetDir: string; inspection: Awaited<Return
     </section>
 
     <section>
+      <h2>Operator Decision</h2>
+      ${renderOperatorDecision(operatorDecision)}
+    </section>
+
+    <section>
       <h2>Proposal Patch</h2>
       <pre>${escapeHtml(String(files["proposal.patch"] ?? ""))}</pre>
+    </section>
+
+    <section>
+      <h2>Operator Summary</h2>
+      <pre>${escapeHtml(String(files["operator-summary.md"] ?? ""))}</pre>
     </section>
 
     <section>

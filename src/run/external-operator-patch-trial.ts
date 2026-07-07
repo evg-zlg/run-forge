@@ -6,9 +6,15 @@ import { writeJson, writeText } from "../core/artifact-store.js";
 import { createRunId } from "../core/trajectory.js";
 import { runExternalCommandCheck } from "./external-command-check.js";
 import { gitSnapshot, mutationVerdictFor } from "./external-command-check-git.js";
-import type { CommandResult, ExternalCheckStatus } from "./external-command-check-types.js";
+import type { ExternalCheckStatus } from "./external-command-check-types.js";
 import { runExternalCodeProposal } from "./external-code-proposal.js";
+import { commandSummaries, renderDecisionMarkdown } from "./external-operator-patch-renderer.js";
 import { runRealRepoDisposablePatchTrial } from "./external-real-repo-patch-trial.js";
+import {
+  buildOperatorDecisionSummary,
+  readPacketValidationState,
+  renderOperatorDecisionSummaryMarkdown
+} from "./operator-decision-summary.js";
 
 const execFileAsync = promisify(execFile);
 const defaultTrialRoot = "/tmp/runforge-alpha21-operator-trial";
@@ -63,6 +69,7 @@ export interface ExternalRecordDecisionResult {
   finalOutcome: "accepted" | "rejected";
   decisionDir: string;
   decisionPath: string;
+  operatorSummaryPath: string;
   validationPacket: string;
   validationStatus: ExternalCheckStatus;
   validationPassed: boolean;
@@ -136,10 +143,12 @@ export async function recordExternalPatchDecision(options: ExternalRecordDecisio
   const repoMutationVerdict = mutationVerdictFor(before, after);
   const finishedAt = new Date().toISOString();
   const finalOutcome: "accepted" | "rejected" = options.decision === "accepted" && validationPassed ? "accepted" : "rejected";
+  const proposalPatch = join(proposalPacket, "proposal.patch");
   const record = {
     schemaVersion: "alpha-21-operator-decision",
     runId,
     proposalPacket,
+    proposalPatch,
     repo,
     decision: options.decision,
     finalOutcome,
@@ -159,6 +168,14 @@ export async function recordExternalPatchDecision(options: ExternalRecordDecisio
       originalRepoMutated: false as const
     },
     runforgeAppliedPatch: false as const,
+    safety: {
+      providerUsed: false as const,
+      networkUsed: false as const,
+      dbUsed: false as const,
+      deployUsed: false as const,
+      pushUsed: false as const,
+      mergeUsed: false as const
+    },
     originalExternalRepoProtected: true,
     noPushAttempted: true,
     noMergeAttempted: true,
@@ -170,16 +187,44 @@ export async function recordExternalPatchDecision(options: ExternalRecordDecisio
   };
   const markdown = renderDecisionMarkdown(record);
   const decisionPath = join(decisionDir, "operator-decision.json");
+  const packetValidation = await readPacketValidationState(proposalPacket);
+  const summary = buildOperatorDecisionSummary({
+    trialId: runId,
+    sourcePath: repo,
+    sourceHeadBefore: before.head,
+    sourceHeadAfter: after.head,
+    sourceStatusBefore: before.status,
+    sourceStatusAfter: after.status,
+    originalRepoMutated: false,
+    proposalOutcome: packetValidation.proposalOutcome,
+    proposalPacket,
+    proposalPatch,
+    decisionVerdict: finalOutcome,
+    appliedBy: record.apply.mode,
+    appliedTo: record.apply.appliedTo,
+    reason: record.reason,
+    decisionPath,
+    validationBefore: packetValidation.before,
+    validationAfter: validationPassed ? "passed" : "failed",
+    beforeCommand: packetValidation.beforeCommand,
+    afterCommand: options.commands.join(" && ")
+  });
+  const operatorSummaryPath = join(decisionDir, "operator-summary.md");
   await writeJson(decisionPath, record);
   await writeText(join(decisionDir, "operator-decision.md"), markdown);
+  await writeJson(join(decisionDir, "operator-summary.json"), summary);
+  await writeText(operatorSummaryPath, renderOperatorDecisionSummaryMarkdown(summary));
   await writeJson(join(proposalPacket, "operator-decision.json"), record);
   await writeText(join(proposalPacket, "operator-decision.md"), markdown);
+  await writeJson(join(proposalPacket, "operator-summary.json"), summary);
+  await writeText(join(proposalPacket, "operator-summary.md"), renderOperatorDecisionSummaryMarkdown(summary));
   return {
     runId,
     decision: options.decision,
     finalOutcome,
     decisionDir,
     decisionPath,
+    operatorSummaryPath,
     validationPacket: validation.packetDir,
     validationStatus: validation.status,
     validationPassed,
@@ -213,6 +258,7 @@ export function renderExternalRecordDecisionSummary(result: ExternalRecordDecisi
     `Operator decision recorded: ${result.finalOutcome}`,
     `Requested decision: ${result.decision}`,
     `Decision artifact: ${result.decisionPath}`,
+    `Operator summary: ${result.operatorSummaryPath}`,
     `Validation packet: ${result.validationPacket}`,
     `Validation status: ${result.validationStatus}`,
     `Validation passed: ${result.validationPassed}`,
@@ -289,52 +335,6 @@ function renderOperatorInstructions(input: { sourceRepo: string; proposalPacket:
     "",
     `Proposal packet: ${input.proposalPacket}`,
     `Proposal patch: ${input.proposalPatch}`,
-    ""
-  ].join("\n");
-}
-
-function commandSummaries(results: CommandResult[]): Array<{ command: string; status: string; exitCode: number | null }> {
-  return results.map((result) => ({ command: result.command, status: result.status, exitCode: result.exitCode }));
-}
-
-function renderDecisionMarkdown(record: {
-  runId: string;
-  proposalPacket: string;
-  repo: string;
-  decision: OperatorDecision;
-  finalOutcome: "accepted" | "rejected";
-  validation: { packet: string; status: ExternalCheckStatus; passed: boolean; commands: Array<{ command: string; status: string; exitCode: number | null }> };
-  runforgeAppliedPatch: false;
-  reason?: string;
-  apply?: { mode: string; appliedTo: string; originalRepoMutated: false };
-  repoMutationVerdictDuringDecision: string;
-  notes: string;
-}): string {
-  return [
-    "# Alpha-21 Operator Decision",
-    "",
-    `Run ID: ${record.runId}`,
-    `Proposal packet: ${record.proposalPacket}`,
-    `Decision repo: ${record.repo}`,
-    `Requested decision: ${record.decision}`,
-    `Final outcome: ${record.finalOutcome}`,
-    `Reason: ${record.reason || "none"}`,
-    `Validation packet: ${record.validation.packet}`,
-    `Validation status: ${record.validation.status}`,
-    `Validation passed: ${record.validation.passed}`,
-    `RunForge applied patch: ${record.runforgeAppliedPatch}`,
-    `Apply mode: ${record.apply?.mode ?? "operator_simulated_manual_apply"}`,
-    `Applied to: ${record.apply?.appliedTo ?? "disposable_copy"}`,
-    `Original repo mutated: ${String(record.apply?.originalRepoMutated ?? false)}`,
-    `Repo mutation verdict during decision rerun: ${record.repoMutationVerdictDuringDecision}`,
-    "",
-    "## Commands",
-    "",
-    ...record.validation.commands.map((command) => `- ${command.command}: ${command.status} (${command.exitCode ?? "null"})`),
-    "",
-    "## Notes",
-    "",
-    record.notes || "No operator notes.",
     ""
   ].join("\n");
 }

@@ -1,7 +1,8 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { basename, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import { buildPacketIndex, type PacketIndexEntry, type PacketIndexResult } from "./packet-indexer.js";
 import { renderLatestDogfoodMarkdown, renderPacketQueryMarkdown } from "./packet-query-renderer.js";
+import { countBy, latestMilestone, repoName } from "./packet-query-utils.js";
 
 export type PacketQueryFormat = "table" | "json" | "md";
 
@@ -31,6 +32,11 @@ export interface PacketQueryRecord {
   viewerPath: string;
   mutationVerdict: string;
   operatorVerdict: string;
+  decisionAppliedTo: string;
+  autoAppliedByRunForge: boolean | null;
+  validationBefore: string;
+  validationAfter: string;
+  originalRepoMutated: boolean | null;
   notes: string;
 }
 
@@ -87,6 +93,11 @@ export interface DashboardSeedRecord {
   providerStatus: string;
   operatorVerdict: string;
   mutationVerdict: string;
+  decisionAppliedTo?: string;
+  autoAppliedByRunForge?: boolean | null;
+  validationBefore?: string;
+  validationAfter?: string;
+  originalRepoMutated?: boolean | null;
   packetPath: string;
   viewerPath: string;
   summaryPath: string;
@@ -248,6 +259,11 @@ function toQueryRecord(entry: PacketIndexEntry): PacketQueryRecord {
     viewerPath: entry.viewerPath,
     mutationVerdict: entry.externalRepoMutationVerdict,
     operatorVerdict: entry.decision,
+    decisionAppliedTo: entry.decisionAppliedTo,
+    autoAppliedByRunForge: entry.autoAppliedByRunForge,
+    validationBefore: entry.validationBefore,
+    validationAfter: entry.validationAfter,
+    originalRepoMutated: entry.originalRepoMutated,
     notes: entry.notes
   };
 }
@@ -265,12 +281,17 @@ function toDashboardSeedRecord(entry: PacketIndexEntry, root: string): Dashboard
     providerStatus: entry.providerStatus,
     operatorVerdict: entry.decision,
     mutationVerdict: entry.externalRepoMutationVerdict,
+    decisionAppliedTo: entry.decisionAppliedTo,
+    autoAppliedByRunForge: entry.autoAppliedByRunForge,
+    validationBefore: entry.validationBefore,
+    validationAfter: entry.validationAfter,
+    originalRepoMutated: entry.originalRepoMutated,
     packetPath: entry.packetPath,
     viewerPath: entry.viewerPath,
     summaryPath: milestoneSummary,
     validationEvidencePath: milestoneSummary,
     providerAuditPath: packetArtifact("provider-safety-report.json"),
-    proposalPatchPath: packetArtifact("proposal.patch"),
+    proposalPatchPath: entry.proposalPatchPath !== "unknown" ? entry.proposalPatchPath : packetArtifact("proposal.patch"),
     humanReviewPath: packetArtifact("human-review.md"),
     notes: entry.notes,
     setupNetworkIntent: setupNetworkIntent(entry),
@@ -284,6 +305,10 @@ function seedTags(entry: PacketIndexEntry): string[] {
   if (entry.outcome !== "unknown") tags.add(entry.outcome);
   if (entry.providerStatus !== "unknown") tags.add(`provider:${entry.providerStatus}`);
   if (entry.externalRepoMutationVerdict !== "unknown") tags.add(`mutation:${entry.externalRepoMutationVerdict}`);
+  if (entry.decision !== "unknown") tags.add(`decision:${entry.decision}`);
+  if (entry.validationBefore !== "unknown" || entry.validationAfter !== "unknown") tags.add(`validation:${entry.validationBefore}->${entry.validationAfter}`);
+  if (entry.autoAppliedByRunForge === false) tags.add("auto-apply:false");
+  if (entry.decisionAppliedTo !== "unknown") tags.add(`applied-to:${entry.decisionAppliedTo}`);
   const intent = setupNetworkIntent(entry);
   if (intent) tags.add(`setup-network:${intent}`);
   const diagnostic = setupDiagnosticMode(entry);
@@ -308,28 +333,4 @@ function isDogfoodEvidence(entry: PacketIndexEntry): boolean {
 function isFailedOrUnsafe(record: PacketQueryRecord): boolean {
   const text = `${record.outcome} ${record.providerStatus} ${record.operatorVerdict}`.toLowerCase();
   return text.includes("rejected") || text.includes("failed") || text.includes("unsafe") || text.includes("forbidden") || text.includes("malformed");
-}
-
-function latestMilestone(milestones: string[]): string {
-  const sorted = [...new Set(milestones)].sort((a, b) => milestoneNumber(a) - milestoneNumber(b) || a.localeCompare(b));
-  return sorted.at(-1) ?? "unknown";
-}
-
-function milestoneNumber(milestone: string): number {
-  const match = /^ALPHA-(\d+)/.exec(milestone);
-  return match ? Number(match[1]) : -1;
-}
-
-function repoName(repo: string): string {
-  if (repo === "unknown") return repo;
-  return basename(repo);
-}
-
-function countBy<T>(items: T[], keyFor: (item: T) => string): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const item of items) {
-    const key = keyFor(item) || "unknown";
-    counts[key] = (counts[key] ?? 0) + 1;
-  }
-  return Object.fromEntries(Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)));
 }
