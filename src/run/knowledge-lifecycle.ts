@@ -155,7 +155,7 @@ function evidenceItem(repoRoot: string, runs: string, run: string): LifecycleIte
     id: `evidence:${run}`,
     kind: "evidence",
     title: run,
-    status: /^ALPHA-(?:17|19|20|21)$/.test(run) || run === "PACKET-VALIDATION" ? "active" : "candidate",
+    status: /^ALPHA-(?:17|19|20|21|22)$/.test(run) || run === "PACKET-VALIDATION" ? "active" : "candidate",
     path: rel(repoRoot, join(runs, run)),
     evidenceLinks: [summary, results].map((file) => rel(repoRoot, file)),
     findings: []
@@ -166,7 +166,7 @@ function itemStatus(content: string, links: string[], findings: string[], file: 
   if (findings.some((finding) => finding.includes("secret-like"))) return "unsafe";
   if (findings.some((finding) => finding.includes("missing evidence"))) return "missing_evidence";
   if (/\bretired\b/i.test(content)) return "retired";
-  if (/\bALPHA-(?:[1-9]|1[0-6])\b/.test(content) && !/ALPHA-(?:17|18|19|20|21)|PACKET-VALIDATION/.test(content)) return "stale";
+  if (/\bALPHA-(?:[1-9]|1[0-6])\b/.test(content) && !/ALPHA-(?:17|18|19|20|21|22)|PACKET-VALIDATION/.test(content)) return "stale";
   if (file.includes("skill-candidates/")) return "candidate";
   return links.length > 0 ? "active" : "needs_review";
 }
@@ -223,7 +223,7 @@ function recommendations(counts: Record<LifecycleStatus, number>, okfValid: bool
   if (counts.candidate > 0) items.push("Review candidate knowledge and skills before promotion.");
   if (counts.missing_evidence > 0) items.push("Add or repair local packet/validation evidence links.");
   if (!okfValid || counts.unsafe > 0) items.push("Block promotion until validation and safety findings are cleared.");
-  items.push("Next milestone: continue expanding operator-accepted patch trials beyond controlled fixtures while keeping manual apply decisions only.");
+  items.push("Next milestone: harden the operator patch trial UX around proposal packets, patches, validation, decisions, dashboard rows, and lifecycle entries.");
   return items;
 }
 
@@ -233,7 +233,8 @@ function milestoneComparison(runs: string[]): string[] {
     has("ALPHA-17") ? "Alpha-17 established OKF export, OKF validation, skills inventory, and curator reports." : "Alpha-17 run evidence is not present as validation/runs/ALPHA-17; Alpha-17 OKF and skills artifacts are covered through generated export, validation, inventory, and curator outputs.",
     has("ALPHA-19") ? "Alpha-19 added setup policy acceptance evidence across packets, dashboard data, and multi-repo validation." : "Alpha-19 evidence is absent locally.",
     "Alpha-20 connects those artifacts into a lifecycle report with deterministic status counts, findings, recommendations, and safety summary.",
-    has("ALPHA-21") ? "Alpha-21 records a manual operator accepted-patch trial with validation rerun evidence and no RunForge auto-apply." : "Alpha-21 evidence is absent locally."
+    has("ALPHA-21") ? "Alpha-21 records a manual operator accepted-patch trial with validation rerun evidence and no RunForge auto-apply." : "Alpha-21 evidence is absent locally.",
+    has("ALPHA-22") ? "Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately." : "Alpha-22 evidence is absent locally."
   ];
 }
 

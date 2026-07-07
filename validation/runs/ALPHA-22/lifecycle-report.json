@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "alpha-22-compact-lifecycle-report",
+  "generatedAt": "2026-07-07T04:50:00.467Z",
+  "validation": {
+    "ok": true,
+    "errors": []
+  },
+  "sourceCounts": {
+    "okfFiles": 33,
+    "skills": 0,
+    "validationRuns": 38,
+    "evidenceFiles": 59
+  },
+  "lifecycleStatusCounts": {
+    "candidate": 34,
+    "active": 21,
+    "needs_review": 0,
+    "stale": 16,
+    "duplicate": 0,
+    "missing_evidence": 0,
+    "unsafe": 0,
+    "retired": 0
+  },
+  "alpha22": {
+    "status": "active",
+    "realExternalRepoSource": "/Users/evgeny/Documents/projects/factory",
+    "disposableTrialRoot": "/tmp/runforge-alpha22-real-repo-trial/factory",
+    "acceptedDecisions": 1,
+    "rejectedDecisions": 1,
+    "originalRepoMutationVerdict": "unchanged",
+    "visibility": {
+      "evidenceResults": "validation/runs/ALPHA-22/results.json",
+      "evidenceSummary": "validation/runs/ALPHA-22/summary.md",
+      "lifecycleReport": "validation/runs/ALPHA-22/lifecycle-report.json",
+      "packetIndex": "/tmp/runforge-alpha22-real-repo-trial/factory/index/index.json",
+      "dashboard": "/tmp/runforge-alpha22-real-repo-trial/factory/dashboard/index.html"
+    },
+    "safety": {
+      "noOriginalExternalRepoMutation": true,
+      "noAutoApplyByRunForge": true,
+      "runforgeApplyMode": "none",
+      "acceptedApplyMode": "operator_simulated_manual_apply",
+      "rejectedApplyMode": "operator_declined",
+      "acceptedAppliedTo": "disposable_copy",
+      "rejectedAppliedTo": "disposable_copy",
+      "noProviderCalls": true,
+      "noNetworkRequired": true,
+      "noDbAccess": true,
+      "noPushMergeDeploy": true
+    }
+  },
+  "milestoneComparison": [
+    "Alpha-21 records a manual operator accepted-patch trial with validation rerun evidence and no RunForge auto-apply.",
+    "Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately."
+  ],
+  "findings": [
+    "16 lifecycle items reference older milestones and should be reviewed."
+  ],
+  "recommendations": [
+    "Next milestone: Alpha-23 Operator Patch Trial UX Hardening."
+  ]
+}

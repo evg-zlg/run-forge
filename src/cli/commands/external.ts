@@ -168,8 +168,10 @@ function codeProposalCommand(): Command {
 
 function patchTrialCommand(): Command {
   return new Command("patch-trial")
-    .description("Create a controlled failing fixture and generate a proposal-only operator patch trial packet.")
+    .description("Create a controlled or real-repo disposable failing trial and generate a proposal-only operator patch packet.")
     .option("--root <path>", "trial root directory (default: /tmp/runforge-alpha21-operator-trial)")
+    .option("--repo <path>", "real external repository path for --mode real-repo-disposable")
+    .option("--mode <mode>", "trial mode: controlled-fixture or real-repo-disposable (default: controlled-fixture)", parsePatchTrialMode)
     .option("--out <artifact-dir>", "proposal artifact output directory")
     .option("--run-id <id>", "run id recorded in the proposal packet")
     .action(async (opts) => {
@@ -177,7 +179,9 @@ function patchTrialCommand(): Command {
         const result = await runExternalPatchTrial({
           root: opts.root as string | undefined,
           out: opts.out as string | undefined,
-          runId: opts.runId as string | undefined
+          runId: opts.runId as string | undefined,
+          repo: opts.repo as string | undefined,
+          mode: opts.mode as "controlled-fixture" | "real-repo-disposable" | undefined
         });
         console.log(renderExternalPatchTrialSummary(result));
       } catch (error) {
@@ -198,6 +202,9 @@ function recordDecisionCommand(): Command {
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger)
     .option("--max-log-bytes <bytes>", "maximum captured bytes per stdout/stderr log", parsePositiveInteger)
     .option("--notes <text>", "operator decision notes")
+    .option("--reason <reason>", "operator decision reason, for example operator_declined or validation_failed_after_apply")
+    .option("--apply-mode <mode>", "apply mode label recorded in the decision (default: operator_simulated_manual_apply)")
+    .option("--applied-to <target>", "apply target label recorded in the decision (default: disposable_copy)")
     .action(async (opts) => {
       try {
         const result = await recordExternalPatchDecision({
@@ -209,7 +216,10 @@ function recordDecisionCommand(): Command {
           runId: opts.runId as string | undefined,
           timeoutMs: opts.timeoutMs as number | undefined,
           maxLogBytes: opts.maxLogBytes as number | undefined,
-          notes: opts.notes as string | undefined
+          notes: opts.notes as string | undefined,
+          reason: opts.reason as string | undefined,
+          applyMode: opts.applyMode as string | undefined,
+          appliedTo: opts.appliedTo as string | undefined
         });
         console.log(renderExternalRecordDecisionSummary(result));
       } catch (error) {
@@ -293,4 +303,9 @@ function parseProvider(value: string): "cli" {
 function parseOperatorDecision(value: string): "accepted" | "rejected" {
   if (value === "accepted" || value === "rejected") return value;
   throw new InvalidArgumentError("--decision must be accepted or rejected.");
+}
+
+function parsePatchTrialMode(value: string): "controlled-fixture" | "real-repo-disposable" {
+  if (value === "controlled-fixture" || value === "real-repo-disposable") return value;
+  throw new InvalidArgumentError("--mode must be controlled-fixture or real-repo-disposable.");
 }
