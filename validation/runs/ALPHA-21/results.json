@@ -1,0 +1,69 @@
+{
+  "schemaVersion": "alpha-21-operator-accepted-patch-trial",
+  "generatedAt": "2026-07-07T04:08:31.842Z",
+  "trialRoot": "/tmp/runforge-alpha21-operator-trial",
+  "sourceRepo": "/tmp/runforge-alpha21-operator-trial/source",
+  "operatorRepo": "/tmp/runforge-alpha21-operator-trial/operator-worktree",
+  "proposalPacket": "/tmp/runforge-alpha21-operator-trial/proposal-run/packet",
+  "proposalPatch": "/tmp/runforge-alpha21-operator-trial/proposal-run/packet/proposal.patch",
+  "operatorDecision": "/tmp/runforge-alpha21-operator-trial/proposal-run/packet/operator-decision.json",
+  "validationPacket": "/tmp/runforge-alpha21-operator-trial/decision/validation-rerun/packet",
+  "externalRepo": {
+    "beforeHead": "a45cfbfe16c55ba1221b7c02eb6846fe19138c96",
+    "afterHead": "a45cfbfe16c55ba1221b7c02eb6846fe19138c96",
+    "mutationVerdict": "unchanged"
+  },
+  "attempts": [
+    {
+      "id": "controlled-fixture-accepted",
+      "repo": "/tmp/runforge-alpha21-operator-trial/source",
+      "decision": "accepted",
+      "packet": "/tmp/runforge-alpha21-operator-trial/proposal-run/packet",
+      "viewer": "/tmp/runforge-alpha21-operator-trial/viewer/index.html",
+      "outcome": "proposal_ready_verified",
+      "providerStatus": "disabled",
+      "filesChanged": [
+        "src/math.js"
+      ],
+      "externalRepoHeadBefore": "a45cfbfe16c55ba1221b7c02eb6846fe19138c96",
+      "externalRepoHeadAfter": "a45cfbfe16c55ba1221b7c02eb6846fe19138c96",
+      "manualApply": true
+    }
+  ],
+  "safety": {
+    "noOriginalExternalRepoMutation": true,
+    "noAutoApplyByRunForge": true,
+    "noProviderCalls": true,
+    "noNetworkRequired": true,
+    "noPushMergeDeploy": true,
+    "disposableOperatorWorktree": "/tmp/runforge-alpha21-operator-trial/operator-worktree"
+  },
+  "commandsRun": [
+    "pnpm dev external patch-trial --root /tmp/runforge-alpha21-operator-trial --out /tmp/runforge-alpha21-operator-trial/proposal-run --run-id alpha21-operator-patch-trial",
+    "# stdout: Patch trial fixture: /tmp/runforge-alpha21-operator-trial/source",
+    "# stderr: $ tsx src/cli/index.ts external patch-trial --root /tmp/runforge-alpha21-operator-trial --out /tmp/runforge-alpha21-operator-trial/proposal-run --run-id alpha21-operator-patch-trial",
+    "(cd /tmp/runforge-alpha21-operator-trial/source && node verify.js)",
+    "(cd /tmp/runforge-alpha21-operator-trial/operator-worktree && git apply /tmp/runforge-alpha21-operator-trial/proposal-run/packet/proposal.patch)",
+    "(cd /tmp/runforge-alpha21-operator-trial/operator-worktree && node verify.js)",
+    "pnpm dev external record-decision --proposal-packet /tmp/runforge-alpha21-operator-trial/proposal-run/packet --repo /tmp/runforge-alpha21-operator-trial/operator-worktree --command node verify.js --decision accepted --out /tmp/runforge-alpha21-operator-trial/decision --run-id alpha21-operator-accepted --notes Alpha-21 validation manually applied proposal.patch in a disposable operator worktree.",
+    "# stdout: Operator decision recorded: accepted",
+    "# stderr: $ tsx src/cli/index.ts external record-decision --proposal-packet /tmp/runforge-alpha21-operator-trial/proposal-run/packet --repo /tmp/runforge-alpha21-operator-trial/operator-worktree --command 'node verify.js' --decision accepted --out /tmp/runforge-alpha21-operator-trial/decision --run-id alpha21-operator-accepted --notes 'Alpha-21 validation manually applied proposal.patch in a disposable operator worktree.'",
+    "pnpm dev packet inspect --packet /tmp/runforge-alpha21-operator-trial/proposal-run/packet --validate",
+    "# stdout: Run ID: alpha21-operator-patch-trial",
+    "# stderr: $ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha21-operator-trial/proposal-run/packet --validate",
+    "pnpm dev packet view --packet /tmp/runforge-alpha21-operator-trial/proposal-run/packet --out /tmp/runforge-alpha21-operator-trial/viewer",
+    "# stdout: Packet viewer written: /tmp/runforge-alpha21-operator-trial/viewer/index.html",
+    "# stderr: $ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha21-operator-trial/proposal-run/packet --out /tmp/runforge-alpha21-operator-trial/viewer",
+    "(cd /tmp/runforge-alpha21-operator-trial/source && git status --short)",
+    "(cd /tmp/runforge-alpha21-operator-trial/source && git rev-parse HEAD)",
+    "(cd /tmp/runforge-alpha21-operator-trial/source && git rev-parse HEAD)",
+    "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha21-operator-trial/index --dashboard-seed",
+    "# stdout: Indexed 7 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha21-operator-trial/index --dashboard-seed",
+    "pnpm dev dashboard build --seed /tmp/runforge-alpha21-operator-trial/index/dashboard-seed.json --out /tmp/runforge-alpha21-operator-trial/dashboard",
+    "# stdout: Dashboard written: /tmp/runforge-alpha21-operator-trial/dashboard/index.html",
+    "# stderr: $ tsx src/cli/index.ts dashboard build --seed /tmp/runforge-alpha21-operator-trial/index/dashboard-seed.json --out /tmp/runforge-alpha21-operator-trial/dashboard"
+  ],
+  "errors": [],
+  "finalVerdict": "passed"
+}

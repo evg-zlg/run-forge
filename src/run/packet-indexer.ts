@@ -92,6 +92,18 @@ interface ProposalStatus {
   diagnostics?: string[];
 }
 
+interface OperatorDecisionRecord {
+  decision?: string;
+  finalOutcome?: string;
+  validation?: {
+    status?: string;
+    passed?: boolean;
+    packet?: string;
+  };
+  runforgeAppliedPatch?: boolean;
+  manualApplyRequired?: boolean;
+}
+
 export async function buildPacketIndex(options: PacketIndexOptions): Promise<PacketIndexResult> {
   const root = resolve(options.root);
   const entries = dedupeEntries([
@@ -208,6 +220,7 @@ async function entriesFromPackets(root: string): Promise<PacketIndexEntry[]> {
     const packetPath = dirname(runPath);
     const run = await readJson<RunJson>(runPath);
     const status = await readOptionalJson<ProposalStatus>(join(packetPath, "proposal-status.json"));
+    const operatorDecision = await readOptionalJson<OperatorDecisionRecord>(join(packetPath, "operator-decision.json"));
     entries.push(normalizeEntry(milestoneFor(root, packetPath), scenarioFor(root, packetPath), {
       repo: run.repo?.path,
       outcome: status?.outcome ?? run.status,
@@ -218,8 +231,8 @@ async function entriesFromPackets(root: string): Promise<PacketIndexEntry[]> {
       externalRepoHeadBefore: run.repo?.headBefore,
       externalRepoHeadAfter: run.repo?.headAfter,
       externalRepoMutationVerdict: run.repo?.mutationVerdict,
-      decision: status?.reviewerDecision,
-      notes: [status?.diagnostics?.join("; "), setupPolicyNote(run)].filter(Boolean).join("; "),
+      decision: operatorDecision?.finalOutcome ?? status?.reviewerDecision,
+      notes: [status?.diagnostics?.join("; "), setupPolicyNote(run), operatorDecisionNote(operatorDecision)].filter(Boolean).join("; "),
       packetType: run.taskType?.replace(/^external_/, "")
     }));
   }
@@ -230,6 +243,17 @@ function setupPolicyNote(run: RunJson): string {
   if (!run.setupPolicy) return "";
   const diagnostic = run.setupPolicy.continueAfterSetupFailure ? "diagnostic-continue" : "setup-gates-main";
   return `setupNetworkIntent=${run.setupPolicy.networkIntent ?? "unknown"} ${diagnostic}`;
+}
+
+function operatorDecisionNote(record: OperatorDecisionRecord | null): string {
+  if (!record) return "";
+  return [
+    `operatorDecision=${record.decision ?? "unknown"}`,
+    `finalOutcome=${record.finalOutcome ?? "unknown"}`,
+    `validation=${record.validation?.passed ? "passed" : record.validation?.status ?? "unknown"}`,
+    `runforgeAppliedPatch=${record.runforgeAppliedPatch === true ? "true" : "false"}`,
+    `manualApplyRequired=${record.manualApplyRequired === false ? "false" : "true"}`
+  ].join(" ");
 }
 
 function normalizeEntry(milestone: string, scenario: string, input: Partial<PacketIndexEntry>): PacketIndexEntry {
