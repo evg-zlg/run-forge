@@ -1,6 +1,7 @@
 import { homedir } from "node:os";
 import { mkdir, readdir, readFile, stat, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
+import { findSecretLikeContent } from "./okf-secret-scan.js";
 
 export interface SkillInventoryOptions {
   out: string;
@@ -100,6 +101,7 @@ async function inspectSkill(path: string): Promise<SkillInventoryItem> {
   const content = skillMd ? await readFile(skillMd, "utf8").catch(() => "") : "";
   const description = extractDescription(content);
   const trigger = extractTrigger(content);
+  const notes = skillMd ? skillNotes(content, description, trigger) : ["No SKILL.md file found."];
   return {
     name: basename(path),
     path,
@@ -108,7 +110,7 @@ async function inspectSkill(path: string): Promise<SkillInventoryItem> {
     fileCount: files.length,
     sizeBytes: await totalSize(files),
     status: skillMd ? "active" : "unknown",
-    notes: skillMd ? [] : ["No SKILL.md file found."]
+    notes
   };
 }
 
@@ -136,6 +138,17 @@ function extractDescription(content: string): string {
 function extractTrigger(content: string): string {
   const line = content.split(/\r?\n/).find((item) => /trigger/i.test(item));
   return line?.replace(/^[-*\s#]*/, "").trim() ?? "";
+}
+
+function skillNotes(content: string, description: string, trigger: string): string[] {
+  const notes: string[] = [];
+  if (!/Evidence:|Source Evidence|validation\/runs|summary\.md|results\.json/i.test(content)) notes.push("missing evidence links");
+  if (/\b(?:obsolete|retired|superseded)\b[\s\S]{0,80}\bALPHA-(?:[1-9]|1[0-6])\b/i.test(content)) notes.push("mentions obsolete Alpha milestones");
+  for (const pattern of findSecretLikeContent(content)) notes.push(`secret-like pattern ${pattern}`);
+  if (description.split(/\s+/).filter(Boolean).length < 5 && trigger.split(/\s+/).filter(Boolean).length < 5) notes.push("too vague to act on safely");
+  const evidence = content.match(/(?:validation\/runs|summary\.md|results\.json)[^\s)`,]*/g) ?? [];
+  if (evidence.length > 0) notes.push(`Evidence: ${[...new Set(evidence)].join(", ")}`);
+  return notes;
 }
 
 function cell(value: string): string {
