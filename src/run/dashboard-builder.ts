@@ -18,6 +18,7 @@ export interface DashboardRecord extends DashboardSeedRecord {
   proposalPatchPath: string;
   handoffReadmePath: string;
   handoffJsonPath: string;
+  handoffAuditStatus: string; handoffAuditReportPath: string; handoffAuditResultPath: string;
   humanReviewPath: string;
   decisionAppliedTo: string;
   autoAppliedByRunForge: boolean | null;
@@ -88,6 +89,7 @@ type NormalizedDashboardSeedRecord = DashboardSeedRecord & {
   notes: string; setupNetworkIntent: string; setupDiagnosticMode: string;
   validationEvidencePath: string; providerAuditPath: string; proposalPatchPath: string; humanReviewPath: string;
   handoffReadmePath: string; handoffJsonPath: string;
+  handoffAuditStatus: string; handoffAuditReportPath: string; handoffAuditResultPath: string;
   decisionAppliedTo: string; autoAppliedByRunForge: boolean | null; validationBefore: string; validationAfter: string; originalRepoMutated: boolean | null;
 };
 
@@ -103,6 +105,7 @@ function normalizeRecord(record: DashboardSeedRecord): NormalizedDashboardSeedRe
     proposalPatchPath: stringField(record, "proposalPatchPath"),
     handoffReadmePath: stringField(record, "handoffReadmePath"),
     handoffJsonPath: stringField(record, "handoffJsonPath"),
+    handoffAuditStatus: stringField(record, "handoffAuditStatus"), handoffAuditReportPath: stringField(record, "handoffAuditReportPath"), handoffAuditResultPath: stringField(record, "handoffAuditResultPath"),
     humanReviewPath: stringField(record, "humanReviewPath"),
     decisionAppliedTo: stringField(record, "decisionAppliedTo"),
     autoAppliedByRunForge: typeof record.autoAppliedByRunForge === "boolean" ? record.autoAppliedByRunForge : null,
@@ -216,7 +219,6 @@ function renderCountSection(title: string, counts: Record<string, number>, filte
   }).join("");
   return `<section><h2>${title}</h2><table class="counts"><tbody>${rows || "<tr><td>none</td><td>0</td></tr>"}</tbody></table></section>`;
 }
-
 function renderAlphaComparison(rows: AlphaComparisonSummary[]): string {
   const body = rows.map((row) => `<tr>
     <td><button type="button" class="link-button" data-filter-key="alpha" data-filter-value="${escapeAttr(row.alpha)}">${escapeHtml(row.alpha)}</button></td>
@@ -257,7 +259,7 @@ function renderTable(records: DashboardRecord[]): string {
     <td>${artifactLink("Packet path", record.packetPath)}</td>
     <td>${artifactLink("Viewer path", record.viewerPath)}</td>
     <td>${artifactLink("Summary path", record.summaryPath)}</td>
-    <td>${artifactLink("Handoff README", record.handoffReadmePath)}</td>
+    <td>${handoffCell(record)}</td>
     <td>${renderDetails(record)}</td>
     <td>${escapeHtml(record.tags.join(", "))}</td>
     <td>${escapeHtml(record.notes ?? "")}</td>
@@ -265,10 +267,13 @@ function renderTable(records: DashboardRecord[]): string {
   return `<section><h2>Records</h2><table class="records" id="records-table"><thead><tr><th><button type="button" class="sort-button" data-sort="alpha">Alpha</button></th><th><button type="button" class="sort-button" data-sort="repo">Repo</button></th><th><button type="button" class="sort-button" data-sort="scenario">Scenario</button></th><th>Packet type</th><th><button type="button" class="sort-button" data-sort="outcome">Outcome</button></th><th><button type="button" class="sort-button" data-sort="providerStatus">Provider</button></th><th>Operator verdict</th><th><button type="button" class="sort-button" data-sort="mutationVerdict">Mutation</button></th><th>Validation</th><th>Setup</th><th>Safety</th><th>Packet</th><th>Viewer</th><th>Summary</th><th>Handoff</th><th>Details</th><th>Tags</th><th>Notes</th></tr></thead><tbody>${rows}</tbody></table><p id="empty-state" class="empty-state" hidden>No records match the active filters. Reset filters or copy the current view URL to share this empty state.</p></section>`;
 }
 
+function handoffCell(record: DashboardRecord): string {
+  const audit = record.handoffAuditStatus ? `<div>${labels([`audit:${record.handoffAuditStatus}`])}</div>` : "";
+  return [artifactLink("Handoff README", record.handoffReadmePath), audit, record.handoffAuditReportPath ? artifactLink("Handoff audit report", record.handoffAuditReportPath) : ""].filter(Boolean).join("");
+}
 function labels(values: string[]): string {
   return values.map((value) => `<span class="label label-${labelClass(value)}">${escapeHtml(value)}</span>`).join(" ");
 }
-
 function setupPolicy(record: DashboardRecord): string {
   const values = [record.setupNetworkIntent ? `network:${record.setupNetworkIntent}` : "", record.setupDiagnosticMode].filter(Boolean);
   return values.length > 0 ? labels(values) : "n/a";

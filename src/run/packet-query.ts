@@ -39,6 +39,7 @@ export interface PacketQueryRecord {
   originalRepoMutated: boolean | null;
   handoffReadmePath: string;
   handoffJsonPath: string;
+  handoffAuditStatus: string; handoffAuditReportPath: string; handoffAuditResultPath: string;
   notes: string;
 }
 
@@ -108,6 +109,7 @@ export interface DashboardSeedRecord {
   proposalPatchPath?: string;
   handoffReadmePath?: string;
   handoffJsonPath?: string;
+  handoffAuditStatus?: string; handoffAuditReportPath?: string; handoffAuditResultPath?: string;
   humanReviewPath?: string;
   notes?: string;
   setupNetworkIntent?: string;
@@ -270,6 +272,7 @@ function toQueryRecord(entry: PacketIndexEntry): PacketQueryRecord {
     originalRepoMutated: entry.originalRepoMutated,
     handoffReadmePath: entry.handoffReadmePath,
     handoffJsonPath: entry.handoffJsonPath,
+    handoffAuditStatus: entry.handoffAuditStatus, handoffAuditReportPath: entry.handoffAuditReportPath, handoffAuditResultPath: entry.handoffAuditResultPath,
     notes: entry.notes
   };
 }
@@ -300,6 +303,7 @@ function toDashboardSeedRecord(entry: PacketIndexEntry, root: string): Dashboard
     proposalPatchPath: entry.proposalPatchPath !== "unknown" ? entry.proposalPatchPath : packetArtifact("proposal.patch"),
     handoffReadmePath: entry.handoffReadmePath !== "unknown" ? entry.handoffReadmePath : undefined,
     handoffJsonPath: entry.handoffJsonPath !== "unknown" ? entry.handoffJsonPath : undefined,
+    handoffAuditStatus: entry.handoffAuditStatus !== "unknown" ? entry.handoffAuditStatus : undefined, handoffAuditReportPath: entry.handoffAuditReportPath !== "unknown" ? entry.handoffAuditReportPath : undefined, handoffAuditResultPath: entry.handoffAuditResultPath !== "unknown" ? entry.handoffAuditResultPath : undefined,
     humanReviewPath: packetArtifact("human-review.md"),
     notes: entry.notes,
     setupNetworkIntent: setupNetworkIntent(entry),
@@ -317,6 +321,7 @@ function seedTags(entry: PacketIndexEntry): string[] {
   if (entry.validationBefore !== "unknown" || entry.validationAfter !== "unknown") tags.add(`validation:${entry.validationBefore}->${entry.validationAfter}`);
   if (entry.autoAppliedByRunForge === false) tags.add("auto-apply:false");
   if (entry.decisionAppliedTo !== "unknown") tags.add(`applied-to:${entry.decisionAppliedTo}`);
+  if (entry.handoffAuditStatus !== "unknown") tags.add(`handoff-audit:${entry.handoffAuditStatus}`);
   const intent = setupNetworkIntent(entry);
   if (intent) tags.add(`setup-network:${intent}`);
   const diagnostic = setupDiagnosticMode(entry);

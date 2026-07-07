@@ -41,6 +41,9 @@ export function searchableRecordText(record: DashboardSeedRecord): string {
     typeof raw.setupDiagnosticMode === "string" ? raw.setupDiagnosticMode : "",
     typeof raw.handoffReadmePath === "string" ? raw.handoffReadmePath : "",
     typeof raw.handoffJsonPath === "string" ? raw.handoffJsonPath : "",
+    typeof raw.handoffAuditStatus === "string" ? raw.handoffAuditStatus : "",
+    typeof raw.handoffAuditReportPath === "string" ? raw.handoffAuditReportPath : "",
+    typeof raw.handoffAuditResultPath === "string" ? raw.handoffAuditResultPath : "",
     ...(Array.isArray(record.tags) ? record.tags : []),
     typeof raw.notes === "string" ? raw.notes : ""
   ].join(" ").toLowerCase();

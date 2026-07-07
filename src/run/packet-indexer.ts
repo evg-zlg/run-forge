@@ -27,6 +27,9 @@ export interface PacketIndexEntry {
   proposalPatchPath: string;
   handoffReadmePath: string;
   handoffJsonPath: string;
+  handoffAuditStatus: string;
+  handoffAuditReportPath: string;
+  handoffAuditResultPath: string;
   originalRepoMutated: boolean | null;
   notes: string;
 }
@@ -53,6 +56,9 @@ interface DogfoodIndexEntry {
   proposalPatchPath?: string;
   handoffReadmePath?: string;
   handoffJsonPath?: string;
+  handoffAuditStatus?: string;
+  handoffAuditReportPath?: string;
+  handoffAuditResultPath?: string;
   originalRepoMutated?: boolean | null;
 }
 
@@ -75,6 +81,9 @@ interface ResultsAttempt {
   proposalPatch?: string;
   handoffReadme?: string;
   handoffJson?: string;
+  handoffAuditStatus?: string;
+  handoffAuditReport?: string;
+  handoffAuditResult?: string;
 }
 
 interface ResultsJson { externalRepo?: RepoState; originalRepo?: RepoState; attempts?: ResultsAttempt[]; }
@@ -178,6 +187,9 @@ async function entriesFromResults(root: string): Promise<PacketIndexEntry[]> {
         proposalPatchPath: attempt.proposalPatch,
         handoffReadmePath: attempt.handoffReadme,
         handoffJsonPath: attempt.handoffJson,
+        handoffAuditStatus: attempt.handoffAuditStatus,
+        handoffAuditReportPath: attempt.handoffAuditReport,
+        handoffAuditResultPath: attempt.handoffAuditResult,
         originalRepoMutated: attempt.originalRepoMutated,
         notes: attempt.manualApply === false ? "Patch was not manually applied to the external repo." : undefined
       }));
@@ -259,6 +271,9 @@ function normalizeEntry(milestone: string, scenario: string, input: Partial<Pack
     proposalPatchPath: input.proposalPatchPath ?? "unknown",
     handoffReadmePath: input.handoffReadmePath ?? "unknown",
     handoffJsonPath: input.handoffJsonPath ?? "unknown",
+    handoffAuditStatus: input.handoffAuditStatus ?? "unknown",
+    handoffAuditReportPath: input.handoffAuditReportPath ?? "unknown",
+    handoffAuditResultPath: input.handoffAuditResultPath ?? "unknown",
     originalRepoMutated: input.originalRepoMutated ?? null,
     notes: input.notes ?? ""
   };

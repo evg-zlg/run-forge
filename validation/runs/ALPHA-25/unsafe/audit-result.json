@@ -1,0 +1,47 @@
+{
+  "auditId": "alpha25-unsafe-handoff-rejected",
+  "handoffPath": "/tmp/runforge-alpha25-handoff-replay/factory/unsafe-handoff",
+  "status": "failed",
+  "sourceRepo": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "headBefore": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "headAfter": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "statusBefore": "",
+    "statusAfter": "",
+    "originalRepoMutated": false
+  },
+  "replay": {
+    "worktreePath": "/tmp/runforge-alpha25-handoff-replay/factory/unsafe-audit/replay-worktree",
+    "patchApplied": false,
+    "validationRun": false,
+    "validationStatus": "skipped"
+  },
+  "decisionForms": {
+    "acceptedValid": true,
+    "rejectedValid": true
+  },
+  "safety": {
+    "unsafeInstructionsFound": true,
+    "forbiddenTargetsFound": false,
+    "providerUsed": false,
+    "networkUsed": false,
+    "dbUsed": false,
+    "deployUsed": false,
+    "pushUsed": false,
+    "mergeUsed": false
+  },
+  "findings": [
+    "handoff packet missing README.md",
+    "handoff.json proposal.autoAppliedByRunForge must be false",
+    "validation command attempts forbidden push operation"
+  ],
+  "recommendations": [
+    "Do not trust this handoff until the patch applies cleanly in a disposable replay worktree.",
+    "Do not accept this handoff until declared validation passes after replay apply."
+  ],
+  "artifacts": {
+    "auditReport": "/tmp/runforge-alpha25-handoff-replay/factory/unsafe-audit/audit-report.md",
+    "auditResult": "/tmp/runforge-alpha25-handoff-replay/factory/unsafe-audit/audit-result.json",
+    "replayLog": "/tmp/runforge-alpha25-handoff-replay/factory/unsafe-audit/replay-log.json"
+  }
+}
