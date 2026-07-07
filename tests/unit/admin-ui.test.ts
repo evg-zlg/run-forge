@@ -6,6 +6,7 @@ import { buildAdminUi } from "../../src/admin/builder.js";
 import { diffAdminConfigs, saveAdminConfigDraft, validateAdminConfigDraft } from "../../src/admin/config-edit.js";
 import { loadAdminConfig, writeAdminConfig, type AdminConfig } from "../../src/admin/config.js";
 import { redactSecrets } from "../../src/admin/redaction.js";
+import { artifactPathAllowed, compareRuns, filterRuns, normalizeArtifactLinks, sortRuns } from "../../src/admin/run-browser.js";
 import { buildRunDetail } from "../../src/admin/run-graph.js";
 import { startAdminServer } from "../../src/admin/server.js";
 
@@ -78,16 +79,19 @@ describe("admin UI alpha", () => {
 
     const result = await buildAdminUi({ repoRoot: root, config: configPath, out: join(root, "admin") });
 
-    expect(result.data.runs).toHaveLength(1);
-    expect(result.data.runs[0]).toMatchObject({
+    expect(result.data.runs).toHaveLength(2);
+    expect(result.data.runs.find((run) => run.scenario === "reject")).toMatchObject({
       alpha: "ALPHA-UI",
       outcome: "provider_rejected",
       providerStatus: "rejected",
-      doNotApply: true
+      doNotApply: true,
+      providerRejected: true,
+      urgent: true
     });
     expect(result.data.overview.byOutcome.provider_rejected).toBe(1);
     expect(result.data.overview.urgentSafetyCounts.provider_rejected).toBe(1);
-    expect(result.data.runDetails[0]?.graph.map((node) => node.label)).toEqual(["task_received", "provider_patch_validator", "packet_writer"]);
+    expect(result.data.runDetails.find((detail) => detail.packetPath.endsWith("reject/packet"))?.graph.map((node) => node.label)).toEqual(["task_received", "provider_patch_validator", "packet_writer"]);
+    expect(result.data.artifactLinks[result.data.runs[0]!.id]?.some((link) => link.label === "Events")).toBe(true);
   });
 
   it("builds run detail graph from events.jsonl", async () => {
@@ -97,6 +101,63 @@ describe("admin UI alpha", () => {
     expect(detail.graph).toHaveLength(3);
     expect(detail.summary).toContain("external_code_proposal");
     expect(detail.providerAudit).toMatchObject({ verdict: "rejected" });
+  });
+
+  it("builds fallback run detail graph when events.jsonl is missing", async () => {
+    const root = await createFixtureRoot();
+    const detail = await buildRunDetail(join(root, "validation/runs/ALPHA-UI/success/packet"));
+
+    expect(detail.graphSource).toBe("fallback");
+    expect(detail.graph.map((node) => node.label)).toContain("task_received");
+    expect(detail.graph.at(-1)?.detail).toContain("events.jsonl not found");
+  });
+
+  it("filters and sorts runs for the browser", async () => {
+    const root = await createFixtureRoot();
+    const configPath = join(root, "config.json");
+    await writeAdminConfig(configPath, config(root));
+    const result = await buildAdminUi({ repoRoot: root, config: configPath, out: join(root, "admin") });
+
+    expect(filterRuns(result.data.runs, { text: "reject" })).toHaveLength(1);
+    expect(filterRuns(result.data.runs, { outcome: "provider_rejected", providerStatus: "rejected", alpha: "ALPHA-UI", repo: "fixture-repo" })).toHaveLength(1);
+    expect(filterRuns(result.data.runs, { hasDoNotApply: true, hasProviderRejected: true })).toHaveLength(1);
+    expect(filterRuns(result.data.runs, { hasVerificationFailed: true })).toHaveLength(0);
+    expect(filterRuns(result.data.runs, { hasSetupFailure: true })).toHaveLength(1);
+    expect(filterRuns(result.data.runs, { hasProposal: true })).toHaveLength(2);
+    expect(filterRuns(result.data.runs, { hasVerifiedProposal: true })).toHaveLength(1);
+    expect(filterRuns(result.data.runs, { hasViewer: true, hasSummary: true })).toHaveLength(0);
+    expect(sortRuns(result.data.runs, "newest")[0]?.updatedAt >= sortRuns(result.data.runs, "newest")[1]!.updatedAt).toBe(true);
+  });
+
+  it("normalizes artifact links and compares changed run fields", async () => {
+    const root = await createFixtureRoot();
+    const configPath = join(root, "config.json");
+    await writeAdminConfig(configPath, config(root));
+    const result = await buildAdminUi({ repoRoot: root, config: configPath, out: join(root, "admin") });
+    const reject = result.data.runs.find((run) => run.scenario === "reject")!;
+    const success = result.data.runs.find((run) => run.scenario === "success")!;
+    const links = normalizeArtifactLinks(reject, result.data.runDetails.find((detail) => detail.packetPath === reject.packetPath));
+    const comparison = compareRuns(reject, success);
+
+    expect(links.map((link) => link.label)).toContain("Packet");
+    expect(links.map((link) => link.label)).toContain("Provider audit");
+    expect(comparison.changedCount).toBeGreaterThan(0);
+    expect(comparison.rows.find((row) => row.field === "Outcome")?.changed).toBe(true);
+  });
+
+  it("classifies unsafe run status visibly in rendered HTML", async () => {
+    const root = await createFixtureRoot();
+    const configPath = join(root, "config.json");
+    await writeAdminConfig(configPath, config(root));
+    const result = await buildAdminUi({ repoRoot: root, config: configPath, out: join(root, "admin") });
+    const html = await readFile(result.indexPath, "utf8");
+
+    expect(html).toContain("urgent-row");
+    expect(html).toContain("do_not_apply");
+    expect(html).toContain("provider_rejected");
+    expect(html).toContain("Compare Runs");
+    expect(html).not.toContain("validation-secret-should-redact");
+    expect(html).not.toContain("server-secret-should-not-render");
   });
 
   it("renders missing repo paths as missing and writes static output", async () => {
@@ -120,9 +181,9 @@ describe("admin UI alpha", () => {
     expect(html).toContain("RunForge path");
     expect(html).toContain("RunForge SHA");
     expect(html).toContain("Config path");
-    expect(html).toContain("Runs / Evidence");
+    expect(html).toContain("Runs Browser");
     expect(html).toContain('id="repo-filter"');
-    expect(html).toContain("Run Detail / Graph");
+    expect(html).toContain("Run Detail / Timeline");
     expect(html).toContain("Settings");
     expect(html).toContain("Config path");
     expect(html).toContain("repo-editor");
@@ -270,6 +331,27 @@ describe("admin UI alpha", () => {
       await new Promise<void>((resolve) => instance.server.close(() => resolve()));
     }
   });
+
+  it("artifact route rejects traversal and only reads configured run roots", async () => {
+    const root = await createFixtureRoot();
+    const configPath = join(root, "config.json");
+    await writeAdminConfig(configPath, config(root));
+    const instance = await startAdminServer({ config: configPath, repoRoot: root, out: join(root, "admin"), port: 0 });
+    try {
+      const allowedPath = join(root, "validation/runs/ALPHA-UI/reject/packet/events.jsonl");
+      const allowed = await fetch(new URL(`/api/admin/artifact?path=${encodeURIComponent(allowedPath)}`, instance.url));
+      const outside = await fetch(new URL(`/api/admin/artifact?path=${encodeURIComponent(join(root, "config.json"))}`, instance.url));
+      const traversal = await fetch(new URL(`/api/admin/artifact?path=${encodeURIComponent(join(root, "validation/runs/../config.json"))}`, instance.url));
+
+      expect(artifactPathAllowed(allowedPath, [join(root, "validation/runs")])).toBe(true);
+      expect(allowed.status).toBe(200);
+      expect(await allowed.text()).toContain("task_received");
+      expect(outside.status).toBe(403);
+      expect(traversal.status).toBe(403);
+    } finally {
+      await new Promise<void>((resolve) => instance.server.close(() => resolve()));
+    }
+  });
 });
 
 async function createFixtureRoot(): Promise<string> {
@@ -307,6 +389,34 @@ async function createFixtureRoot(): Promise<string> {
   await writeFile(join(packet, "metrics.json"), JSON.stringify({ durationMs: 42 }), "utf8");
   await writeFile(join(packet, "safety-report.json"), JSON.stringify({ mutationVerdict: "unchanged" }), "utf8");
   await writeFile(join(packet, "provider-safety-report.json"), JSON.stringify({ verdict: "rejected" }), "utf8");
+  await writeFile(join(root, "validation/runs/ALPHA-UI/summary.md"), "# Alpha UI Summary\n", "utf8");
+  const successPacket = join(root, "validation/runs/ALPHA-UI/success/packet");
+  await mkdir(successPacket, { recursive: true });
+  await writeFile(join(successPacket, "run.json"), JSON.stringify({
+    schemaVersion: "alpha-test",
+    runId: "admin-fixture-success",
+    taskType: "external_code_proposal",
+    status: "proposal_ready_verified",
+    repo: {
+      path: join(root, "fixture-repo"),
+      mutationVerdict: "unchanged",
+      headBefore: "abc",
+      headAfter: "abc"
+    },
+    setupPolicy: {
+      continueAfterSetupFailure: true
+    }
+  }), "utf8");
+  await writeFile(join(successPacket, "proposal-status.json"), JSON.stringify({
+    outcome: "proposal_ready_verified",
+    providerStatus: "mocked",
+    reviewerDecision: "ready",
+    filesChanged: ["src/index.ts"]
+  }), "utf8");
+  await writeFile(join(successPacket, "packet-manifest.json"), JSON.stringify({
+    schemaVersion: "alpha-test",
+    artifacts: [{ path: "run.json" }, { path: "proposal-status.json" }]
+  }), "utf8");
   await mkdir(join(root, "fixture-repo"), { recursive: true });
   return root;
 }

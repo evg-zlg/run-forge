@@ -51,6 +51,10 @@ validation/runs/*/*
 !validation/runs/ADMIN-UI-2/
 !validation/runs/ADMIN-UI-2/summary.md
 !validation/runs/ADMIN-UI-2/results.json
+!validation/runs/ADMIN-UI-3/
+!validation/runs/ADMIN-UI-3/summary.md
+!validation/runs/ADMIN-UI-3/results.json
+!validation/runs/ADMIN-UI-3/visual-review.md
 !validation/runs/PACKET-VALIDATION/summary.md
 !validation/runs/PACKET-VALIDATION/results.json
 .DS_Store

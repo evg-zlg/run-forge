@@ -2,11 +2,12 @@ import { execFile } from "node:child_process";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
-import { buildPacketIndex, type PacketIndexEntry } from "../run/packet-indexer.js";
 import { type AdminConfig, loadAdminConfig } from "./config.js";
 import { redactJson, redactedRef } from "./redaction.js";
 import { renderAdminHtml } from "./renderer.js";
+import { normalizeArtifactLinks, type AdminArtifactLink } from "./run-browser.js";
 import { buildRunDetail, type AdminRunDetail } from "./run-graph.js";
+import { loadRuns, missingEvidence, unsafeMutation, type AdminRunRecord } from "./run-records.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -37,6 +38,7 @@ export interface AdminData {
   providers: AdminProviderStatus[];
   runs: AdminRunRecord[];
   runDetails: AdminRunDetail[];
+  artifactLinks: Record<string, AdminArtifactLink[]>;
   settings: {
     defaultRoots: string[];
     redactionPolicy: string;
@@ -76,23 +78,6 @@ export interface AdminProviderStatus {
   command: string;
 }
 
-export interface AdminRunRecord {
-  alpha: string;
-  repo: string;
-  scenario: string;
-  packetType: string;
-  outcome: string;
-  providerStatus: string;
-  operatorVerdict: string;
-  mutationVerdict: string;
-  packetPath: string;
-  viewerPath: string;
-  summaryPath: string;
-  doNotApply: boolean;
-  verifiedProposal: boolean;
-  setupFailure: boolean;
-}
-
 export async function buildAdminUi(options: AdminBuildOptions): Promise<AdminBuildResult> {
   const repoRoot = resolve(options.repoRoot ?? process.cwd());
   const out = resolve(options.out);
@@ -100,7 +85,9 @@ export async function buildAdminUi(options: AdminBuildOptions): Promise<AdminBui
   const runs = await loadRuns(repoRoot, loadedConfig.config);
   const repositories = await Promise.all(loadedConfig.config.repositories.map((repo) => repoStatus(repo, runs)));
   const providers = loadedConfig.config.providers.map(providerStatus);
-  const runDetails = await loadDetails(runs, options.maxDetails ?? 20);
+  const runDetails = await loadDetails(runs, options.maxDetails ?? 40);
+  const detailsByPacket = new Map(runDetails.map((detail) => [detail.packetPath, detail]));
+  const allowedArtifactRoots = loadedConfig.config.runs.defaultRoots.map((root) => resolve(repoRoot, root));
   const data: AdminData = redactJson({
     schemaVersion: "runforge-admin-alpha",
     generatedAt: new Date().toISOString(),
@@ -115,6 +102,7 @@ export async function buildAdminUi(options: AdminBuildOptions): Promise<AdminBui
     providers,
     runs,
     runDetails,
+    artifactLinks: Object.fromEntries(runs.map((run) => [run.id, normalizeArtifactLinks(run, detailsByPacket.get(run.packetPath), allowedArtifactRoots)])),
     settings: {
       defaultRoots: loadedConfig.config.runs.defaultRoots,
       redactionPolicy: "API keys, bearer tokens, OpenRouter keys, .env-style secrets, and private keys are redacted before rendering.",
@@ -129,37 +117,6 @@ export async function buildAdminUi(options: AdminBuildOptions): Promise<AdminBui
   await writeFile(dataPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
   await writeFile(indexPath, renderAdminHtml(data), "utf8");
   return { indexPath, dataPath, data };
-}
-
-async function loadRuns(repoRoot: string, config: AdminConfig): Promise<AdminRunRecord[]> {
-  const entries: PacketIndexEntry[] = [];
-  for (const root of config.runs.defaultRoots) {
-    const absoluteRoot = resolve(repoRoot, root);
-    try {
-      const info = await stat(absoluteRoot);
-      if (!info.isDirectory()) continue;
-    } catch {
-      continue;
-    }
-    const index = await buildPacketIndex({ root: absoluteRoot });
-    entries.push(...index.entries);
-  }
-  return dedupe(entries).map((entry) => ({
-    alpha: entry.milestone,
-    repo: shortRepo(entry.repo),
-    scenario: entry.scenario,
-    packetType: entry.packetType,
-    outcome: entry.outcome,
-    providerStatus: entry.providerStatus,
-    operatorVerdict: entry.decision,
-    mutationVerdict: entry.externalRepoMutationVerdict,
-    packetPath: entry.packetPath,
-    viewerPath: entry.viewerPath,
-    summaryPath: summaryForPacket(entry.packetPath),
-    doNotApply: entry.decision === "do_not_apply" || entry.outcome === "do_not_apply",
-    verifiedProposal: entry.outcome === "proposal_ready_verified",
-    setupFailure: entry.outcome.includes("setup_failed")
-  }));
 }
 
 async function repoStatus(repo: AdminConfig["repositories"][number], runs: AdminRunRecord[]): Promise<AdminRepositoryStatus> {
@@ -223,11 +180,14 @@ function buildOverview(runs: AdminRunRecord[], providerCount: number, repository
     byOutcome: countBy(runs.map((run) => run.outcome)),
     byProviderStatus: countBy(runs.map((run) => run.providerStatus)),
     urgentSafetyCounts: {
-      do_not_apply: runs.filter((run) => run.operatorVerdict === "do_not_apply" || run.doNotApply).length,
-      provider_rejected: runs.filter((run) => run.outcome === "provider_rejected" || run.providerStatus === "rejected").length,
-      verification_failed: runs.filter((run) => run.outcome === "verification_failed").length,
-      setup_failed: runs.filter((run) => run.outcome === "setup_failed").length,
-      setup_failed_main_failed: runs.filter((run) => run.outcome === "setup_failed_main_failed").length
+      urgent: runs.filter((run) => run.urgent).length,
+      do_not_apply: runs.filter((run) => run.doNotApply).length,
+      provider_rejected: runs.filter((run) => run.providerRejected).length,
+      verification_failed: runs.filter((run) => run.verificationFailed).length,
+      setup_failed: runs.filter((run) => run.setupFailure).length,
+      setup_failed_main_failed: runs.filter((run) => run.outcome === "setup_failed_main_failed").length,
+      unsafe_mutation: runs.filter((run) => unsafeMutation(run.mutationVerdict)).length,
+      missing_evidence: runs.filter((run) => missingEvidence(run.hasSummary, run.hasViewer, run.packetPath)).length
     }
   };
 }
@@ -253,26 +213,6 @@ function countBy(values: string[]): Record<string, number> {
 
 function latestAlpha(runs: AdminRunRecord[]): string {
   return runs.map((run) => run.alpha).filter((alpha) => alpha.startsWith("ALPHA-")).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).at(-1) ?? "none";
-}
-
-function dedupe(entries: PacketIndexEntry[]): PacketIndexEntry[] {
-  const seen = new Set<string>();
-  return entries.filter((entry) => {
-    const key = `${entry.milestone}\0${entry.scenario}\0${entry.packetPath}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function summaryForPacket(packetPath: string): string {
-  if (!packetPath || packetPath === "unknown") return "unknown";
-  return join(packetPath, "..", "summary.md");
-}
-
-function shortRepo(repo: string): string {
-  if (!repo || repo === "unknown") return "unknown";
-  return basename(repo) || repo;
 }
 
 function latestRepoRun(runs: AdminRunRecord[], ...names: string[]): AdminRunRecord | undefined {

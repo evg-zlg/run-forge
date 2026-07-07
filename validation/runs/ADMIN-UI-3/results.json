@@ -1,0 +1,62 @@
+{
+  "schemaVersion": "admin-ui-3-validation",
+  "ok": true,
+  "branch": "codex/admin-ui-3-run-browser",
+  "commitSha": "c8a18d0",
+  "worktreeDirtyDuringEvidence": true,
+  "configPath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-admin-ui-3-config.json",
+  "adminOutputPath": "/tmp/runforge-admin-ui",
+  "adminIndexPath": "/tmp/runforge-admin-ui/index.html",
+  "adminDataPath": "/tmp/runforge-admin-ui/admin-data.json",
+  "counts": {
+    "runs": 7,
+    "details": 7,
+    "urgent": 7,
+    "artifactsForFirstRun": 32
+  },
+  "filtersTested": {
+    "text": 1,
+    "status": 1,
+    "urgent": 7
+  },
+  "detailTimeline": {
+    "eventsDetailPresent": true,
+    "fallbackDetailPresent": false,
+    "firstDetailGraphNodes": 51
+  },
+  "compare": {
+    "changedCount": 13,
+    "leftId": "QUxQSEEtMjEAY29udHJvbGxlZC1maXh0dXJlLWFjY2VwdGVkAC90bXAvcnVuZm9yZ2UtYWxwaGEyMS1vcGVyYXRvci10cmlhbC9wcm9wb3NhbC1ydW4vcGFja2V0",
+    "rightId": "QUxQSEEtMTAAZmFjdG9yeS1yZWFkbWUtcHJvdmlkZXItcmVqZWN0aW9uLWRyeS1ydW4tYXBwbHkAL3RtcC9ydW5mb3JnZS1hbHBoYTktZXh0ZXJuYWwtZG9nZm9vZC9mYWN0b3J5LXJlYWRtZS1wcm9wb3NhbC9jb2RlL3BhY2tldA"
+  },
+  "artifactRoute": {
+    "url": "http://127.0.0.1:60798/",
+    "allowedStatus": 200,
+    "traversalStatus": 403,
+    "testedPath": "/Users/evgeny/Documents/projects/RunForge-admin-ui-3/validation/runs/ADMIN-UI-2/results.json",
+    "stopped": true
+  },
+  "redaction": {
+    "rawTokenValueRendered": false
+  },
+  "commandsRun": [
+    "pnpm validation:admin-ui-3"
+  ],
+  "postScriptCommandsRun": [
+    { "command": "pnpm check:governance", "status": "passed" },
+    { "command": "pnpm check:structure", "status": "passed", "notes": "Existing warning-only long files remain; no hard failures after splitting admin builder." },
+    { "command": "pnpm typecheck", "status": "passed" },
+    { "command": "pnpm test", "status": "passed", "tests": 152, "files": 17 },
+    { "command": "pnpm exec vitest run tests/unit/admin-ui.test.ts", "status": "passed", "tests": 21, "files": 1 },
+    { "command": "pnpm validation:packets", "status": "passed" },
+    { "command": "pnpm build", "status": "passed" },
+    { "command": "pnpm validation:alpha15", "status": "passed" },
+    { "command": "pnpm validation:alpha16", "status": "passed" },
+    { "command": "pnpm validation:okf", "status": "passed" },
+    { "command": "pnpm demo:admin-ui", "status": "passed", "runs": 7, "indexPath": "/tmp/runforge-admin-ui/index.html" },
+    { "command": "pnpm demo:admin-ui-2", "status": "passed", "runs": 7, "indexPath": "/tmp/runforge-admin-ui/index.html" },
+    { "command": "pnpm demo:admin-ui-3", "status": "passed", "runs": 7, "indexPath": "/tmp/runforge-admin-ui/index.html" },
+    { "command": "pnpm dev admin serve --config /tmp/runforge-admin-ui-config.json --out /tmp/runforge-admin-ui-visual --port 0", "status": "passed", "url": "http://127.0.0.1:58573/", "stopped": true }
+  ],
+  "errors": []
+}
