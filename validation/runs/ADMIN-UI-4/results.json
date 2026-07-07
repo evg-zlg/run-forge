@@ -1,0 +1,158 @@
+{
+  "schemaVersion": "admin-ui-4-validation",
+  "ok": true,
+  "branch": "codex/admin-ui-4-action-previews",
+  "commitSha": "65f8a7d",
+  "worktreeDirtyDuringEvidence": false,
+  "configPath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-admin-ui-4-config.json",
+  "adminOutputPath": "/tmp/runforge-admin-ui",
+  "adminIndexPath": "/tmp/runforge-admin-ui/index.html",
+  "adminDataPath": "/tmp/runforge-admin-ui/admin-data.json",
+  "actionPlanPath": "/tmp/runforge-action-plan.md",
+  "counts": {
+    "runs": 11,
+    "actionPreviews": 38,
+    "blockedActions": 3,
+    "mutatingActions": 5,
+    "blockedRuns": 3,
+    "mutatingRuns": 5,
+    "safeRuns": 11,
+    "cautionRuns": 0,
+    "runsRequiringCaution": 5,
+    "noRecommendedActionRuns": 0
+  },
+  "countsByMode": {
+    "read_only": 22,
+    "dry_run": 8,
+    "mutating": 5,
+    "blocked": 3
+  },
+  "countsBySafety": {
+    "safe": 30,
+    "danger": 5,
+    "blocked": 3
+  },
+  "queue": {
+    "runsWithSafeReadOnlyActions": 11,
+    "runsRequiringCaution": 5,
+    "runsBlockedBySafety": 3,
+    "runsWithVerifiedProposals": 5,
+    "runsWithSetupFailures": 0,
+    "runsWithProviderRejections": 3,
+    "runsWithVerificationFailures": 0,
+    "runsWithMutatingPreviews": 5,
+    "runsWithNoRecommendedAction": 0
+  },
+  "safetyChecks": {
+    "blockedCopyButtons": 0,
+    "mutatingManualOnlyWarnings": true,
+    "renderedHtmlTokenLeak": false,
+    "adminDataTokenLeak": false,
+    "actionPlanTokenLeak": false,
+    "providerCalls": false,
+    "repoMutation": false
+  },
+  "visualReview": {
+    "path": "validation/runs/ADMIN-UI-4/visual-review.md",
+    "servedUrl": "http://127.0.0.1:63039/",
+    "visibleRuns": 11,
+    "renderedActionCards": 37,
+    "blockedActionCards": 3,
+    "mutatingActionCards": 4,
+    "blockedCopyButtons": 0,
+    "tokenLeakDetected": false,
+    "clipboardFallbackNote": "Browser clipboard APIs may be blocked; copy controls fall back to selected feedback."
+  },
+  "commandsRun": [
+    "pnpm check:governance",
+    "pnpm check:structure",
+    "pnpm typecheck",
+    "pnpm test",
+    "pnpm validation:packets",
+    "pnpm build",
+    "pnpm validation:alpha15",
+    "pnpm validation:alpha16",
+    "pnpm validation:okf",
+    "pnpm demo:admin-ui",
+    "pnpm demo:admin-ui-2",
+    "pnpm demo:admin-ui-3",
+    "pnpm demo:admin-ui-4",
+    "pnpm dev admin action-plan --out /tmp/runforge-action-plan.md",
+    "pnpm validation:admin-ui-4"
+  ],
+  "fullValidation": [
+    {
+      "command": "pnpm check:governance",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm check:structure",
+      "status": "passed",
+      "note": "Line-count warnings only."
+    },
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm test",
+      "status": "passed",
+      "testFilesPassed": 18,
+      "testsPassed": 160
+    },
+    {
+      "command": "pnpm validation:packets",
+      "status": "passed",
+      "note": "Unrelated PACKET-VALIDATION timestamp/temp-path churn was inspected and reverted."
+    },
+    {
+      "command": "pnpm build",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm validation:alpha15",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm validation:alpha16",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm validation:okf",
+      "status": "passed",
+      "markdownFiles": 32
+    },
+    {
+      "command": "pnpm demo:admin-ui",
+      "status": "passed",
+      "runs": 11
+    },
+    {
+      "command": "pnpm demo:admin-ui-2",
+      "status": "passed",
+      "runs": 11
+    },
+    {
+      "command": "pnpm demo:admin-ui-3",
+      "status": "passed",
+      "runs": 11
+    },
+    {
+      "command": "pnpm demo:admin-ui-4",
+      "status": "passed",
+      "runs": 11,
+      "actionPlanPath": "/tmp/runforge-action-plan.md"
+    },
+    {
+      "command": "pnpm dev admin action-plan --out /tmp/runforge-action-plan.md",
+      "status": "passed",
+      "runsInspected": 11,
+      "previewOnly": true
+    },
+    {
+      "command": "pnpm validation:admin-ui-4",
+      "status": "passed"
+    }
+  ],
+  "errors": []
+}

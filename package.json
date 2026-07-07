@@ -42,6 +42,7 @@
     "demo:admin-ui": "tsx src/cli/index.ts admin demo",
     "demo:admin-ui-2": "tsx src/cli/index.ts admin demo --out /tmp/runforge-admin-ui",
     "demo:admin-ui-3": "tsx src/cli/index.ts admin demo --out /tmp/runforge-admin-ui",
+    "demo:admin-ui-4": "tsx src/cli/index.ts admin demo --out /tmp/runforge-admin-ui && tsx src/cli/index.ts admin action-plan --config /tmp/runforge-admin-ui-config.json --out /tmp/runforge-action-plan.md",
     "demo:knowledge-lifecycle": "tsx src/cli/index.ts knowledge lifecycle-report --runs ./validation/runs --out /tmp/runforge-demo-knowledge-lifecycle",
     "demo:operator-accepted-patch": "tsx scripts/alpha21-validation.ts",
     "demo:real-repo-operator-trial": "tsx scripts/alpha22-validation.ts",
@@ -80,6 +81,7 @@
     "validation:alpha23": "tsx scripts/alpha23-validation.ts",
     "validation:admin-ui-2": "tsx scripts/admin-ui-2-validation.ts",
     "validation:admin-ui-3": "tsx scripts/admin-ui-3-validation.ts",
+    "validation:admin-ui-4": "tsx scripts/admin-ui-4-validation.ts",
     "validation:okf": "tsx scripts/okf-validation.ts"
   },
   "keywords": [

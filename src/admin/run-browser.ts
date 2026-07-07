@@ -44,6 +44,18 @@ export interface AdminRunRecordLike {
   hasViewer: boolean;
   hasSummary: boolean;
   urgent: boolean;
+  actionSummary?: {
+    count: number;
+    blockedCount: number;
+    mutatingCount: number;
+    highestSafety: string;
+    recommendedTitle: string;
+    hasRecommendedAction: boolean;
+    hasSafeAction: boolean;
+    hasCautionAction: boolean;
+    hasBlockedAction: boolean;
+    hasMutatingPreview: boolean;
+  };
 }
 
 export interface RunBrowserFilters {
@@ -64,6 +76,11 @@ export interface RunBrowserFilters {
   hasViewer?: boolean;
   hasSummary?: boolean;
   urgentOnly?: boolean;
+  hasSafeAction?: boolean;
+  hasCautionAction?: boolean;
+  hasBlockedAction?: boolean;
+  hasMutatingPreview?: boolean;
+  hasNoRecommendedAction?: boolean;
 }
 
 export type RunSort = "newest" | "outcome" | "repo" | "alpha" | "provider";
@@ -136,7 +153,12 @@ export function filterRuns<T extends AdminRunRecordLike>(runs: T[], filters: Run
       && (!filters.hasVerifiedProposal || run.verifiedProposal)
       && (!filters.hasViewer || run.hasViewer)
       && (!filters.hasSummary || run.hasSummary)
-      && (!filters.urgentOnly || run.urgent);
+      && (!filters.urgentOnly || run.urgent)
+      && (!filters.hasSafeAction || Boolean(run.actionSummary?.hasSafeAction))
+      && (!filters.hasCautionAction || Boolean(run.actionSummary?.hasCautionAction))
+      && (!filters.hasBlockedAction || Boolean(run.actionSummary?.hasBlockedAction))
+      && (!filters.hasMutatingPreview || Boolean(run.actionSummary?.hasMutatingPreview))
+      && (!filters.hasNoRecommendedAction || run.actionSummary?.hasRecommendedAction === false);
   });
 }
 
