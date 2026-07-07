@@ -40,6 +40,7 @@
     "demo:skills-inventory": "tsx src/cli/index.ts skills inventory --out /tmp/runforge-demo-skills",
     "demo:skills-curator-report": "tsx src/cli/index.ts skills curator-report --runs ./validation/runs --out /tmp/runforge-demo-skill-curator",
     "demo:admin-ui": "tsx src/cli/index.ts admin demo",
+    "demo:admin-ui-2": "tsx src/cli/index.ts admin demo --out /tmp/runforge-admin-ui",
     "demo:knowledge-lifecycle": "tsx src/cli/index.ts knowledge lifecycle-report --runs ./validation/runs --out /tmp/runforge-demo-knowledge-lifecycle",
     "demo:operator-accepted-patch": "tsx scripts/alpha21-validation.ts",
     "demo:external-provider-proposal": "tsx scripts/alpha6-provider-demo.ts",
@@ -72,6 +73,7 @@
     "validation:alpha19": "tsx scripts/alpha19-validation.ts",
     "validation:alpha20": "tsx scripts/alpha20-validation.ts",
     "validation:alpha21": "tsx scripts/alpha21-validation.ts",
+    "validation:admin-ui-2": "tsx scripts/admin-ui-2-validation.ts",
     "validation:okf": "tsx scripts/okf-validation.ts"
   },
   "keywords": [

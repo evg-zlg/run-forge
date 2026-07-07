@@ -1,9 +1,9 @@
-import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
+import { chmod, mkdir, open, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { redactJson } from "./redaction.js";
 
-export type AdminProviderType = "openrouter" | "cli" | "future";
+export type AdminProviderType = "openrouter" | "cli" | "future" | string;
 
 export interface AdminRepositoryConfig {
   id: string;
@@ -22,7 +22,7 @@ export interface AdminProviderConfig {
 }
 
 export interface AdminConfig {
-  schemaVersion: "admin-alpha";
+  schemaVersion: string;
   repositories: AdminRepositoryConfig[];
   providers: AdminProviderConfig[];
   runs: {
@@ -85,13 +85,53 @@ export async function loadAdminConfig(path = defaultAdminConfigPath()): Promise<
 
 export async function writeAdminConfig(path: string, config: AdminConfig): Promise<void> {
   const configPath = resolve(path);
+  const parent = dirname(configPath);
+  const tempPath = join(parent, `.${basename(configPath)}.${process.pid}.${Date.now()}.tmp`);
   await mkdir(dirname(configPath), { recursive: true });
-  await writeFile(configPath, `${JSON.stringify(redactJson(config), null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  await writeFile(tempPath, `${JSON.stringify(redactJson(config), null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
+  try {
+    const handle = await open(tempPath, "r");
+    try {
+      await handle.sync();
+    } finally {
+      await handle.close();
+    }
+  } catch {
+    // Some filesystems do not support fsync in the current execution environment.
+  }
+  await rename(tempPath, configPath);
   try {
     await chmod(configPath, 0o600);
   } catch {
     // Some filesystems ignore POSIX permissions. The config still contains no raw token values.
   }
+  try {
+    const parentHandle = await open(parent, "r");
+    try {
+      await parentHandle.sync();
+    } finally {
+      await parentHandle.close();
+    }
+  } catch {
+    // Directory fsync is best effort for local atomic write durability.
+  }
+}
+
+export async function backupAdminConfig(path: string): Promise<string | null> {
+  const configPath = resolve(path);
+  try {
+    await stat(configPath);
+  } catch {
+    return null;
+  }
+  const backupPath = `${configPath}.bak`;
+  await writeFile(backupPath, await readFile(configPath));
+  try {
+    await chmod(backupPath, 0o600);
+  } catch {
+    // Best effort only.
+  }
+  return backupPath;
 }
 
 export function upsertRepository(config: AdminConfig, repo: AdminRepositoryConfig): AdminConfig {
@@ -139,7 +179,7 @@ function normalizeRepository(value: unknown): AdminRepositoryConfig | null {
 
 function normalizeProvider(value: unknown): AdminProviderConfig | null {
   if (!isRecord(value) || typeof value.id !== "string") return null;
-  const type = value.type === "openrouter" || value.type === "cli" || value.type === "future" ? value.type : "future";
+  const type = typeof value.type === "string" && value.type ? value.type : "future";
   return {
     id: value.id,
     type,

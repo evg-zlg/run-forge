@@ -1,0 +1,100 @@
+{
+  "schemaVersion": "admin-ui-2-validation",
+  "ok": true,
+  "branch": "codex/admin-ui-2-settings",
+  "commitSha": "b3f9079",
+  "worktreeDirtyDuringEvidence": false,
+  "configPath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-admin-ui-2-tnrSCA/config.json",
+  "tempSaveConfigPath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-admin-ui-2-tnrSCA/save-smoke-config.json",
+  "adminOutputPath": "/tmp/runforge-admin-ui",
+  "adminIndexPath": "/tmp/runforge-admin-ui/index.html",
+  "adminDataPath": "/tmp/runforge-admin-ui/admin-data.json",
+  "counts": {
+    "repositories": 2,
+    "providers": 2,
+    "runRoots": 2
+  },
+  "validation": {
+    "ok": true,
+    "diagnostics": [
+      {
+        "level": "info",
+        "code": "repository_path_exists",
+        "path": "repositories.0.path"
+      },
+      {
+        "level": "warning",
+        "code": "repository_path_missing",
+        "path": "repositories.1.path"
+      },
+      {
+        "level": "info",
+        "code": "run_root_exists",
+        "path": "runs.defaultRoots.0"
+      },
+      {
+        "level": "info",
+        "code": "run_root_exists",
+        "path": "runs.defaultRoots.1"
+      }
+    ]
+  },
+  "redaction": {
+    "rawTokenRejected": true,
+    "diffRedacted": true
+  },
+  "diffPreview": {
+    "summary": [
+      "Repository added: runforge ({\"id\":\"runforge\",\"name\":\"RunForge\",\"path\":\"/Users/evgeny/Documents/projects/RunForge-admin-ui-2\",\"tags\":[\"self\",\"admin-ui-2\"]})",
+      "Repository added: missing-demo ({\"id\":\"missing-demo\",\"name\":\"Missing demo repo\",\"path\":\"/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-admin-ui-2-tnrSCA/missing-repo\",\"tags\":[\"missing\",\"demo\"]})",
+      "Provider changed: codex-cli",
+      "Run root added: /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-admin-ui-2-tnrSCA/runs"
+    ]
+  },
+  "saveBehavior": {
+    "saved": true,
+    "configPath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-admin-ui-2-tnrSCA/save-smoke-config.json",
+    "backupPath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-admin-ui-2-tnrSCA/save-smoke-config.json.bak"
+  },
+  "serverSmoke": {
+    "url": "http://127.0.0.1:57187/",
+    "status": 200,
+    "saved": true,
+    "localOnly": true,
+    "providerCalls": false,
+    "repoMutation": false
+  },
+  "commandsRun": [
+    "pnpm validation:admin-ui-2",
+    "pnpm check:governance",
+    "pnpm check:structure",
+    "pnpm typecheck",
+    "pnpm test",
+    "pnpm exec vitest run tests/unit/admin-ui.test.ts",
+    "pnpm validation:packets",
+    "pnpm build",
+    "pnpm validation:alpha15",
+    "pnpm validation:alpha16",
+    "pnpm validation:okf",
+    "pnpm demo:admin-ui",
+    "pnpm demo:admin-ui-2",
+    "pnpm dev admin serve --config /tmp/runforge-admin-ui-config.json --out /tmp/runforge-admin-ui-serve-smoke --port 0",
+    "curl -fsS http://127.0.0.1:55655/api/admin/status"
+  ],
+  "validationCommandResults": [
+    { "command": "pnpm check:governance", "status": "passed", "timing": "before rebase" },
+    { "command": "pnpm check:structure", "status": "passed", "timing": "before and after rebase", "notes": "Warnings included src/cli/commands/admin.ts and existing long files; no hard failures." },
+    { "command": "pnpm typecheck", "status": "passed", "timing": "before and after rebase" },
+    { "command": "pnpm test", "status": "passed", "timing": "before rebase", "testFiles": 17, "tests": 147 },
+    { "command": "pnpm exec vitest run tests/unit/admin-ui.test.ts", "status": "passed", "timing": "after rebase", "tests": 16 },
+    { "command": "pnpm validation:packets", "status": "passed", "timing": "before rebase", "notes": "Unrelated generated PACKET-VALIDATION timestamp/temp-path churn was reverted." },
+    { "command": "pnpm build", "status": "passed", "timing": "before rebase" },
+    { "command": "pnpm validation:alpha15", "status": "passed", "timing": "before rebase" },
+    { "command": "pnpm validation:alpha16", "status": "passed", "timing": "before rebase" },
+    { "command": "pnpm validation:okf", "status": "passed", "timing": "before evidence update" },
+    { "command": "pnpm demo:admin-ui", "status": "passed", "indexPath": "/tmp/runforge-admin-ui/index.html", "dataPath": "/tmp/runforge-admin-ui/admin-data.json" },
+    { "command": "pnpm demo:admin-ui-2", "status": "passed", "indexPath": "/tmp/runforge-admin-ui/index.html", "dataPath": "/tmp/runforge-admin-ui/admin-data.json" },
+    { "command": "pnpm dev admin serve --config /tmp/runforge-admin-ui-config.json --out /tmp/runforge-admin-ui-serve-smoke --port 0", "status": "passed", "url": "http://127.0.0.1:55655/", "statusEndpoint": { "ok": true, "localOnly": true, "providerCalls": false, "repoMutation": false }, "stopped": true }
+  ],
+  "errors": []
+}
