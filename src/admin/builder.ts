@@ -2,6 +2,14 @@ import { execFile } from "node:child_process";
 import { mkdir, stat, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { promisify } from "node:util";
+import {
+  buildActionPreviews,
+  buildActionQueueSummary,
+  summarizeActionPreviews,
+  type AdminActionPreview,
+  type AdminActionQueueSummary,
+  type AdminActionRunSummary
+} from "./action-previews.js";
 import { type AdminConfig, loadAdminConfig } from "./config.js";
 import { redactJson, redactedRef } from "./redaction.js";
 import { renderAdminHtml } from "./renderer.js";
@@ -36,9 +44,12 @@ export interface AdminData {
   overview: AdminOverview;
   repositories: AdminRepositoryStatus[];
   providers: AdminProviderStatus[];
-  runs: AdminRunRecord[];
+  runs: Array<AdminRunRecord & { actionSummary?: AdminActionRunSummary }>;
   runDetails: AdminRunDetail[];
   artifactLinks: Record<string, AdminArtifactLink[]>;
+  actionPreviews: Record<string, AdminActionPreview[]>;
+  actionSummaries: Record<string, AdminActionRunSummary>;
+  actionQueue: AdminActionQueueSummary;
   settings: {
     defaultRoots: string[];
     redactionPolicy: string;
@@ -55,6 +66,7 @@ export interface AdminOverview {
   byOutcome: Record<string, number>;
   byProviderStatus: Record<string, number>;
   urgentSafetyCounts: Record<string, number>;
+  actionQueue: AdminActionQueueSummary;
 }
 
 export interface AdminRepositoryStatus {
@@ -79,14 +91,27 @@ export interface AdminProviderStatus {
 }
 
 export async function buildAdminUi(options: AdminBuildOptions): Promise<AdminBuildResult> {
-  const repoRoot = resolve(options.repoRoot ?? process.cwd());
+  const data = await collectAdminData(options);
   const out = resolve(options.out);
+  await mkdir(out, { recursive: true });
+  const dataPath = join(out, "admin-data.json");
+  const indexPath = join(out, "index.html");
+  await writeFile(dataPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
+  await writeFile(indexPath, renderAdminHtml(data), "utf8");
+  return { indexPath, dataPath, data };
+}
+
+export async function collectAdminData(options: Omit<AdminBuildOptions, "out"> & { out?: string }): Promise<AdminData> {
+  const repoRoot = resolve(options.repoRoot ?? process.cwd());
   const loadedConfig = await loadAdminConfig(options.config);
   const runs = await loadRuns(repoRoot, loadedConfig.config);
   const repositories = await Promise.all(loadedConfig.config.repositories.map((repo) => repoStatus(repo, runs)));
   const providers = loadedConfig.config.providers.map(providerStatus);
   const runDetails = await loadDetails(runs, options.maxDetails ?? 40);
   const detailsByPacket = new Map(runDetails.map((detail) => [detail.packetPath, detail]));
+  const actionPreviews = Object.fromEntries(runs.map((run) => [run.id, buildActionPreviews(run, detailsByPacket.get(run.packetPath))]));
+  const actionSummaries = Object.fromEntries(Object.entries(actionPreviews).map(([id, actions]) => [id, summarizeActionPreviews(actions)]));
+  const actionQueue = buildActionQueueSummary(runs, actionSummaries);
   const allowedArtifactRoots = loadedConfig.config.runs.defaultRoots.map((root) => resolve(repoRoot, root));
   const data: AdminData = redactJson({
     schemaVersion: "runforge-admin-alpha",
@@ -97,12 +122,15 @@ export async function buildAdminUi(options: AdminBuildOptions): Promise<AdminBui
     },
     configPath: loadedConfig.path,
     configExists: loadedConfig.exists,
-    overview: buildOverview(runs, providers.length, repositories.length),
+    overview: buildOverview(runs, providers.length, repositories.length, actionQueue),
     repositories,
     providers,
-    runs,
+    runs: runs.map((run) => ({ ...run, actionSummary: actionSummaries[run.id] })),
     runDetails,
     artifactLinks: Object.fromEntries(runs.map((run) => [run.id, normalizeArtifactLinks(run, detailsByPacket.get(run.packetPath), allowedArtifactRoots)])),
+    actionPreviews,
+    actionSummaries,
+    actionQueue,
     settings: {
       defaultRoots: loadedConfig.config.runs.defaultRoots,
       redactionPolicy: "API keys, bearer tokens, OpenRouter keys, .env-style secrets, and private keys are redacted before rendering.",
@@ -110,13 +138,7 @@ export async function buildAdminUi(options: AdminBuildOptions): Promise<AdminBui
       serverWritable: false
     }
   } satisfies AdminData);
-
-  await mkdir(out, { recursive: true });
-  const dataPath = join(out, "admin-data.json");
-  const indexPath = join(out, "index.html");
-  await writeFile(dataPath, `${JSON.stringify(data, null, 2)}\n`, "utf8");
-  await writeFile(indexPath, renderAdminHtml(data), "utf8");
-  return { indexPath, dataPath, data };
+  return data;
 }
 
 async function repoStatus(repo: AdminConfig["repositories"][number], runs: AdminRunRecord[]): Promise<AdminRepositoryStatus> {
@@ -171,7 +193,7 @@ function providerStatus(provider: AdminConfig["providers"][number]): AdminProvid
   };
 }
 
-function buildOverview(runs: AdminRunRecord[], providerCount: number, repositoryCount: number): AdminOverview {
+function buildOverview(runs: AdminRunRecord[], providerCount: number, repositoryCount: number, actionQueue: AdminActionQueueSummary): AdminOverview {
   return {
     repositoryCount,
     providerCount,
@@ -188,7 +210,8 @@ function buildOverview(runs: AdminRunRecord[], providerCount: number, repository
       setup_failed_main_failed: runs.filter((run) => run.outcome === "setup_failed_main_failed").length,
       unsafe_mutation: runs.filter((run) => unsafeMutation(run.mutationVerdict)).length,
       missing_evidence: runs.filter((run) => missingEvidence(run.hasSummary, run.hasViewer, run.packetPath)).length
-    }
+    },
+    actionQueue
   };
 }
 

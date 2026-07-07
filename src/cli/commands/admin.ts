@@ -13,11 +13,13 @@ import {
 } from "../../admin/config.js";
 import { redactJson } from "../../admin/redaction.js";
 import { startAdminServer } from "../../admin/server.js";
+import { actionPlanCommand } from "./admin-action-plan.js";
 
 export function adminCommand(): Command {
   const admin = new Command("admin").description("Build and configure the local RunForge Admin UI.");
   admin.addCommand(buildCommand());
   admin.addCommand(demoCommand());
+  admin.addCommand(actionPlanCommand());
   admin.addCommand(serveCommand());
   admin.addCommand(configCommand());
   admin.addCommand(repoCommand());

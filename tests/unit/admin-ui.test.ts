@@ -2,12 +2,15 @@ import { mkdir, mkdtemp, readFile, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { renderActionPlanReport } from "../../src/admin/action-plan-report.js";
+import { buildActionPreviews } from "../../src/admin/action-previews.js";
 import { buildAdminUi } from "../../src/admin/builder.js";
 import { diffAdminConfigs, saveAdminConfigDraft, validateAdminConfigDraft } from "../../src/admin/config-edit.js";
 import { loadAdminConfig, writeAdminConfig, type AdminConfig } from "../../src/admin/config.js";
 import { redactSecrets } from "../../src/admin/redaction.js";
 import { artifactPathAllowed, compareRuns, filterRuns, normalizeArtifactLinks, sortRuns } from "../../src/admin/run-browser.js";
 import { buildRunDetail } from "../../src/admin/run-graph.js";
+import type { AdminRunRecord } from "../../src/admin/run-records.js";
 import { startAdminServer } from "../../src/admin/server.js";
 
 const originalOpenRouter = process.env.OPENROUTER_API_KEY;
@@ -90,8 +93,85 @@ describe("admin UI alpha", () => {
     });
     expect(result.data.overview.byOutcome.provider_rejected).toBe(1);
     expect(result.data.overview.urgentSafetyCounts.provider_rejected).toBe(1);
+    expect(result.data.actionQueue.runsBlockedBySafety).toBeGreaterThanOrEqual(1);
+    expect(result.data.runs.find((run) => run.scenario === "reject")?.actionSummary?.hasBlockedAction).toBe(true);
+    expect(result.data.runs.find((run) => run.scenario === "success")?.actionSummary?.hasMutatingPreview).toBe(true);
     expect(result.data.runDetails.find((detail) => detail.packetPath.endsWith("reject/packet"))?.graph.map((node) => node.label)).toEqual(["task_received", "provider_patch_validator", "packet_writer"]);
     expect(result.data.artifactLinks[result.data.runs[0]!.id]?.some((link) => link.label === "Events")).toBe(true);
+  });
+
+  it("generates safe action previews without executable blocked CTAs", async () => {
+    const root = await createFixtureRoot();
+    const configPath = join(root, "config.json");
+    await writeAdminConfig(configPath, config(root));
+
+    const result = await buildAdminUi({ repoRoot: root, config: configPath, out: join(root, "admin") });
+    const reject = result.data.runs.find((run) => run.scenario === "reject")!;
+    const success = result.data.runs.find((run) => run.scenario === "success")!;
+    const rejectActions = result.data.actionPreviews[reject.id] ?? [];
+    const successActions = result.data.actionPreviews[success.id] ?? [];
+
+    expect(rejectActions.some((action) => action.mode === "blocked" && action.blockers?.some((blocker) => blocker.includes("Provider audit rejected")))).toBe(true);
+    expect(rejectActions.find((action) => action.category === "apply")?.command).toBeUndefined();
+    expect(successActions.some((action) => action.mode === "mutating" && action.warnings?.some((warning) => warning.includes("Admin UI never executes")))).toBe(true);
+    expect(successActions.map((action) => action.command ?? "").join("\n")).not.toContain("server-secret-should-not-render");
+  });
+
+  it("blocks apply-like previews for verification failure and do_not_apply runs", () => {
+    const verificationFailed = buildActionPreviews(runRecord({
+      id: "verification-failed",
+      verificationFailed: true,
+      verifiedProposal: true,
+      outcome: "verification_failed",
+      safetyFlags: ["verification_failed"]
+    }));
+    const doNotApply = buildActionPreviews(runRecord({
+      id: "do-not-apply",
+      doNotApply: true,
+      verifiedProposal: true,
+      operatorVerdict: "do_not_apply",
+      safetyFlags: ["do_not_apply"]
+    }));
+
+    expect(verificationFailed.some((action) => action.id.endsWith(":verification-failed") && action.mode === "blocked")).toBe(true);
+    expect(verificationFailed.some((action) => action.mode === "mutating")).toBe(false);
+    expect(doNotApply.some((action) => action.id.endsWith(":do-not-apply") && action.mode === "blocked")).toBe(true);
+    expect(doNotApply.some((action) => action.mode === "mutating")).toBe(false);
+  });
+
+  it("does not invent commands when packet metadata is unknown", () => {
+    const actions = buildActionPreviews(runRecord({
+      id: "unknown-metadata",
+      packetPath: "unknown",
+      viewerPath: "unknown",
+      summaryPath: "unknown",
+      eventsPath: "unknown",
+      metricsPath: "unknown",
+      safetyReportPath: "unknown",
+      providerAuditPath: "unknown"
+    }));
+
+    expect(actions.find((action) => action.id.endsWith(":inspect"))?.command).toBeUndefined();
+    expect(actions.every((action) => !action.command?.includes("unknown"))).toBe(true);
+  });
+
+  it("renders a redacted local action plan report", async () => {
+    const root = await createFixtureRoot();
+    const configPath = join(root, "config.json");
+    const rawKey = `sk-${"or"}-v1-report-secret-should-redact`;
+    await writeAdminConfig(configPath, {
+      ...config(root),
+      providers: [{ id: "openrouter", type: "openrouter", enabled: false, apiKeyRef: rawKey }]
+    });
+
+    const result = await buildAdminUi({ repoRoot: root, config: configPath, out: join(root, "admin") });
+    const report = renderActionPlanReport(result.data, (await loadAdminConfig(configPath)).config);
+
+    expect(report).toContain("RunForge Admin Action Plan");
+    expect(report).toContain("Runs inspected: 2");
+    expect(report).toContain("Provider references");
+    expect(report).not.toContain(rawKey);
+    expect(report).toContain("[REDACTED_OPENROUTER_KEY]");
   });
 
   it("builds run detail graph from events.jsonl", async () => {
@@ -126,6 +206,8 @@ describe("admin UI alpha", () => {
     expect(filterRuns(result.data.runs, { hasProposal: true })).toHaveLength(2);
     expect(filterRuns(result.data.runs, { hasVerifiedProposal: true })).toHaveLength(1);
     expect(filterRuns(result.data.runs, { hasViewer: true, hasSummary: true })).toHaveLength(0);
+    expect(filterRuns(result.data.runs, { hasBlockedAction: true })).toHaveLength(1);
+    expect(filterRuns(result.data.runs, { hasMutatingPreview: true })).toHaveLength(1);
     expect(sortRuns(result.data.runs, "newest")[0]?.updatedAt >= sortRuns(result.data.runs, "newest")[1]!.updatedAt).toBe(true);
   });
 
@@ -156,6 +238,9 @@ describe("admin UI alpha", () => {
     expect(html).toContain("do_not_apply");
     expect(html).toContain("provider_rejected");
     expect(html).toContain("Compare Runs");
+    expect(html).toContain("Action Previews");
+    expect(html).toContain("Operator Queue");
+    expect(html).toContain("Manual terminal only");
     expect(html).not.toContain("validation-secret-should-redact");
     expect(html).not.toContain("server-secret-should-not-render");
   });
@@ -441,4 +526,45 @@ function config(root: string): AdminConfig {
       defaultRoots: ["validation/runs"]
     }
   };
+}
+
+function runRecord(overrides: Partial<AdminRunRecord> = {}): AdminRunRecord {
+  const base: AdminRunRecord = {
+    id: "run",
+    alpha: "ALPHA-UI",
+    repo: "fixture-repo",
+    repoPath: "/tmp/runforge-admin-fixture/fixture-repo",
+    scenario: "success",
+    packetType: "external_code_proposal",
+    outcome: "proposal_ready_verified",
+    providerStatus: "mocked",
+    operatorVerdict: "ready",
+    mutationVerdict: "unchanged",
+    setupStatus: "ok",
+    proposalStatus: "proposal_ready_verified",
+    safetyFlags: [],
+    createdAt: "2026-07-07T00:00:00.000Z",
+    updatedAt: "2026-07-07T00:00:00.000Z",
+    packetPath: "/tmp/runforge-admin-fixture/validation/runs/ALPHA-UI/success/packet",
+    resultsPath: "/tmp/runforge-admin-fixture/validation/runs/ALPHA-UI/results.json",
+    viewerPath: "unknown",
+    summaryPath: "/tmp/runforge-admin-fixture/validation/runs/ALPHA-UI/summary.md",
+    dashboardPath: "unknown",
+    eventsPath: "/tmp/runforge-admin-fixture/validation/runs/ALPHA-UI/success/packet/events.jsonl",
+    metricsPath: "/tmp/runforge-admin-fixture/validation/runs/ALPHA-UI/success/packet/metrics.json",
+    safetyReportPath: "/tmp/runforge-admin-fixture/validation/runs/ALPHA-UI/success/packet/safety-report.json",
+    providerAuditPath: "/tmp/runforge-admin-fixture/validation/runs/ALPHA-UI/success/packet/provider-safety-report.json",
+    artifactCount: 0,
+    commandCount: 0,
+    doNotApply: false,
+    providerRejected: false,
+    verificationFailed: false,
+    verifiedProposal: true,
+    hasProposal: true,
+    setupFailure: false,
+    hasViewer: false,
+    hasSummary: true,
+    urgent: false
+  };
+  return { ...base, ...overrides };
 }
