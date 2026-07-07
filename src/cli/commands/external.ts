@@ -7,10 +7,11 @@ import { renderExternalCodeProposalCliSummary, runExternalCodeProposal } from ".
 import { recordExternalPatchDecision, renderExternalPatchTrialSummary, renderExternalRecordDecisionSummary, runExternalPatchTrial } from "../../run/external-operator-patch-trial.js";
 import { generateOperatorHandoffPacket, renderOperatorHandoffSummary } from "../../run/external-operator-handoff.js";
 import { renderOperatorHandoffReplaySummary, replayOperatorHandoffPacket } from "../../run/external-operator-handoff-replay.js";
+import { handoffArchiveCommand, handoffArchiveValidateCommand, handoffSearchCommand } from "./external-handoff-archive.js";
 
 export function externalCommand(): Command {
   const external = new Command("external").description("Run safe packet-producing workflows for explicitly declared external local repositories.");
-  for (const command of [checkCommand(), failureTriageCommand(), proposalReadinessCommand(), codeProposalCommand(), patchTrialCommand(), handoffPacketCommand(), handoffReplayCommand(), recordDecisionCommand(), docsProposalCommand()]) external.addCommand(command);
+  for (const command of [checkCommand(), failureTriageCommand(), proposalReadinessCommand(), codeProposalCommand(), patchTrialCommand(), handoffPacketCommand(), handoffReplayCommand(), handoffArchiveCommand(), handoffSearchCommand(), handoffArchiveValidateCommand(), recordDecisionCommand(), docsProposalCommand()]) external.addCommand(command);
   return external;
 }
 
@@ -56,6 +57,7 @@ function handoffReplayCommand(): Command {
       }
     });
 }
+
 
 function checkCommand(): Command {
   return new Command("check")

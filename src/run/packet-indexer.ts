@@ -30,6 +30,7 @@ export interface PacketIndexEntry {
   handoffAuditStatus: string;
   handoffAuditReportPath: string;
   handoffAuditResultPath: string;
+  handoffArchivePath: string; handoffArchiveRecordCount: number;
   originalRepoMutated: boolean | null;
   notes: string;
 }
@@ -59,6 +60,7 @@ interface DogfoodIndexEntry {
   handoffAuditStatus?: string;
   handoffAuditReportPath?: string;
   handoffAuditResultPath?: string;
+  handoffArchivePath?: string; handoffArchiveRecordCount?: number;
   originalRepoMutated?: boolean | null;
 }
 
@@ -84,6 +86,7 @@ interface ResultsAttempt {
   handoffAuditStatus?: string;
   handoffAuditReport?: string;
   handoffAuditResult?: string;
+  handoffArchive?: string; handoffArchiveRecordCount?: number;
 }
 
 interface ResultsJson { externalRepo?: RepoState; originalRepo?: RepoState; attempts?: ResultsAttempt[]; }
@@ -190,6 +193,8 @@ async function entriesFromResults(root: string): Promise<PacketIndexEntry[]> {
         handoffAuditStatus: attempt.handoffAuditStatus,
         handoffAuditReportPath: attempt.handoffAuditReport,
         handoffAuditResultPath: attempt.handoffAuditResult,
+        handoffArchivePath: attempt.handoffArchive,
+        handoffArchiveRecordCount: attempt.handoffArchiveRecordCount,
         originalRepoMutated: attempt.originalRepoMutated,
         notes: attempt.manualApply === false ? "Patch was not manually applied to the external repo." : undefined
       }));
@@ -274,6 +279,7 @@ function normalizeEntry(milestone: string, scenario: string, input: Partial<Pack
     handoffAuditStatus: input.handoffAuditStatus ?? "unknown",
     handoffAuditReportPath: input.handoffAuditReportPath ?? "unknown",
     handoffAuditResultPath: input.handoffAuditResultPath ?? "unknown",
+    handoffArchivePath: input.handoffArchivePath ?? "unknown", handoffArchiveRecordCount: input.handoffArchiveRecordCount ?? 0,
     originalRepoMutated: input.originalRepoMutated ?? null,
     notes: input.notes ?? ""
   };

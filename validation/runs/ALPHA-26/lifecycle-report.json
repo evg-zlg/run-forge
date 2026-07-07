@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "alpha-26-compact-lifecycle-report",
+  "generatedAt": "2026-07-07T12:17:21.805Z",
+  "validation": {
+    "ok": true,
+    "errors": []
+  },
+  "sourceCounts": {
+    "okfFiles": 33,
+    "skills": 0,
+    "validationRuns": 44,
+    "evidenceFiles": 71
+  },
+  "lifecycleStatusCounts": {
+    "candidate": 36,
+    "active": 25,
+    "needs_review": 0,
+    "stale": 16,
+    "duplicate": 0,
+    "missing_evidence": 0,
+    "unsafe": 0,
+    "retired": 0
+  },
+  "operatorTrialCounts": {
+    "accepted": 3,
+    "rejected": 2,
+    "missingDecision": 5,
+    "unsafeMutation": 0
+  },
+  "handoffPacketCounts": {
+    "generated": 1,
+    "missingReadme": 0,
+    "unsafe": 0,
+    "audited": 2,
+    "auditPassed": 1,
+    "auditFailed": 1,
+    "unsafeRejected": 1
+  },
+  "handoffArchiveCounts": {
+    "records": 9,
+    "byRepo": {
+      "factory": 7,
+      "smartsql": 1,
+      "source": 1
+    },
+    "byDecision": {
+      "accepted": 4,
+      "handoff_archive_generated": 1,
+      "handoff_generated": 1,
+      "rejected": 3
+    },
+    "byAuditStatus": {
+      "failed": 1,
+      "missing": 6,
+      "passed": 2
+    },
+    "bySafetyStatus": {
+      "safe": 4,
+      "unknown": 4,
+      "unsafe": 1
+    },
+    "byValidationAfter": {
+      "failed": 1,
+      "passed": 3,
+      "pending_operator": 1,
+      "skipped": 1,
+      "unknown": 3
+    }
+  },
+  "handoffArchiveRecommendations": [
+    "Candidate OKF lesson: accepted audited handoff flow works for repo factory.",
+    "Candidate archive lesson: preserve handoff/audit evidence for repo factory.",
+    "Candidate archive lesson: preserve handoff/audit evidence for repo source.",
+    "Candidate lesson: declined or failed handoff for repo factory; review validation and decision rules.",
+    "Candidate lesson: declined or failed handoff for repo smartsql; review validation and decision rules.",
+    "Candidate safety lesson: rejected unsafe handoff for repo factory; review handoff proposal autoAppliedByRunForge=true."
+  ],
+  "visibility": {
+    "packetIndexHasArchive": true,
+    "lifecycleHasArchiveCounts": true
+  },
+  "milestoneComparison": [
+    "Alpha-24 generates a portable real-operator handoff packet with manual apply, validation, rollback, decisions, and evidence links.",
+    "Alpha-25 replays and audits operator handoff packets in disposable worktrees, including unsafe-packet rejection evidence.",
+    "Alpha-26 archives and searches handoff/audit evidence with lifecycle recommendations."
+  ],
+  "findings": [
+    "16 lifecycle items reference older milestones and should be reviewed."
+  ],
+  "recommendations": [
+    "Keep packets and dashboard/index records as runtime truth; use OKF as portable memory.",
+    "Review candidate knowledge and skills before promotion.",
+    "Next milestone: replay and audit existing operator handoff packets in disposable worktrees."
+  ],
+  "finalVerdict": "passed"
+}
