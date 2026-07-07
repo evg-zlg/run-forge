@@ -1,0 +1,125 @@
+{
+  "schemaVersion": "alpha-25-handoff-replay-audit",
+  "generatedAt": "2026-07-07T11:51:38.092Z",
+  "sourceHandoffPath": "/tmp/runforge-alpha25-handoff-replay/factory/handoff",
+  "originalRepo": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "beforeHead": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "beforeStatus": "",
+    "afterHead": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "afterStatus": "",
+    "mutationVerdict": "unchanged"
+  },
+  "replay": {
+    "worktreePath": "/tmp/runforge-alpha25-handoff-replay/factory/audit/replay-worktree",
+    "auditDir": "/tmp/runforge-alpha25-handoff-replay/factory/audit",
+    "auditReport": "/tmp/runforge-alpha25-handoff-replay/factory/audit/audit-report.md",
+    "auditResult": "/tmp/runforge-alpha25-handoff-replay/factory/audit/audit-result.json",
+    "status": "passed",
+    "patchApplied": true,
+    "validationStatus": "passed"
+  },
+  "unsafeReplay": {
+    "handoffDir": "/tmp/runforge-alpha25-handoff-replay/factory/unsafe-handoff",
+    "auditDir": "/tmp/runforge-alpha25-handoff-replay/factory/unsafe-audit",
+    "status": "failed",
+    "findings": [
+      "handoff packet missing README.md",
+      "handoff.json proposal.autoAppliedByRunForge must be false",
+      "validation command attempts forbidden push operation"
+    ]
+  },
+  "attempts": [
+    {
+      "id": "factory-handoff-replay-audit",
+      "repo": "/Users/evgeny/Documents/projects/factory",
+      "decision": "handoff_audit_passed",
+      "packet": "/tmp/runforge-alpha25-handoff-replay/factory/proposal-run/packet",
+      "viewer": "unknown",
+      "outcome": "handoff_replay_audit_passed",
+      "providerStatus": "disabled",
+      "filesChanged": [
+        "runforge-alpha22/math.cjs"
+      ],
+      "manualApply": false,
+      "appliedTo": "disposable_replay_worktree",
+      "originalRepoMutated": false,
+      "validationBefore": "failed",
+      "validationAfter": "passed",
+      "proposalPatch": "/tmp/runforge-alpha25-handoff-replay/factory/proposal-run/packet/proposal.patch",
+      "handoffReadme": "/tmp/runforge-alpha25-handoff-replay/factory/handoff/README.md",
+      "handoffJson": "/tmp/runforge-alpha25-handoff-replay/factory/handoff/handoff.json",
+      "handoffAuditStatus": "passed",
+      "handoffAuditReport": "/tmp/runforge-alpha25-handoff-replay/factory/audit/audit-report.md",
+      "handoffAuditResult": "/tmp/runforge-alpha25-handoff-replay/factory/audit/audit-result.json"
+    }
+  ],
+  "decisionForms": {
+    "acceptedValid": true,
+    "rejectedValid": true
+  },
+  "safety": {
+    "validAuditSafety": {
+      "unsafeInstructionsFound": false,
+      "forbiddenTargetsFound": false,
+      "providerUsed": false,
+      "networkUsed": false,
+      "dbUsed": false,
+      "deployUsed": false,
+      "pushUsed": false,
+      "mergeUsed": false
+    },
+    "unsafeAuditRejected": true,
+    "noOriginalExternalRepoMutation": true,
+    "noAutoApplyToOriginalRepo": true,
+    "replayOnlyUnderTmp": true,
+    "noProviderCalls": true,
+    "noNetworkRequired": true,
+    "noDbAccess": true,
+    "noPushMergeDeploy": true
+  },
+  "visibility": {
+    "packetIndex": "/tmp/runforge-alpha25-handoff-replay/factory/index/index.json",
+    "dashboard": "/tmp/runforge-alpha25-handoff-replay/factory/dashboard/dashboard-data.json",
+    "lifecycleReport": "validation/runs/ALPHA-25/lifecycle-report.json",
+    "packetIndexAuditVisible": true,
+    "dashboardAuditVisible": true,
+    "lifecycleCounts": {
+      "generated": 1,
+      "missingReadme": 0,
+      "unsafe": 0,
+      "audited": 2,
+      "auditPassed": 1,
+      "auditFailed": 1,
+      "unsafeRejected": 1
+    }
+  },
+  "limitations": [
+    "Replay audits apply patches only in disposable replay worktrees under /tmp.",
+    "Validation command safety is deterministic lint plus local execution; no network sandbox is introduced.",
+    "The real repo source was Factory, but failure injection and replay occur only in disposable copies."
+  ],
+  "commandsRun": [
+    "(cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)",
+    "(cd /Users/evgeny/Documents/projects/factory && git status --short)",
+    "pnpm dev external patch-trial --repo /Users/evgeny/Documents/projects/factory --mode real-repo-disposable --out /tmp/runforge-alpha25-handoff-replay/factory --run-id alpha25-handoff-replay",
+    "# stdout: Patch trial source: /tmp/runforge-alpha25-handoff-replay/factory/source-copy",
+    "# stderr: $ tsx src/cli/index.ts external patch-trial --repo /Users/evgeny/Documents/projects/factory --mode real-repo-disposable --out /tmp/runforge-alpha25-handoff-replay/factory --run-id alpha25-handoff-replay",
+    "pnpm dev external handoff-packet --trial /tmp/runforge-alpha25-handoff-replay/factory --out /tmp/runforge-alpha25-handoff-replay/factory/handoff --operator-worktree /tmp/runforge-alpha25-handoff-replay/factory/source-copy --validation-command node runforge-alpha22-verify.cjs --trial-id alpha25-handoff-replay",
+    "# stdout: Operator handoff packet: /tmp/runforge-alpha25-handoff-replay/factory/handoff",
+    "# stderr: $ tsx src/cli/index.ts external handoff-packet --trial /tmp/runforge-alpha25-handoff-replay/factory --out /tmp/runforge-alpha25-handoff-replay/factory/handoff --operator-worktree /tmp/runforge-alpha25-handoff-replay/factory/source-copy --validation-command 'node runforge-alpha22-verify.cjs' --trial-id alpha25-handoff-replay",
+    "pnpm dev external handoff-replay --handoff /tmp/runforge-alpha25-handoff-replay/factory/handoff --out /tmp/runforge-alpha25-handoff-replay/factory/audit --audit-id alpha25-valid-handoff-replay",
+    "# stdout: Handoff replay audit: passed",
+    "# stderr: $ tsx src/cli/index.ts external handoff-replay --handoff /tmp/runforge-alpha25-handoff-replay/factory/handoff --out /tmp/runforge-alpha25-handoff-replay/factory/audit --audit-id alpha25-valid-handoff-replay",
+    "(cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)",
+    "(cd /Users/evgeny/Documents/projects/factory && git status --short)",
+    "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha25-handoff-replay/factory/index --dashboard-seed",
+    "# stdout: Indexed 13 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha25-handoff-replay/factory/index --dashboard-seed",
+    "pnpm dev dashboard build --seed /tmp/runforge-alpha25-handoff-replay/factory/index/dashboard-seed.json --out /tmp/runforge-alpha25-handoff-replay/factory/dashboard",
+    "# stdout: Dashboard written: /tmp/runforge-alpha25-handoff-replay/factory/dashboard/index.html",
+    "# stderr: $ tsx src/cli/index.ts dashboard build --seed /tmp/runforge-alpha25-handoff-replay/factory/index/dashboard-seed.json --out /tmp/runforge-alpha25-handoff-replay/factory/dashboard"
+  ],
+  "errors": [],
+  "finalVerdict": "passed"
+}

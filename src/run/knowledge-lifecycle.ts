@@ -23,6 +23,8 @@ export interface LifecycleItem {
   findings: string[];
 }
 
+type HandoffPacketCounts = { generated: number; missingReadme: number; unsafe: number; audited: number; auditPassed: number; auditFailed: number; unsafeRejected: number };
+
 export interface KnowledgeLifecycleReport {
   generatedAt: string;
   repoRoot: string;
@@ -38,7 +40,7 @@ export interface KnowledgeLifecycleReport {
   validation: { ok: boolean; errors: string[] };
   safetySummary: { secretLikeFindings: number; unsafeItems: number; networkRequired: false; providerCalls: false };
   operatorTrialCounts: { accepted: number; rejected: number; missingDecision: number; unsafeMutation: number };
-  handoffPacketCounts: { generated: number; missingReadme: number; unsafe: number };
+  handoffPacketCounts: HandoffPacketCounts;
   items: LifecycleItem[];
 }
 
@@ -140,6 +142,9 @@ export function renderLifecycleSummary(report: KnowledgeLifecycleReport): string
     `- generated: ${report.handoffPacketCounts.generated}`,
     `- missing README: ${report.handoffPacketCounts.missingReadme}`,
     `- unsafe: ${report.handoffPacketCounts.unsafe}`,
+    `- audited: ${report.handoffPacketCounts.audited}`,
+    `- audit passed/failed: ${report.handoffPacketCounts.auditPassed}/${report.handoffPacketCounts.auditFailed}`,
+    `- unsafe handoff rejected: ${report.handoffPacketCounts.unsafeRejected}`,
     "",
     "## Alpha Comparison",
     "",
@@ -174,7 +179,7 @@ function evidenceItem(repoRoot: string, runs: string, run: string): LifecycleIte
     id: `evidence:${run}`,
     kind: "evidence",
     title: run,
-    status: /^ALPHA-(?:17|19|20|21|22|23|24)$/.test(run) || run === "PACKET-VALIDATION" ? "active" : "candidate",
+    status: /^ALPHA-(?:17|19|20|21|22|23|24|25)$/.test(run) || run === "PACKET-VALIDATION" ? "active" : "candidate",
     path: rel(repoRoot, join(runs, run)),
     evidenceLinks: [summary, results].map((file) => rel(repoRoot, file)),
     findings: []
@@ -185,7 +190,7 @@ function itemStatus(content: string, links: string[], findings: string[], file: 
   if (findings.some((finding) => finding.includes("secret-like"))) return "unsafe";
   if (findings.some((finding) => finding.includes("missing evidence"))) return "missing_evidence";
   if (/\bretired\b/i.test(content)) return "retired";
-  if (/\bALPHA-(?:[1-9]|1[0-6])\b/.test(content) && !/ALPHA-(?:17|18|19|20|21|22|23|24)|PACKET-VALIDATION/.test(content)) return "stale";
+  if (/\bALPHA-(?:[1-9]|1[0-6])\b/.test(content) && !/ALPHA-(?:17|18|19|20|21|22|23|24|25)|PACKET-VALIDATION/.test(content)) return "stale";
   if (file.includes("skill-candidates/")) return "candidate";
   return links.length > 0 ? "active" : "needs_review";
 }
@@ -236,7 +241,6 @@ function reportFindings(items: LifecycleItem[], validationErrors: string[]): str
     ...(counts.unsafe > 0 ? [`${counts.unsafe} lifecycle items contain unsafe or secret-like content.`] : [])
   ];
 }
-
 function recommendations(counts: Record<LifecycleStatus, number>, okfValid: boolean): string[] {
   const items = ["Keep packets and dashboard/index records as runtime truth; use OKF as portable memory."];
   if (counts.candidate > 0) items.push("Review candidate knowledge and skills before promotion.");
@@ -255,20 +259,18 @@ function milestoneComparison(runs: string[]): string[] {
     has("ALPHA-21") ? "Alpha-21 records a manual operator accepted-patch trial with validation rerun evidence and no RunForge auto-apply." : "Alpha-21 evidence is absent locally.",
     has("ALPHA-22") ? "Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately." : "Alpha-22 evidence is absent locally.",
     has("ALPHA-23") ? "Alpha-23 hardens operator patch trial UX with decision summaries, safety lint, and accepted/rejected visibility." : "Alpha-23 evidence is absent locally.",
-    has("ALPHA-24") ? "Alpha-24 generates a portable real-operator handoff packet with manual apply, validation, rollback, decisions, and evidence links." : "Alpha-24 evidence is absent locally."
+    has("ALPHA-24") ? "Alpha-24 generates a portable real-operator handoff packet with manual apply, validation, rollback, decisions, and evidence links." : "Alpha-24 evidence is absent locally.",
+    has("ALPHA-25") ? "Alpha-25 replays and audits operator handoff packets in disposable worktrees, including unsafe-packet rejection evidence." : "Alpha-25 evidence is absent locally."
   ];
 }
-
 function localLinks(content: string): string[] {
   const markdownLinks = [...content.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)].map((match) => match[1]);
   const codePaths = [...content.matchAll(/`([^`]*(?:validation\/runs|summary\.md|results\.json|packet)[^`]*)`/g)].map((match) => match[1]);
   return [...new Set([...markdownLinks, ...codePaths])].filter((link) => !link.startsWith("#"));
 }
-
 function title(content: string): string | undefined {
   return content.match(/^title:\s*(.+)$/m)?.[1]?.trim() ?? content.match(/^#\s+(.+)$/m)?.[1]?.trim();
 }
-
 function rel(root: string, path: string): string {
   return relative(root, resolve(path)) || ".";
 }
@@ -293,8 +295,8 @@ async function countOperatorTrials(resultPaths: string[]): Promise<{ accepted: n
   return counts;
 }
 
-async function countHandoffPackets(runDirs: string[]): Promise<{ generated: number; missingReadme: number; unsafe: number }> {
-  const counts = { generated: 0, missingReadme: 0, unsafe: 0 };
+async function countHandoffPackets(runDirs: string[]): Promise<HandoffPacketCounts> {
+  const counts = { generated: 0, missingReadme: 0, unsafe: 0, audited: 0, auditPassed: 0, auditFailed: 0, unsafeRejected: 0 };
   for (const runDir of runDirs) {
     const paths = await collectHandoffJsonFiles(runDir);
     for (const path of paths) {
@@ -316,17 +318,32 @@ async function countHandoffPackets(runDirs: string[]): Promise<{ generated: numb
         counts.unsafe += 1;
       }
     }
+    const audits = await collectNamedFiles(runDir, "audit-result.json");
+    for (const auditPath of audits) {
+      counts.audited += 1;
+      try {
+        const audit = JSON.parse(await readFile(auditPath, "utf8")) as { status?: string; safety?: { unsafeInstructionsFound?: boolean; forbiddenTargetsFound?: boolean }; findings?: string[] };
+        if (audit.status === "passed") counts.auditPassed += 1;
+        else counts.auditFailed += 1;
+        const unsafeRejected = audit.status === "failed" && (audit.safety?.unsafeInstructionsFound === true || audit.safety?.forbiddenTargetsFound === true || (audit.findings ?? []).some((finding) => /unsafe|forbidden|original_repo|autoAppliedByRunForge/i.test(finding)));
+        if (unsafeRejected) counts.unsafeRejected += 1;
+      } catch {
+        counts.auditFailed += 1;
+      }
+    }
   }
   return counts;
 }
-
 async function collectHandoffJsonFiles(root: string): Promise<string[]> {
+  return collectNamedFiles(root, "handoff.json");
+}
+async function collectNamedFiles(root: string, name: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true }).catch(() => []);
   const nested = await Promise.all(entries.map(async (entry) => {
     const child = join(root, entry.name);
-    if (entry.isDirectory()) return collectHandoffJsonFiles(child);
+    if (entry.isDirectory()) return collectNamedFiles(child, name);
     if (!entry.isFile()) return [];
-    return entry.name === "handoff.json" ? [child] : [];
+    return entry.name === name ? [child] : [];
   }));
   return nested.flat();
 }

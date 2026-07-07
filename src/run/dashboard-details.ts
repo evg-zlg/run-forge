@@ -9,6 +9,7 @@ export function renderDetails(record: DashboardRecord): string {
       <p><strong>Applied to:</strong> ${escapeHtml(record.decisionAppliedTo || "unknown")}</p>
       <p><strong>RunForge auto-applied:</strong> ${escapeHtml(record.autoAppliedByRunForge === null ? "unknown" : String(record.autoAppliedByRunForge))}</p>
       <p><strong>Validation before/after:</strong> ${escapeHtml(record.validationBefore || "unknown")} -> ${escapeHtml(record.validationAfter || "unknown")}</p>
+      <p><strong>Handoff replay audit:</strong> ${escapeHtml(record.handoffAuditStatus || "unknown")}</p>
       <p><strong>Original repo mutated:</strong> ${escapeHtml(record.originalRepoMutated === null ? "unknown" : String(record.originalRepoMutated))}</p>
       <p><strong>Provider status:</strong> ${escapeHtml(record.providerStatus)}</p>
       <p><strong>Reason:</strong> ${escapeHtml(reasonFor(record))}</p>
@@ -21,6 +22,8 @@ export function renderDetails(record: DashboardRecord): string {
         ${artifactRow("Proposal patch path", record.proposalPatchPath)}
         ${artifactRow("Handoff README path", record.handoffReadmePath)}
         ${artifactRow("Handoff JSON path", record.handoffJsonPath)}
+        ${artifactRow("Handoff audit report path", record.handoffAuditReportPath)}
+        ${artifactRow("Handoff audit result path", record.handoffAuditResultPath)}
         ${artifactRow("Human review path", record.humanReviewPath)}
       </div>
       <p><strong>Safety notes:</strong> ${escapeHtml(record.safetyLabels.join(", ") || "none")}</p>

@@ -4,24 +4,13 @@ import { renderExternalCommandCheckCliSummary, runExternalCommandCheck } from ".
 import { buildExternalDocsProposalSpec, renderExternalDocsProposalSummary, runExternalDocsProposalPacket } from "../../run/external-docs-proposal.js";
 import { renderExternalProposalReadinessCliSummary, runExternalProposalReadiness } from "../../run/external-proposal-readiness.js";
 import { renderExternalCodeProposalCliSummary, runExternalCodeProposal } from "../../run/external-code-proposal.js";
-import {
-  recordExternalPatchDecision,
-  renderExternalPatchTrialSummary,
-  renderExternalRecordDecisionSummary,
-  runExternalPatchTrial
-} from "../../run/external-operator-patch-trial.js";
+import { recordExternalPatchDecision, renderExternalPatchTrialSummary, renderExternalRecordDecisionSummary, runExternalPatchTrial } from "../../run/external-operator-patch-trial.js";
 import { generateOperatorHandoffPacket, renderOperatorHandoffSummary } from "../../run/external-operator-handoff.js";
+import { renderOperatorHandoffReplaySummary, replayOperatorHandoffPacket } from "../../run/external-operator-handoff-replay.js";
 
 export function externalCommand(): Command {
   const external = new Command("external").description("Run safe packet-producing workflows for explicitly declared external local repositories.");
-  external.addCommand(checkCommand());
-  external.addCommand(failureTriageCommand());
-  external.addCommand(proposalReadinessCommand());
-  external.addCommand(codeProposalCommand());
-  external.addCommand(patchTrialCommand());
-  external.addCommand(handoffPacketCommand());
-  external.addCommand(recordDecisionCommand());
-  external.addCommand(docsProposalCommand());
+  for (const command of [checkCommand(), failureTriageCommand(), proposalReadinessCommand(), codeProposalCommand(), patchTrialCommand(), handoffPacketCommand(), handoffReplayCommand(), recordDecisionCommand(), docsProposalCommand()]) external.addCommand(command);
   return external;
 }
 
@@ -44,6 +33,24 @@ function handoffPacketCommand(): Command {
         });
         console.log(renderOperatorHandoffSummary(result));
         if (!result.validation.passed) process.exitCode = 1;
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+function handoffReplayCommand(): Command {
+  return new Command("handoff-replay")
+    .description("Replay and audit an operator handoff packet in a disposable /tmp worktree.")
+    .requiredOption("--handoff <handoff-dir>", "handoff bundle directory containing handoff.json")
+    .requiredOption("--out <audit-output-root>", "audit output directory under /tmp")
+    .option("--audit-id <id>", "audit id recorded in audit artifacts")
+    .option("--timeout-ms <ms>", "patch/validation timeout in milliseconds (default: 120000)", parsePositiveInteger)
+    .action(async (opts) => {
+      try {
+        const result = await replayOperatorHandoffPacket({ handoff: opts.handoff as string, out: opts.out as string, auditId: opts.auditId as string | undefined, timeoutMs: opts.timeoutMs as number | undefined });
+        console.log(renderOperatorHandoffReplaySummary(result));
+        if (result.status !== "passed") process.exitCode = 1;
       } catch (error) {
         throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
       }

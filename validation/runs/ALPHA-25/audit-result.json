@@ -1,0 +1,42 @@
+{
+  "auditId": "alpha25-valid-handoff-replay",
+  "handoffPath": "/tmp/runforge-alpha25-handoff-replay/factory/handoff",
+  "status": "passed",
+  "sourceRepo": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "headBefore": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "headAfter": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "statusBefore": "",
+    "statusAfter": "",
+    "originalRepoMutated": false
+  },
+  "replay": {
+    "worktreePath": "/tmp/runforge-alpha25-handoff-replay/factory/audit/replay-worktree",
+    "patchApplied": true,
+    "validationRun": true,
+    "validationStatus": "passed"
+  },
+  "decisionForms": {
+    "acceptedValid": true,
+    "rejectedValid": true
+  },
+  "safety": {
+    "unsafeInstructionsFound": false,
+    "forbiddenTargetsFound": false,
+    "providerUsed": false,
+    "networkUsed": false,
+    "dbUsed": false,
+    "deployUsed": false,
+    "pushUsed": false,
+    "mergeUsed": false
+  },
+  "findings": [],
+  "recommendations": [
+    "Handoff is complete, replayable, auditable, and safe for operator review in a disposable worktree."
+  ],
+  "artifacts": {
+    "auditReport": "/tmp/runforge-alpha25-handoff-replay/factory/audit/audit-report.md",
+    "auditResult": "/tmp/runforge-alpha25-handoff-replay/factory/audit/audit-result.json",
+    "replayLog": "/tmp/runforge-alpha25-handoff-replay/factory/audit/replay-log.json"
+  }
+}

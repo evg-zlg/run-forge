@@ -1,0 +1,56 @@
+{
+  "schemaVersion": "alpha-25-compact-lifecycle-report",
+  "generatedAt": "2026-07-07T11:51:38.846Z",
+  "validation": {
+    "ok": true,
+    "errors": []
+  },
+  "sourceCounts": {
+    "okfFiles": 33,
+    "skills": 0,
+    "validationRuns": 43,
+    "evidenceFiles": 69
+  },
+  "lifecycleStatusCounts": {
+    "candidate": 36,
+    "active": 24,
+    "needs_review": 0,
+    "stale": 16,
+    "duplicate": 0,
+    "missing_evidence": 0,
+    "unsafe": 0,
+    "retired": 0
+  },
+  "operatorTrialCounts": {
+    "accepted": 3,
+    "rejected": 2,
+    "missingDecision": 4,
+    "unsafeMutation": 0
+  },
+  "handoffPacketCounts": {
+    "generated": 1,
+    "missingReadme": 0,
+    "unsafe": 0,
+    "audited": 2,
+    "auditPassed": 1,
+    "auditFailed": 1,
+    "unsafeRejected": 1
+  },
+  "visibility": {
+    "packetIndexHasAudit": true,
+    "dashboardHasAudit": true
+  },
+  "milestoneComparison": [
+    "Alpha-24 generates a portable real-operator handoff packet with manual apply, validation, rollback, decisions, and evidence links.",
+    "Alpha-25 replays and audits operator handoff packets in disposable worktrees, including unsafe-packet rejection evidence."
+  ],
+  "findings": [
+    "16 lifecycle items reference older milestones and should be reviewed."
+  ],
+  "recommendations": [
+    "Keep packets and dashboard/index records as runtime truth; use OKF as portable memory.",
+    "Review candidate knowledge and skills before promotion.",
+    "Next milestone: replay and audit existing operator handoff packets in disposable worktrees."
+  ],
+  "finalVerdict": "passed"
+}
