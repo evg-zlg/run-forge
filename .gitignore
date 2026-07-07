@@ -41,6 +41,9 @@ validation/runs/*/*
 !validation/runs/ALPHA-19/
 !validation/runs/ALPHA-19/summary.md
 !validation/runs/ALPHA-19/results.json
+!validation/runs/ADMIN-UI-ALPHA/
+!validation/runs/ADMIN-UI-ALPHA/summary.md
+!validation/runs/ADMIN-UI-ALPHA/results.json
 !validation/runs/PACKET-VALIDATION/summary.md
 !validation/runs/PACKET-VALIDATION/results.json
 .DS_Store

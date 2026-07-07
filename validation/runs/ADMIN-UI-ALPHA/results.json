@@ -1,0 +1,96 @@
+{
+  "schemaVersion": "admin-ui-alpha-results",
+  "generatedAt": "2026-07-07T03:30:33.880Z",
+  "verdict": "passed",
+  "configFileUsed": "/tmp/runforge-admin-ui-config.json",
+  "adminOutputPath": "/tmp/runforge-admin-ui/index.html",
+  "adminDataPath": "/tmp/runforge-admin-ui/admin-data.json",
+  "counts": {
+    "repositories": 1,
+    "providers": 2,
+    "runs": 6,
+    "runDetails": 6,
+    "latestValidationAlpha": "ALPHA-10"
+  },
+  "byOutcome": {
+    "provider_rejected": 3,
+    "proposal_ready_verified": 3
+  },
+  "byProviderStatus": {
+    "rejected": 3,
+    "accepted": 3
+  },
+  "urgentSafetyCounts": {
+    "do_not_apply": 0,
+    "provider_rejected": 3,
+    "verification_failed": 0,
+    "setup_failed": 0,
+    "setup_failed_main_failed": 0
+  },
+  "checks": {
+    "configSafeDefaults": true,
+    "envTokenReferenceOnly": true,
+    "redactionChecks": true,
+    "runGraphCheck": true,
+    "missingRepoDoesNotCrash": true,
+    "overviewShowsRepoShaAndConfigPath": true,
+    "repoFilterRendered": true,
+    "staticOutputExists": true,
+    "tmpOutputTokenShapeScanClean": true,
+    "providerCallsMade": false,
+    "repositoryMutationsMade": false
+  },
+  "validationCommands": [
+    {
+      "command": "pnpm check:governance",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm check:structure",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm test",
+      "status": "passed",
+      "details": "17 test files, 136 tests"
+    },
+    {
+      "command": "pnpm validation:packets",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm build",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm validation:alpha15",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm validation:alpha16",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm validation:okf",
+      "status": "passed",
+      "details": "32 markdown files"
+    },
+    {
+      "command": "pnpm demo:admin-ui",
+      "status": "passed"
+    }
+  ],
+  "diffHygiene": {
+    "packetValidationRegeneratedFiles": "reverted",
+    "reason": "Only timestamp, duration, and temporary path churn unrelated to ADMIN-UI-ALPHA."
+  },
+  "knownLimitations": [
+    "UI editing is deferred to CLI config helpers.",
+    "Local file links depend on browser file:// policy.",
+    "Older packets without events.jsonl use a canonical fallback graph."
+  ]
+}
