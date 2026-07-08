@@ -1,6 +1,6 @@
 # RunForge Alpha-24 Real Operator Handoff Packet
 
-Generated at: 2026-07-07T06:20:35.438Z
+Generated at: 2026-07-08T17:30:38.839Z
 Trial root: /tmp/runforge-alpha24-operator-handoff/factory
 
 ## Outcome
@@ -67,7 +67,7 @@ Final verdict: passed
 - (cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)
 - (cd /Users/evgeny/Documents/projects/factory && git status --short)
 - pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha24-operator-handoff/factory/index --dashboard-seed
-- # stdout: Indexed 12 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
+- # stdout: Indexed 14 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
 - # stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha24-operator-handoff/factory/index --dashboard-seed
 - pnpm dev dashboard build --seed /tmp/runforge-alpha24-operator-handoff/factory/index/dashboard-seed.json --out /tmp/runforge-alpha24-operator-handoff/factory/dashboard
 - # stdout: Dashboard written: /tmp/runforge-alpha24-operator-handoff/factory/dashboard/index.html

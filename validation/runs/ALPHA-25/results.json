@@ -1,6 +1,6 @@
 {
   "schemaVersion": "alpha-25-handoff-replay-audit",
-  "generatedAt": "2026-07-07T11:51:38.092Z",
+  "generatedAt": "2026-07-08T17:30:46.174Z",
   "sourceHandoffPath": "/tmp/runforge-alpha25-handoff-replay/factory/handoff",
   "originalRepo": {
     "path": "/Users/evgeny/Documents/projects/factory",
@@ -114,7 +114,7 @@
     "(cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)",
     "(cd /Users/evgeny/Documents/projects/factory && git status --short)",
     "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha25-handoff-replay/factory/index --dashboard-seed",
-    "# stdout: Indexed 13 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stdout: Indexed 14 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
     "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha25-handoff-replay/factory/index --dashboard-seed",
     "pnpm dev dashboard build --seed /tmp/runforge-alpha25-handoff-replay/factory/index/dashboard-seed.json --out /tmp/runforge-alpha25-handoff-replay/factory/dashboard",
     "# stdout: Dashboard written: /tmp/runforge-alpha25-handoff-replay/factory/dashboard/index.html",

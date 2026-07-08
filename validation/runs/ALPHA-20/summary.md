@@ -1,19 +1,19 @@
 # RunForge Alpha-20 Knowledge Lifecycle
 
-Generated at: 2026-07-07T05:45:41.229Z
+Generated at: 2026-07-08T17:28:46.176Z
 Repo root: /Users/evgeny/Documents/projects/RunForge
 
 ## Source Counts
 
 OKF files: 33
 Skills: 0
-Validation runs: 40
-Evidence files: 64
+Validation runs: 44
+Evidence files: 72
 
 ## Lifecycle Status Counts
 
-- candidate: 35
-- active: 22
+- candidate: 36
+- active: 25
 - needs_review: 0
 - stale: 16
 - duplicate: 0
@@ -29,14 +29,41 @@ Evidence files: 64
 
 - Keep packets and dashboard/index records as runtime truth; use OKF as portable memory.
 - Review candidate knowledge and skills before promotion.
-- Next milestone: harden the operator patch trial UX around proposal packets, patches, validation, decisions, dashboard rows, and lifecycle entries.
+- Next milestone: replay and audit existing operator handoff packets in disposable worktrees.
 
 ## Operator Trials
 
 - accepted: 3
 - rejected: 2
-- missing decision: 2
+- missing decision: 5
 - unsafe mutation: 0
+
+## Operator Handoff Packets
+
+- generated: 1
+- missing README: 0
+- unsafe: 0
+- audited: 2
+- audit passed/failed: 1/1
+- unsafe handoff rejected: 1
+
+## Operator Handoff Archive
+
+- archived handoffs: 9
+- audited handoffs: 3
+- accepted handoffs: 4
+- rejected handoffs: 3
+- unsafe rejected handoffs: 1
+- missing audit handoffs: 6
+
+## Archive Recommendations
+
+- Candidate OKF lesson: accepted audited handoff flow works for repo factory.
+- Candidate archive lesson: preserve handoff/audit evidence for repo factory.
+- Candidate archive lesson: preserve handoff/audit evidence for repo source.
+- Candidate lesson: declined or failed handoff for repo factory; review validation and decision rules.
+- Candidate lesson: declined or failed handoff for repo smartsql; review validation and decision rules.
+- Candidate safety lesson: rejected unsafe handoff for repo factory; review handoff proposal autoAppliedByRunForge=true.
 
 ## Alpha Comparison
 
@@ -46,6 +73,9 @@ Evidence files: 64
 - Alpha-21 records a manual operator accepted-patch trial with validation rerun evidence and no RunForge auto-apply.
 - Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately.
 - Alpha-23 hardens operator patch trial UX with decision summaries, safety lint, and accepted/rejected visibility.
+- Alpha-24 generates a portable real-operator handoff packet with manual apply, validation, rollback, decisions, and evidence links.
+- Alpha-25 replays and audits operator handoff packets in disposable worktrees, including unsafe-packet rejection evidence.
+- Alpha-26 archives and searches handoff/audit evidence with lifecycle recommendations.
 
 ## Evidence Links
 
@@ -53,14 +83,14 @@ Evidence files: 64
 - validation/runs/ADMIN-UI-2/summary.md
 - validation/runs/ADMIN-UI-3/results.json
 - validation/runs/ADMIN-UI-3/summary.md
+- validation/runs/ADMIN-UI-4/results.json
+- validation/runs/ADMIN-UI-4/summary.md
 - validation/runs/ADMIN-UI-ALPHA/results.json
 - validation/runs/ADMIN-UI-ALPHA/summary.md
 - validation/runs/ALPHA-10/results.json
 - validation/runs/ALPHA-10/summary.md
 - validation/runs/ALPHA-11/results.json
 - validation/runs/ALPHA-11/summary.md
-- validation/runs/ALPHA-12/results.json
-- validation/runs/ALPHA-12/summary.md
 
 Final verdict: passed
 

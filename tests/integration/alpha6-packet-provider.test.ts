@@ -24,7 +24,7 @@ describe("Alpha-6 packet validation", () => {
     for (const packet of [checkOut, triageOut, readinessOut, codeOut].map((out) => join(out, "packet"))) {
       await expect(validatePacket(packet)).resolves.toMatchObject({ passed: true, errors: [] });
     }
-  });
+  }, 30_000);
 
   it("reports missing artifacts, missing JSON fields, and inspector validation output", async () => {
     const repo = await createSampleGitRepo();

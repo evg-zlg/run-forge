@@ -1,6 +1,6 @@
 {
   "schemaVersion": "alpha-21-operator-accepted-patch-trial",
-  "generatedAt": "2026-07-07T05:46:40.843Z",
+  "generatedAt": "2026-07-08T17:30:00.158Z",
   "trialRoot": "/tmp/runforge-alpha21-operator-trial",
   "sourceRepo": "/tmp/runforge-alpha21-operator-trial/source",
   "operatorRepo": "/tmp/runforge-alpha21-operator-trial/operator-worktree",
@@ -9,8 +9,8 @@
   "operatorDecision": "/tmp/runforge-alpha21-operator-trial/proposal-run/packet/operator-decision.json",
   "validationPacket": "/tmp/runforge-alpha21-operator-trial/decision/validation-rerun/packet",
   "externalRepo": {
-    "beforeHead": "ad31b64520cd4ba7d57938e5411e22a7cda8a1bb",
-    "afterHead": "ad31b64520cd4ba7d57938e5411e22a7cda8a1bb",
+    "beforeHead": "3435477c3b27d3d4a50e527daeda8af37c5be7a1",
+    "afterHead": "3435477c3b27d3d4a50e527daeda8af37c5be7a1",
     "mutationVerdict": "unchanged"
   },
   "attempts": [
@@ -25,8 +25,8 @@
       "filesChanged": [
         "src/math.js"
       ],
-      "externalRepoHeadBefore": "ad31b64520cd4ba7d57938e5411e22a7cda8a1bb",
-      "externalRepoHeadAfter": "ad31b64520cd4ba7d57938e5411e22a7cda8a1bb",
+      "externalRepoHeadBefore": "3435477c3b27d3d4a50e527daeda8af37c5be7a1",
+      "externalRepoHeadAfter": "3435477c3b27d3d4a50e527daeda8af37c5be7a1",
       "manualApply": true
     }
   ],
@@ -58,7 +58,7 @@
     "(cd /tmp/runforge-alpha21-operator-trial/source && git rev-parse HEAD)",
     "(cd /tmp/runforge-alpha21-operator-trial/source && git rev-parse HEAD)",
     "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha21-operator-trial/index --dashboard-seed",
-    "# stdout: Indexed 11 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stdout: Indexed 14 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
     "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha21-operator-trial/index --dashboard-seed",
     "pnpm dev dashboard build --seed /tmp/runforge-alpha21-operator-trial/index/dashboard-seed.json --out /tmp/runforge-alpha21-operator-trial/dashboard",
     "# stdout: Dashboard written: /tmp/runforge-alpha21-operator-trial/dashboard/index.html",

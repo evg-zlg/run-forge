@@ -1,6 +1,6 @@
 {
   "schemaVersion": "alpha-19-setup-policy-acceptance",
-  "generatedAt": "2026-07-07T05:45:34.911Z",
+  "generatedAt": "2026-07-08T17:28:45.536Z",
   "rawRoot": "/tmp/runforge-alpha19-acceptance",
   "externalRepos": [
     {
@@ -19,8 +19,8 @@
       "available": true,
       "beforeHead": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
       "afterHead": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
-      "beforeStatus": "?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? tmp/",
-      "afterStatus": "?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? tmp/",
+      "beforeStatus": "?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/MP-W-3082-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? reports/projectops/OPS-W-2960-R001.json\n?? tmp/",
+      "afterStatus": "?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/MP-W-3082-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? reports/projectops/OPS-W-2960-R001.json\n?? tmp/",
       "unchanged": true
     }
   ],
@@ -86,7 +86,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 559,
+      "durationMs": 698,
       "stdout": "RunForge external check\n\nRun ID: alpha19-setup-pass\nStatus: passed\nCLI exit policy: packet\nCLI exit code: 0\nRepo: /tmp/runforge-alpha19-acceptance/fixtures/setup-pass\nPacket: /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-pass/packet\n\nSetup:\n1. node setup.js - passed\n\nCommands:\n1. node verify.js - passed\n\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- setup-results.json\n- command-results.json\n- logs/\n- events.jsonl\n- metrics.json\n- packet-manifest.json\n",
       "stderr": "$ tsx src/cli/index.ts external check --repo /tmp/runforge-alpha19-acceptance/fixtures/setup-pass --setup-command 'node setup.js' --setup-network-intent none --command 'node verify.js' --out /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-pass --run-id alpha19-setup-pass\n",
       "checks": [
@@ -120,7 +120,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 431,
+      "durationMs": 641,
       "stdout": "RunForge external check\n\nRun ID: alpha19-setup-fail\nStatus: setup_failed\nCLI exit policy: packet\nCLI exit code: 0\nRepo: /tmp/runforge-alpha19-acceptance/fixtures/setup-fail\nPacket: /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail/packet\n\nSetup:\n1. node setup-fail.js - failed\n\nCommands:\nMain commands skipped or not run.\n\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- setup-results.json\n- command-results.json\n- logs/\n- events.jsonl\n- metrics.json\n- packet-manifest.json\n",
       "stderr": "$ tsx src/cli/index.ts external check --repo /tmp/runforge-alpha19-acceptance/fixtures/setup-fail --setup-command 'node setup-fail.js' --setup-network-intent none --command 'node verify.js' --out /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail --run-id alpha19-setup-fail\n",
       "checks": [
@@ -154,7 +154,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 458,
+      "durationMs": 664,
       "stdout": "RunForge external proposal readiness\n\nRun ID: alpha19-setup-fail-readiness\nOutcome: needs_more_context\nCan attempt code proposal: false\nCategory: dependency_missing\nConfidence: high\nSource triage packet: /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail-readiness/triage-source/packet\nPacket: /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail-readiness/packet\n\nRecommended next action: Inspect setup/preflight logs, correct the dependency preparation command, then rerun before attempting a code proposal.\n\nKey artifacts:\n- summary.md\n- proposal-readiness.md\n- proposal-contract.json\n- missing-context.md\n- recommended-next-action.md\n",
       "stderr": "$ tsx src/cli/index.ts external proposal-readiness --repo /tmp/runforge-alpha19-acceptance/fixtures/setup-fail --setup-command 'node setup-fail.js' --setup-network-intent none --command 'node verify.js' --out /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail-readiness --run-id alpha19-setup-fail-readiness\n",
       "checks": [
@@ -189,7 +189,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 459,
+      "durationMs": 671,
       "stdout": "RunForge external check\n\nRun ID: alpha19-setup-diagnostic\nStatus: setup_failed_main_failed\nCLI exit policy: packet\nCLI exit code: 0\nRepo: /tmp/runforge-alpha19-acceptance/fixtures/setup-diagnostic\nPacket: /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-diagnostic/packet\n\nSetup:\n1. node setup-fail.js - failed\n\nCommands:\n1. node verify-fail.js - failed\n\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- setup-results.json\n- command-results.json\n- logs/\n- events.jsonl\n- metrics.json\n- packet-manifest.json\n",
       "stderr": "$ tsx src/cli/index.ts external check --repo /tmp/runforge-alpha19-acceptance/fixtures/setup-diagnostic --setup-command 'node setup-fail.js' --setup-network-intent none --continue-after-setup-failure --command 'node verify-fail.js' --out /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-diagnostic --run-id alpha19-setup-diagnostic\n",
       "checks": [
@@ -223,7 +223,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 466,
+      "durationMs": 763,
       "stdout": "RunForge external check\n\nRun ID: alpha19-setup-network-expected\nStatus: passed\nCLI exit policy: packet\nCLI exit code: 0\nRepo: /tmp/runforge-alpha19-acceptance/fixtures/setup-pass\nPacket: /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-network-expected/packet\n\nSetup:\n1. node setup.js - passed\n\nCommands:\n1. node verify.js - passed\n\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- setup-results.json\n- command-results.json\n- logs/\n- events.jsonl\n- metrics.json\n- packet-manifest.json\n",
       "stderr": "$ tsx src/cli/index.ts external check --repo /tmp/runforge-alpha19-acceptance/fixtures/setup-pass --setup-command 'node setup.js' --setup-network-intent expected --command 'node verify.js' --out /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-network-expected --run-id alpha19-setup-network-expected\n",
       "checks": [
@@ -255,7 +255,7 @@
       "ok": true,
       "expectedSuccess": false,
       "exitCode": 1,
-      "durationMs": 357,
+      "durationMs": 557,
       "stdout": "[ELIFECYCLE] Command failed with exit code 1.\n",
       "stderr": "$ tsx src/cli/index.ts external check --repo /tmp/runforge-alpha19-acceptance/fixtures/setup-pass --setup-command 'node setup.js' --setup-network-intent surprise --command 'node verify.js' --out /tmp/runforge-alpha19-acceptance/ALPHA-19/invalid-network-intent\nerror: option '--setup-network-intent <intent>' argument 'surprise' is invalid. --setup-network-intent must be none, expected, or unknown.\n",
       "checks": [
@@ -289,7 +289,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 625,
+      "durationMs": 910,
       "stdout": "RunForge external check\n\nRun ID: alpha19-factory\nStatus: passed\nCLI exit policy: packet\nCLI exit code: 0\nRepo: /Users/evgeny/Documents/projects/factory\nPacket: /tmp/runforge-alpha19-acceptance/ALPHA-19/factory/packet\n\nSetup:\n1. node -e \"console.log('factory setup preflight')\" - passed\n\nCommands:\n1. node -e \"console.log('factory external check')\" - passed\n\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- setup-results.json\n- command-results.json\n- logs/\n- events.jsonl\n- metrics.json\n- packet-manifest.json\n",
       "stderr": "$ tsx src/cli/index.ts external check --repo /Users/evgeny/Documents/projects/factory --setup-command 'node -e \"console.log('\"'\"'factory setup preflight'\"'\"')\"' --setup-network-intent none --command 'node -e \"console.log('\"'\"'factory external check'\"'\"')\"' --out /tmp/runforge-alpha19-acceptance/ALPHA-19/factory --run-id alpha19-factory\n",
       "checks": [
@@ -323,7 +323,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 5740,
+      "durationMs": 8231,
       "stdout": "RunForge external check\n\nRun ID: alpha19-smartsql\nStatus: passed\nCLI exit policy: packet\nCLI exit code: 0\nRepo: /Users/evgeny/Documents/projects/smartsql\nPacket: /tmp/runforge-alpha19-acceptance/ALPHA-19/smartsql/packet\n\nSetup:\n1. node -e \"console.log('smartsql setup preflight')\" - passed\n\nCommands:\n1. node -e \"console.log('smartsql external check')\" - passed\n\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- setup-results.json\n- command-results.json\n- logs/\n- events.jsonl\n- metrics.json\n- packet-manifest.json\n",
       "stderr": "$ tsx src/cli/index.ts external check --repo /Users/evgeny/Documents/projects/smartsql --setup-command 'node -e \"console.log('\"'\"'smartsql setup preflight'\"'\"')\"' --setup-network-intent none --command 'node -e \"console.log('\"'\"'smartsql external check'\"'\"')\"' --out /tmp/runforge-alpha19-acceptance/ALPHA-19/smartsql --run-id alpha19-smartsql\n",
       "checks": [
@@ -357,7 +357,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 446,
+      "durationMs": 1093,
       "stdout": "RunForge external code proposal\n\nRun ID: alpha19-chained-setup-fail\nOutcome: not_ready\nVerification passed: false\nSource readiness packet: /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/readiness-source/packet\nPacket: /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/packet\nProposal patch bytes: 0\nOriginal repo: unknown\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
       "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /tmp/runforge-alpha19-acceptance/fixtures/setup-fail --setup-command 'node setup-fail.js' --setup-network-intent none --command 'node verify.js' --out /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail --run-id alpha19-chained-setup-fail\n",
       "checks": [
@@ -381,7 +381,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 360,
+      "durationMs": 583,
       "stdout": "Run ID: alpha19-setup-pass\nPacket type: command_check\nStatus: passed\nStrategy: none\nArtifact count: 12\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-pass/packet --validate\n",
       "checks": [
@@ -407,7 +407,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 332,
+      "durationMs": 534,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-pass/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-pass/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-pass\n",
       "checks": [
@@ -431,7 +431,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 340,
+      "durationMs": 581,
       "stdout": "Run ID: alpha19-setup-fail\nPacket type: command_check\nStatus: setup_failed\nStrategy: none\nArtifact count: 10\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail/packet --validate\n",
       "checks": [
@@ -457,7 +457,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 339,
+      "durationMs": 575,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-fail/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-fail\n",
       "checks": [
@@ -481,7 +481,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 332,
+      "durationMs": 566,
       "stdout": "Run ID: alpha19-setup-fail-readiness\nPacket type: proposal_readiness\nStatus: needs_more_context\nStrategy: none\nArtifact count: 11\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- events.jsonl\n- human-review.md\n- metrics.json\n- missing-context.md\n- proposal-contract.json\n- proposal-readiness.md\n- recommended-next-action.md\n- run.json\n- safety-report.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail-readiness/packet --validate\n",
       "checks": [
@@ -507,7 +507,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 328,
+      "durationMs": 551,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-fail-readiness/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail-readiness/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-fail-readiness\n",
       "checks": [
@@ -531,7 +531,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 330,
+      "durationMs": 511,
       "stdout": "Run ID: alpha19-setup-diagnostic\nPacket type: command_check\nStatus: setup_failed_main_failed\nStrategy: none\nArtifact count: 12\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-diagnostic/packet --validate\n",
       "checks": [
@@ -557,7 +557,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 342,
+      "durationMs": 517,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-diagnostic/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-diagnostic/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-diagnostic\n",
       "checks": [
@@ -581,7 +581,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 332,
+      "durationMs": 512,
       "stdout": "Run ID: alpha19-setup-network-expected\nPacket type: command_check\nStatus: passed\nStrategy: none\nArtifact count: 12\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-network-expected/packet --validate\n",
       "checks": [
@@ -607,7 +607,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 333,
+      "durationMs": 516,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-network-expected/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-network-expected/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-network-expected\n",
       "checks": [
@@ -631,7 +631,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 330,
+      "durationMs": 527,
       "stdout": "Run ID: alpha19-factory\nPacket type: command_check\nStatus: passed\nStrategy: none\nArtifact count: 12\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/factory/packet --validate\n",
       "checks": [
@@ -657,7 +657,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 333,
+      "durationMs": 519,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__factory/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/factory/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__factory\n",
       "checks": [
@@ -681,7 +681,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 332,
+      "durationMs": 524,
       "stdout": "Run ID: alpha19-smartsql\nPacket type: command_check\nStatus: passed\nStrategy: none\nArtifact count: 12\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/smartsql/packet --validate\n",
       "checks": [
@@ -707,7 +707,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 377,
+      "durationMs": 527,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__smartsql/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/smartsql/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__smartsql\n",
       "checks": [
@@ -731,7 +731,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 346,
+      "durationMs": 539,
       "stdout": "Run ID: alpha19-chained-setup-fail\nPacket type: code_proposal\nStatus: not_ready\nStrategy: none\nArtifact count: 18\n\nValidation: passed\n\nRoute:\ntask_received\n-> readiness_loader\n-> context_scout\n-> failure_analyst\n-> proposal_reviewer\n-> packet_writer\n-> run_finished\n\nArtifacts:\n- after-command-results.json\n- before-command-results.json\n- events.jsonl\n- human-review.md\n- metrics.json\n- patch-summary.md\n- proposal-status.json\n- proposal.patch\n- run.json\n- safety-report.json\n- summary.md\n- trajectory.json\n- verification-results.json\n- worker-notes/context-scout.md\n- worker-notes/failure-analyst.md\n- worker-notes/packet-writer.md\n- worker-notes/proposal-reviewer.md\n- worker-notes/readiness-loader.md\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/packet --validate\n",
       "checks": [
@@ -757,7 +757,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 336,
+      "durationMs": 532,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__chained-setup-fail/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__chained-setup-fail\n",
       "checks": [
@@ -781,8 +781,8 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 335,
-      "stdout": "Run ID: 2026-07-07T05-45-25Z-226a4393\nPacket type: proposal_readiness\nStatus: needs_more_context\nStrategy: none\nArtifact count: 11\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- events.jsonl\n- human-review.md\n- metrics.json\n- missing-context.md\n- proposal-contract.json\n- proposal-readiness.md\n- recommended-next-action.md\n- run.json\n- safety-report.json\n- summary.md\n- trajectory.json\n",
+      "durationMs": 525,
+      "stdout": "Run ID: 2026-07-08T17-28-29Z-cd91968e\nPacket type: proposal_readiness\nStatus: needs_more_context\nStrategy: none\nArtifact count: 11\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- events.jsonl\n- human-review.md\n- metrics.json\n- missing-context.md\n- proposal-contract.json\n- proposal-readiness.md\n- recommended-next-action.md\n- run.json\n- safety-report.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/readiness-source/packet --validate\n",
       "checks": [
         "passed"
@@ -807,7 +807,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 331,
+      "durationMs": 523,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__chained-setup-fail__readiness-source/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/readiness-source/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__chained-setup-fail__readiness-source\n",
       "checks": [
@@ -831,8 +831,8 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 339,
-      "stdout": "Run ID: 2026-07-07T05-45-25Z-6cd3add7\nPacket type: command_check\nStatus: setup_failed\nStrategy: none\nArtifact count: 10\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
+      "durationMs": 522,
+      "stdout": "Run ID: 2026-07-08T17-28-29Z-89344962\nPacket type: command_check\nStatus: setup_failed\nStrategy: none\nArtifact count: 10\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/readiness-source/triage-source/check-source/packet --validate\n",
       "checks": [
         "passed"
@@ -857,7 +857,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 371,
+      "durationMs": 527,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__chained-setup-fail__readiness-source__triage-source__check-source/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/readiness-source/triage-source/check-source/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__chained-setup-fail__readiness-source__triage-source__check-source\n",
       "checks": [
@@ -881,8 +881,8 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 352,
-      "stdout": "Run ID: 2026-07-07T05-45-25Z-ee367bc1\nPacket type: failure_triage\nStatus: needs_more_context\nStrategy: none\nArtifact count: 11\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- events.jsonl\n- evidence-excerpts.md\n- failure-triage.md\n- human-review.md\n- metrics.json\n- root-cause.json\n- run.json\n- safe-next-action.md\n- safety-report.json\n- summary.md\n- trajectory.json\n",
+      "durationMs": 527,
+      "stdout": "Run ID: 2026-07-08T17-28-29Z-93d5050b\nPacket type: failure_triage\nStatus: needs_more_context\nStrategy: none\nArtifact count: 11\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- events.jsonl\n- evidence-excerpts.md\n- failure-triage.md\n- human-review.md\n- metrics.json\n- root-cause.json\n- run.json\n- safe-next-action.md\n- safety-report.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/readiness-source/triage-source/packet --validate\n",
       "checks": [
         "passed"
@@ -907,7 +907,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 348,
+      "durationMs": 528,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__chained-setup-fail__readiness-source__triage-source/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/chained-setup-fail/readiness-source/triage-source/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__chained-setup-fail__readiness-source__triage-source\n",
       "checks": [
@@ -931,8 +931,8 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 349,
-      "stdout": "Run ID: 2026-07-07T05-45-16Z-32559a95\nPacket type: command_check\nStatus: setup_failed\nStrategy: none\nArtifact count: 10\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
+      "durationMs": 524,
+      "stdout": "Run ID: 2026-07-08T17-28-17Z-327ea26a\nPacket type: command_check\nStatus: setup_failed\nStrategy: none\nArtifact count: 10\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/setup-001.stderr.log\n- logs/setup-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail-readiness/triage-source/check-source/packet --validate\n",
       "checks": [
         "passed"
@@ -957,7 +957,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 335,
+      "durationMs": 531,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-fail-readiness__triage-source__check-source/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail-readiness/triage-source/check-source/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-fail-readiness__triage-source__check-source\n",
       "checks": [
@@ -981,8 +981,8 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 333,
-      "stdout": "Run ID: 2026-07-07T05-45-16Z-d7532eb8\nPacket type: failure_triage\nStatus: needs_more_context\nStrategy: none\nArtifact count: 11\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- events.jsonl\n- evidence-excerpts.md\n- failure-triage.md\n- human-review.md\n- metrics.json\n- root-cause.json\n- run.json\n- safe-next-action.md\n- safety-report.json\n- summary.md\n- trajectory.json\n",
+      "durationMs": 528,
+      "stdout": "Run ID: 2026-07-08T17-28-17Z-f66ed088\nPacket type: failure_triage\nStatus: needs_more_context\nStrategy: none\nArtifact count: 11\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- events.jsonl\n- evidence-excerpts.md\n- failure-triage.md\n- human-review.md\n- metrics.json\n- root-cause.json\n- run.json\n- safe-next-action.md\n- safety-report.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail-readiness/triage-source/packet --validate\n",
       "checks": [
         "passed"
@@ -1007,7 +1007,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 340,
+      "durationMs": 533,
       "stdout": "Packet viewer written: /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-fail-readiness__triage-source/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha19-acceptance/ALPHA-19/setup-fail-readiness/triage-source/packet --out /tmp/runforge-alpha19-acceptance/viewers/ALPHA-19__setup-fail-readiness__triage-source\n",
       "checks": [
@@ -1034,7 +1034,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 396,
+      "durationMs": 612,
       "stdout": "Indexed 13 packet/run entries under /tmp/runforge-alpha19-acceptance.\nALPHA-19 chained-setup-fail: not_ready decision=rejected_no_safe_proposal validation=unknown->unknown mutation=unknown\nALPHA-19 check-source: setup_failed decision=unknown validation=unknown->unknown mutation=unchanged\nALPHA-19 check-source: setup_failed decision=unknown validation=unknown->unknown mutation=unchanged\nALPHA-19 factory: passed decision=unknown validation=unknown->unknown mutation=unchanged\nALPHA-19 readiness-source: needs_more_context decision=unknown validation=unknown->unknown mutation=unknown\nALPHA-19 setup-diagnostic: setup_failed_main_failed decision=unknown validation=unknown->unknown mutation=unchanged\nALPHA-19 setup-fail-readiness: needs_more_context decision=unknown validation=unknown->unknown mutation=unknown\nALPHA-19 setup-fail: setup_failed decision=unknown validation=unknown->unknown mutation=unchanged\nALPHA-19 setup-network-expected: passed decision=unknown validation=unknown->unknown mutation=unchanged\nALPHA-19 setup-pass: passed decision=unknown validation=unknown->unknown mutation=unchanged\nALPHA-19 smartsql: passed decision=unknown validation=unknown->unknown mutation=unchanged\nALPHA-19 triage-source: needs_more_context decision=unknown validation=unknown->unknown mutation=unknown\nALPHA-19 triage-source: needs_more_context decision=unknown validation=unknown->unknown mutation=unknown\n",
       "stderr": "$ tsx src/cli/index.ts packet index --root /tmp/runforge-alpha19-acceptance --out /tmp/runforge-alpha19-acceptance/index --dashboard-seed\n",
       "checks": [
@@ -1060,7 +1060,7 @@
       "ok": true,
       "expectedSuccess": true,
       "exitCode": 0,
-      "durationMs": 343,
+      "durationMs": 543,
       "stdout": "Dashboard written: /tmp/runforge-alpha19-acceptance/dashboard/index.html\nDashboard data written: /tmp/runforge-alpha19-acceptance/dashboard/dashboard-data.json\n",
       "stderr": "$ tsx src/cli/index.ts dashboard build --seed /tmp/runforge-alpha19-acceptance/index/dashboard-seed.json --out /tmp/runforge-alpha19-acceptance/dashboard\n",
       "checks": [

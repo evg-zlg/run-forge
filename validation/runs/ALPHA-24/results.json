@@ -1,6 +1,6 @@
 {
   "schemaVersion": "alpha-24-operator-handoff",
-  "generatedAt": "2026-07-07T06:20:35.415Z",
+  "generatedAt": "2026-07-08T17:30:38.737Z",
   "trialRoot": "/tmp/runforge-alpha24-operator-handoff/factory",
   "originalRepo": {
     "path": "/Users/evgeny/Documents/projects/factory",
@@ -103,7 +103,7 @@
     "(cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)",
     "(cd /Users/evgeny/Documents/projects/factory && git status --short)",
     "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha24-operator-handoff/factory/index --dashboard-seed",
-    "# stdout: Indexed 12 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stdout: Indexed 14 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
     "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha24-operator-handoff/factory/index --dashboard-seed",
     "pnpm dev dashboard build --seed /tmp/runforge-alpha24-operator-handoff/factory/index/dashboard-seed.json --out /tmp/runforge-alpha24-operator-handoff/factory/dashboard",
     "# stdout: Dashboard written: /tmp/runforge-alpha24-operator-handoff/factory/dashboard/index.html",
