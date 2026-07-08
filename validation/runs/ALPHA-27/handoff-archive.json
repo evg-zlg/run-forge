@@ -1,0 +1,121 @@
+{
+  "schemaVersion": "alpha-26-handoff-archive",
+  "generatedAt": "2026-07-08T17:58:09.647Z",
+  "root": "/tmp/runforge-alpha27-handoff-archive-viewer/source",
+  "records": [
+    {
+      "id": "ALPHA-27-DEMO__accepted-handoff",
+      "repoPath": "/tmp/runforge-alpha27-handoff-archive-viewer/repos/factory",
+      "repoName": "factory",
+      "handoffPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/handoff.json",
+      "handoffReadmePath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/README.md",
+      "patchPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/proposal.patch",
+      "auditResultPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-audit/audit-result.json",
+      "auditReportPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-audit/audit-report.md",
+      "decisionPath": "unknown",
+      "operatorSummaryPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/operator-summary.md",
+      "lifecycleReportPath": "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json",
+      "auditStatus": "passed",
+      "decisionVerdict": "accepted",
+      "validationBefore": "failed",
+      "validationAfter": "passed",
+      "originalRepoMutated": false,
+      "safetyStatus": "safe",
+      "unsafeReasons": [],
+      "lifecycleRefs": [
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json"
+      ],
+      "validationCommands": [
+        "node verify.cjs"
+      ],
+      "createdFromAlpha": "ALPHA-27-DEMO",
+      "findings": [],
+      "recommendations": [
+        "Candidate OKF lesson: accepted audited handoff flow works for repo factory."
+      ]
+    },
+    {
+      "id": "ALPHA-27-DEMO__unsafe-handoff",
+      "repoPath": "/tmp/runforge-alpha27-handoff-archive-viewer/repos/factory",
+      "repoName": "factory",
+      "handoffPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/handoff.json",
+      "handoffReadmePath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/README.md",
+      "patchPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/proposal.patch",
+      "auditResultPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-audit/audit-result.json",
+      "auditReportPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-audit/audit-report.md",
+      "decisionPath": "unknown",
+      "operatorSummaryPath": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/operator-summary.md",
+      "lifecycleReportPath": "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json",
+      "auditStatus": "failed",
+      "decisionVerdict": "rejected",
+      "validationBefore": "failed",
+      "validationAfter": "skipped",
+      "originalRepoMutated": false,
+      "safetyStatus": "unsafe",
+      "unsafeReasons": [
+        "handoff safety.pushUsed=true",
+        "handoff proposal autoAppliedByRunForge=true",
+        "handoff allows original_repo apply target",
+        "audit found unsafe instructions",
+        "audit found forbidden targets",
+        "validation command attempts forbidden push operation"
+      ],
+      "lifecycleRefs": [
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json"
+      ],
+      "validationCommands": [
+        "git push origin main"
+      ],
+      "createdFromAlpha": "ALPHA-27-DEMO",
+      "findings": [
+        "unsafe: handoff safety.pushUsed=true",
+        "unsafe: handoff proposal autoAppliedByRunForge=true",
+        "unsafe: handoff allows original_repo apply target",
+        "unsafe: audit found unsafe instructions",
+        "unsafe: audit found forbidden targets",
+        "unsafe: validation command attempts forbidden push operation"
+      ],
+      "recommendations": [
+        "Candidate safety lesson: rejected unsafe handoff for repo factory; review handoff safety.pushUsed=true."
+      ]
+    }
+  ],
+  "counts": {
+    "records": 2,
+    "byRepo": {
+      "factory": 2
+    },
+    "byDecision": {
+      "accepted": 1,
+      "rejected": 1
+    },
+    "byAuditStatus": {
+      "failed": 1,
+      "passed": 1
+    },
+    "bySafetyStatus": {
+      "safe": 1,
+      "unsafe": 1
+    },
+    "byValidationAfter": {
+      "passed": 1,
+      "skipped": 1
+    }
+  },
+  "findings": [
+    "ALPHA-27-DEMO__unsafe-handoff: unsafe: handoff safety.pushUsed=true",
+    "ALPHA-27-DEMO__unsafe-handoff: unsafe: handoff proposal autoAppliedByRunForge=true",
+    "ALPHA-27-DEMO__unsafe-handoff: unsafe: handoff allows original_repo apply target",
+    "ALPHA-27-DEMO__unsafe-handoff: unsafe: audit found unsafe instructions",
+    "ALPHA-27-DEMO__unsafe-handoff: unsafe: audit found forbidden targets",
+    "ALPHA-27-DEMO__unsafe-handoff: unsafe: validation command attempts forbidden push operation"
+  ],
+  "recommendations": [
+    "Candidate OKF lesson: accepted audited handoff flow works for repo factory.",
+    "Candidate safety lesson: rejected unsafe handoff for repo factory; review handoff safety.pushUsed=true."
+  ],
+  "validation": {
+    "passed": true,
+    "errors": []
+  }
+}

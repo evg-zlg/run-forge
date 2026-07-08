@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RunForge Operator Handoff Archive Viewer</title>
+  <link rel="stylesheet" href="assets/viewer.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <p class="eyebrow">RunForge Alpha-27</p>
+      <h1>Operator Handoff Archive Viewer</h1>
+      <p class="meta">Generated 2026-07-08T17:58:10.170Z from handoff-archive.json</p>
+    </div>
+    <div class="safety" role="status">Read-only local viewer. It never applies patches, mutates original repositories, calls providers, pushes, merges, deploys, or promotes skills.</div>
+  </header>
+  <main>
+    <section class="summary" aria-label="Archive summary">
+      <div class="count-group"><h2>Records</h2><div><span>total</span><strong>2</strong></div></div>
+      <div class="count-group"><h2>By repo</h2><div><span>factory</span><strong>2</strong></div></div>
+      <div class="count-group"><h2>By decision</h2><div><span>accepted</span><strong>1</strong></div><div><span>rejected</span><strong>1</strong></div></div>
+      <div class="count-group"><h2>By audit</h2><div><span>failed</span><strong>1</strong></div><div><span>passed</span><strong>1</strong></div></div>
+      <div class="count-group"><h2>By safety</h2><div><span>safe</span><strong>1</strong></div><div><span>unsafe</span><strong>1</strong></div></div>
+      <div class="count-group"><h2>By validation after</h2><div><span>passed</span><strong>1</strong></div><div><span>skipped</span><strong>1</strong></div></div>
+    </section>
+
+    <section class="filters" aria-label="Archive filters">
+      <label>Repo <input id="filter-repo" type="search" placeholder="substring" autocomplete="off"></label>
+      <label>Decision <select id="filter-decision"><option value="">Any</option><option value="accepted">accepted</option><option value="rejected">rejected</option></select></label>
+      <label>Audit <select id="filter-audit"><option value="">Any</option><option value="failed">failed</option><option value="passed">passed</option></select></label>
+      <label>Safety <select id="filter-safety"><option value="">Any</option><option value="safe">safe</option><option value="unsafe">unsafe</option></select></label>
+      <label>Validation <select id="filter-validation"><option value="">Any</option><option value="passed">passed</option><option value="skipped">skipped</option></select></label>
+      <label>Original repo <select id="filter-mutated"><option value="">Any</option><option value="unchanged">unchanged</option></select></label>
+      <button id="reset-filters" type="button">Reset</button>
+    </section>
+
+    <section class="records" aria-label="Archive records">
+      <div class="record-count"><span id="visible-count">2</span> of 2 records</div>
+      <div id="empty-state" class="empty" hidden>No handoff archive records match the current filters.</div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Repo</th>
+              <th>Decision</th>
+              <th>Audit</th>
+              <th>Safety</th>
+              <th>Validation</th>
+              <th>Original repo</th>
+              <th>Artifacts</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr data-repo="/tmp/runforge-alpha27-handoff-archive-viewer/repos/factory factory" data-decision="accepted" data-audit="passed" data-safety-status="safe" data-validation="passed" data-mutated="unchanged">
+  <td><strong>factory</strong><span>ALPHA-27-DEMO</span></td>
+  <td><span class="badge">accepted</span></td>
+  <td><span class="badge">passed</span></td>
+  <td><span class="badge">safe</span></td>
+  <td>failed -&gt; passed</td>
+  <td>unchanged</td>
+  <td><details><summary>Paths and notes</summary><div class="artifact"><span>Handoff README</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/README.md</code></div><div class="artifact"><span>Handoff JSON</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/handoff.json</code></div><div class="artifact"><span>Proposal patch</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/proposal.patch</code></div><div class="artifact"><span>Audit result</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-audit/audit-result.json</code></div><div class="artifact"><span>Audit report</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-audit/audit-report.md</code></div><div class="artifact"><span>Operator decision</span><code>missing</code></div><div class="artifact"><span>Lifecycle evidence</span><code>/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json</code></div><div class="detail-list"><span>Validation commands</span><ul><li>node verify.cjs</li></ul></div><div class="detail-list"><span>Lifecycle refs</span><ul><li>/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json</li></ul></div><div class="detail-list"><span>Safety notes</span><ul><li>No unsafe reasons recorded.</li></ul></div><div class="detail-list"><span>Missing optional files</span><ul><li>operator decision</li></ul></div><div class="detail-list"><span>Record recommendations</span><ul><li>Candidate OKF lesson: accepted audited handoff flow works for repo factory.</li></ul></div></details></td>
+</tr>
+<tr data-repo="/tmp/runforge-alpha27-handoff-archive-viewer/repos/factory factory" data-decision="rejected" data-audit="failed" data-safety-status="unsafe" data-validation="skipped" data-mutated="unchanged">
+  <td><strong>factory</strong><span>ALPHA-27-DEMO</span></td>
+  <td><span class="badge">rejected</span></td>
+  <td><span class="badge">failed</span></td>
+  <td><span class="badge">UNSAFE</span></td>
+  <td>failed -&gt; skipped</td>
+  <td>unchanged</td>
+  <td><details><summary>Paths and notes</summary><div class="artifact"><span>Handoff README</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/README.md</code></div><div class="artifact"><span>Handoff JSON</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/handoff.json</code></div><div class="artifact"><span>Proposal patch</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/proposal.patch</code></div><div class="artifact"><span>Audit result</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-audit/audit-result.json</code></div><div class="artifact"><span>Audit report</span><code>/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-audit/audit-report.md</code></div><div class="artifact"><span>Operator decision</span><code>missing</code></div><div class="artifact"><span>Lifecycle evidence</span><code>/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json</code></div><div class="detail-list"><span>Validation commands</span><ul><li>[redacted unsafe command: see handoff and audit artifacts]</li></ul></div><div class="detail-list"><span>Lifecycle refs</span><ul><li>/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json</li></ul></div><div class="detail-list"><span>Safety notes</span><ul><li>handoff safety.pushUsed=true</li><li>handoff proposal autoAppliedByRunForge=true</li><li>handoff allows original_repo apply target</li><li>audit found unsafe instructions</li><li>audit found forbidden targets</li><li>validation command attempts forbidden push operation</li></ul></div><div class="detail-list"><span>Missing optional files</span><ul><li>operator decision</li></ul></div><div class="detail-list"><span>Record recommendations</span><ul><li>Candidate safety lesson: rejected unsafe handoff for repo factory; review handoff safety.pushUsed=true.</li></ul></div></details></td>
+</tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section class="recommendations" aria-label="Findings and recommendations">
+      <h2>Findings</h2>
+      <ul><li>ALPHA-27-DEMO__unsafe-handoff: unsafe: handoff safety.pushUsed=true</li><li>ALPHA-27-DEMO__unsafe-handoff: unsafe: handoff proposal autoAppliedByRunForge=true</li><li>ALPHA-27-DEMO__unsafe-handoff: unsafe: handoff allows original_repo apply target</li><li>ALPHA-27-DEMO__unsafe-handoff: unsafe: audit found unsafe instructions</li><li>ALPHA-27-DEMO__unsafe-handoff: unsafe: audit found forbidden targets</li><li>ALPHA-27-DEMO__unsafe-handoff: unsafe: validation command attempts forbidden push operation</li></ul>
+      <h2>OKF / Skills Recommendations</h2>
+      <ul><li>Candidate OKF lesson: accepted audited handoff flow works for repo factory.</li><li>Candidate safety lesson: rejected unsafe handoff for repo factory; review handoff safety.pushUsed=true.</li></ul>
+      <h2>Source Metadata</h2>
+      <dl>
+        <dt>Archive root</dt><dd>/tmp/runforge-alpha27-handoff-archive-viewer/source</dd>
+        <dt>Archive generated</dt><dd>2026-07-08T17:58:09.647Z</dd>
+      </dl>
+    </section>
+  </main>
+  <script type="application/json" id="viewer-records">[{&quot;id&quot;:&quot;ALPHA-27-DEMO__accepted-handoff&quot;,&quot;repoPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/repos/factory&quot;,&quot;repoName&quot;:&quot;factory&quot;,&quot;handoffPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/handoff.json&quot;,&quot;handoffReadmePath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/README.md&quot;,&quot;patchPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/proposal.patch&quot;,&quot;auditResultPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-audit/audit-result.json&quot;,&quot;auditReportPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-audit/audit-report.md&quot;,&quot;decisionPath&quot;:&quot;unknown&quot;,&quot;operatorSummaryPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/operator-summary.md&quot;,&quot;lifecycleReportPath&quot;:&quot;/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json&quot;,&quot;auditStatus&quot;:&quot;passed&quot;,&quot;decisionVerdict&quot;:&quot;accepted&quot;,&quot;validationBefore&quot;:&quot;failed&quot;,&quot;validationAfter&quot;:&quot;passed&quot;,&quot;originalRepoMutated&quot;:false,&quot;safetyStatus&quot;:&quot;safe&quot;,&quot;unsafeReasons&quot;:[],&quot;lifecycleRefs&quot;:[&quot;/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json&quot;],&quot;validationCommands&quot;:[&quot;node verify.cjs&quot;],&quot;createdFromAlpha&quot;:&quot;ALPHA-27-DEMO&quot;,&quot;findings&quot;:[],&quot;recommendations&quot;:[&quot;Candidate OKF lesson: accepted audited handoff flow works for repo factory.&quot;],&quot;mutationVerdict&quot;:&quot;unchanged&quot;,&quot;displayValidationCommands&quot;:[&quot;node verify.cjs&quot;],&quot;missingOptionalFiles&quot;:[&quot;operator decision&quot;]},{&quot;id&quot;:&quot;ALPHA-27-DEMO__unsafe-handoff&quot;,&quot;repoPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/repos/factory&quot;,&quot;repoName&quot;:&quot;factory&quot;,&quot;handoffPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/handoff.json&quot;,&quot;handoffReadmePath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/README.md&quot;,&quot;patchPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/proposal.patch&quot;,&quot;auditResultPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-audit/audit-result.json&quot;,&quot;auditReportPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-audit/audit-report.md&quot;,&quot;decisionPath&quot;:&quot;unknown&quot;,&quot;operatorSummaryPath&quot;:&quot;/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/unsafe-handoff/operator-summary.md&quot;,&quot;lifecycleReportPath&quot;:&quot;/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json&quot;,&quot;auditStatus&quot;:&quot;failed&quot;,&quot;decisionVerdict&quot;:&quot;rejected&quot;,&quot;validationBefore&quot;:&quot;failed&quot;,&quot;validationAfter&quot;:&quot;skipped&quot;,&quot;originalRepoMutated&quot;:false,&quot;safetyStatus&quot;:&quot;unsafe&quot;,&quot;unsafeReasons&quot;:[&quot;handoff safety.pushUsed=true&quot;,&quot;handoff proposal autoAppliedByRunForge=true&quot;,&quot;handoff allows original_repo apply target&quot;,&quot;audit found unsafe instructions&quot;,&quot;audit found forbidden targets&quot;,&quot;validation command attempts forbidden push operation&quot;],&quot;lifecycleRefs&quot;:[&quot;/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-27/lifecycle-report.json&quot;],&quot;validationCommands&quot;:[&quot;[redacted unsafe command: see handoff and audit artifacts]&quot;],&quot;createdFromAlpha&quot;:&quot;ALPHA-27-DEMO&quot;,&quot;findings&quot;:[&quot;unsafe: handoff safety.pushUsed=true&quot;,&quot;unsafe: handoff proposal autoAppliedByRunForge=true&quot;,&quot;unsafe: handoff allows original_repo apply target&quot;,&quot;unsafe: audit found unsafe instructions&quot;,&quot;unsafe: audit found forbidden targets&quot;,&quot;unsafe: validation command attempts forbidden push operation&quot;],&quot;recommendations&quot;:[&quot;Candidate safety lesson: rejected unsafe handoff for repo factory; review handoff safety.pushUsed=true.&quot;],&quot;mutationVerdict&quot;:&quot;unchanged&quot;,&quot;displayValidationCommands&quot;:[&quot;[redacted unsafe command: see handoff and audit artifacts]&quot;],&quot;missingOptionalFiles&quot;:[&quot;operator decision&quot;]}]</script>
+  <script src="assets/viewer.js"></script>
+</body>
+</html>
