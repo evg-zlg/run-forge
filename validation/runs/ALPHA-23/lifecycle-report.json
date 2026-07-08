@@ -1,6 +1,6 @@
 {
   "schemaVersion": "alpha-23-compact-lifecycle-report",
-  "generatedAt": "2026-07-07T05:47:04.599Z",
+  "generatedAt": "2026-07-08T17:30:26.250Z",
   "validation": {
     "ok": true,
     "errors": []
@@ -8,12 +8,12 @@
   "sourceCounts": {
     "okfFiles": 33,
     "skills": 0,
-    "validationRuns": 40,
-    "evidenceFiles": 63
+    "validationRuns": 44,
+    "evidenceFiles": 71
   },
   "lifecycleStatusCounts": {
-    "candidate": 35,
-    "active": 22,
+    "candidate": 36,
+    "active": 25,
     "needs_review": 0,
     "stale": 16,
     "duplicate": 0,
@@ -24,7 +24,7 @@
   "operatorTrialCounts": {
     "accepted": 3,
     "rejected": 2,
-    "missingDecision": 2,
+    "missingDecision": 5,
     "unsafeMutation": 0
   },
   "alpha23": {

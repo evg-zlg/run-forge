@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-07-07T05:45:41.229Z",
+  "generatedAt": "2026-07-08T17:28:46.176Z",
   "repoRoot": "/Users/evgeny/Documents/projects/RunForge",
   "sources": {
     "runs": "validation/runs",
@@ -10,8 +10,8 @@
   "sourceCounts": {
     "okfFiles": 33,
     "skills": 0,
-    "validationRuns": 40,
-    "evidenceFiles": 64
+    "validationRuns": 44,
+    "evidenceFiles": 72
   },
   "okfEntryCounts": {
     "candidate": 1,
@@ -34,8 +34,8 @@
     "retired": 0
   },
   "lifecycleStatusCounts": {
-    "candidate": 35,
-    "active": 22,
+    "candidate": 36,
+    "active": 25,
     "needs_review": 0,
     "stale": 16,
     "duplicate": 0,
@@ -49,7 +49,7 @@
   "recommendations": [
     "Keep packets and dashboard/index records as runtime truth; use OKF as portable memory.",
     "Review candidate knowledge and skills before promotion.",
-    "Next milestone: harden the operator patch trial UX around proposal packets, patches, validation, decisions, dashboard rows, and lifecycle entries."
+    "Next milestone: replay and audit existing operator handoff packets in disposable worktrees."
   ],
   "milestoneComparison": [
     "Alpha-17 run evidence is not present as validation/runs/ALPHA-17; Alpha-17 OKF and skills artifacts are covered through generated export, validation, inventory, and curator outputs.",
@@ -57,13 +57,18 @@
     "Alpha-20 connects those artifacts into a lifecycle report with deterministic status counts, findings, recommendations, and safety summary.",
     "Alpha-21 records a manual operator accepted-patch trial with validation rerun evidence and no RunForge auto-apply.",
     "Alpha-22 extends the operator loop to a real external repo disposable copy and records accepted and rejected operator decisions separately.",
-    "Alpha-23 hardens operator patch trial UX with decision summaries, safety lint, and accepted/rejected visibility."
+    "Alpha-23 hardens operator patch trial UX with decision summaries, safety lint, and accepted/rejected visibility.",
+    "Alpha-24 generates a portable real-operator handoff packet with manual apply, validation, rollback, decisions, and evidence links.",
+    "Alpha-25 replays and audits operator handoff packets in disposable worktrees, including unsafe-packet rejection evidence.",
+    "Alpha-26 archives and searches handoff/audit evidence with lifecycle recommendations."
   ],
   "evidenceLinks": [
     "validation/runs/ADMIN-UI-2/results.json",
     "validation/runs/ADMIN-UI-2/summary.md",
     "validation/runs/ADMIN-UI-3/results.json",
     "validation/runs/ADMIN-UI-3/summary.md",
+    "validation/runs/ADMIN-UI-4/results.json",
+    "validation/runs/ADMIN-UI-4/summary.md",
     "validation/runs/ADMIN-UI-ALPHA/results.json",
     "validation/runs/ADMIN-UI-ALPHA/summary.md",
     "validation/runs/ALPHA-10/results.json",
@@ -92,14 +97,12 @@
     "validation/runs/ALPHA-22/summary.md",
     "validation/runs/ALPHA-23/results.json",
     "validation/runs/ALPHA-23/summary.md",
-    "validation/runs/ALPHA-3/results.json",
-    "validation/runs/ALPHA-3/summary.md",
-    "validation/runs/ALPHA-3A/score.json",
-    "validation/runs/ALPHA-4/results.json",
-    "validation/runs/ALPHA-4/summary.md",
-    "validation/runs/ALPHA-5/results.json",
-    "validation/runs/ALPHA-5/summary.md",
-    "validation/runs/ALPHA-6/results.json"
+    "validation/runs/ALPHA-24/results.json",
+    "validation/runs/ALPHA-24/summary.md",
+    "validation/runs/ALPHA-25/results.json",
+    "validation/runs/ALPHA-25/summary.md",
+    "validation/runs/ALPHA-26/results.json",
+    "validation/runs/ALPHA-26/summary.md"
   ],
   "validation": {
     "ok": true,
@@ -114,9 +117,57 @@
   "operatorTrialCounts": {
     "accepted": 3,
     "rejected": 2,
-    "missingDecision": 2,
+    "missingDecision": 5,
     "unsafeMutation": 0
   },
+  "handoffPacketCounts": {
+    "generated": 1,
+    "missingReadme": 0,
+    "unsafe": 0,
+    "audited": 2,
+    "auditPassed": 1,
+    "auditFailed": 1,
+    "unsafeRejected": 1
+  },
+  "handoffArchiveCounts": {
+    "records": 9,
+    "byRepo": {
+      "factory": 7,
+      "smartsql": 1,
+      "source": 1
+    },
+    "byDecision": {
+      "accepted": 4,
+      "handoff_archive_generated": 1,
+      "handoff_generated": 1,
+      "rejected": 3
+    },
+    "byAuditStatus": {
+      "failed": 1,
+      "missing": 6,
+      "passed": 2
+    },
+    "bySafetyStatus": {
+      "safe": 4,
+      "unknown": 4,
+      "unsafe": 1
+    },
+    "byValidationAfter": {
+      "failed": 1,
+      "passed": 3,
+      "pending_operator": 1,
+      "skipped": 1,
+      "unknown": 3
+    }
+  },
+  "handoffArchiveRecommendations": [
+    "Candidate OKF lesson: accepted audited handoff flow works for repo factory.",
+    "Candidate archive lesson: preserve handoff/audit evidence for repo factory.",
+    "Candidate archive lesson: preserve handoff/audit evidence for repo source.",
+    "Candidate lesson: declined or failed handoff for repo factory; review validation and decision rules.",
+    "Candidate lesson: declined or failed handoff for repo smartsql; review validation and decision rules.",
+    "Candidate safety lesson: rejected unsafe handoff for repo factory; review handoff proposal autoAppliedByRunForge=true."
+  ],
   "items": [
     {
       "id": "okf:index",
@@ -127,6 +178,7 @@
       "evidenceLinks": [
         "milestones/admin-ui-2.md",
         "milestones/admin-ui-3.md",
+        "milestones/admin-ui-4.md",
         "milestones/admin-ui-alpha.md",
         "milestones/alpha-3.md",
         "milestones/alpha-3a.md",
@@ -149,6 +201,9 @@
         "milestones/alpha-21.md",
         "milestones/alpha-22.md",
         "milestones/alpha-23.md",
+        "milestones/alpha-24.md",
+        "milestones/alpha-25.md",
+        "milestones/alpha-26.md",
         "milestones/case-001.md",
         "milestones/case-002.md",
         "milestones/case-003.md",
@@ -184,6 +239,8 @@
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-2/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-3/summary.md",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-3/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-4/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-4/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-ALPHA/summary.md",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ADMIN-UI-ALPHA/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-3/summary.md",
@@ -228,6 +285,12 @@
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-22/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-23/summary.md",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-23/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-24/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-24/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-25/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-25/results.json",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-26/summary.md",
+        "/Users/evgeny/Documents/projects/RunForge/validation/runs/ALPHA-26/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-001/summary.md",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-001/results.json",
         "/Users/evgeny/Documents/projects/RunForge/validation/runs/case-002/summary.md",
@@ -731,6 +794,18 @@
       "findings": []
     },
     {
+      "id": "evidence:ADMIN-UI-4",
+      "kind": "evidence",
+      "title": "ADMIN-UI-4",
+      "status": "candidate",
+      "path": "validation/runs/ADMIN-UI-4",
+      "evidenceLinks": [
+        "validation/runs/ADMIN-UI-4/summary.md",
+        "validation/runs/ADMIN-UI-4/results.json"
+      ],
+      "findings": []
+    },
+    {
       "id": "evidence:ADMIN-UI-ALPHA",
       "kind": "evidence",
       "title": "ADMIN-UI-ALPHA",
@@ -991,6 +1066,42 @@
       "evidenceLinks": [
         "validation/runs/ALPHA-23/summary.md",
         "validation/runs/ALPHA-23/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-24",
+      "kind": "evidence",
+      "title": "ALPHA-24",
+      "status": "active",
+      "path": "validation/runs/ALPHA-24",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-24/summary.md",
+        "validation/runs/ALPHA-24/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-25",
+      "kind": "evidence",
+      "title": "ALPHA-25",
+      "status": "active",
+      "path": "validation/runs/ALPHA-25",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-25/summary.md",
+        "validation/runs/ALPHA-25/results.json"
+      ],
+      "findings": []
+    },
+    {
+      "id": "evidence:ALPHA-26",
+      "kind": "evidence",
+      "title": "ALPHA-26",
+      "status": "active",
+      "path": "validation/runs/ALPHA-26",
+      "evidenceLinks": [
+        "validation/runs/ALPHA-26/summary.md",
+        "validation/runs/ALPHA-26/results.json"
       ],
       "findings": []
     },

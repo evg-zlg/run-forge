@@ -1,6 +1,6 @@
 # RunForge Alpha-21 Operator Accepted Patch Trial
 
-Generated at: 2026-07-07T05:46:41.586Z
+Generated at: 2026-07-08T17:30:01.458Z
 Trial root: /tmp/runforge-alpha21-operator-trial
 
 ## Outcome
@@ -46,7 +46,7 @@ Final verdict: passed
 - (cd /tmp/runforge-alpha21-operator-trial/source && git rev-parse HEAD)
 - (cd /tmp/runforge-alpha21-operator-trial/source && git rev-parse HEAD)
 - pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha21-operator-trial/index --dashboard-seed
-- # stdout: Indexed 11 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
+- # stdout: Indexed 14 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
 - # stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha21-operator-trial/index --dashboard-seed
 - pnpm dev dashboard build --seed /tmp/runforge-alpha21-operator-trial/index/dashboard-seed.json --out /tmp/runforge-alpha21-operator-trial/dashboard
 - # stdout: Dashboard written: /tmp/runforge-alpha21-operator-trial/dashboard/index.html

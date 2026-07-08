@@ -1,6 +1,6 @@
 {
   "schemaVersion": "alpha-25-compact-lifecycle-report",
-  "generatedAt": "2026-07-07T11:51:38.846Z",
+  "generatedAt": "2026-07-08T17:30:47.457Z",
   "validation": {
     "ok": true,
     "errors": []
@@ -8,12 +8,12 @@
   "sourceCounts": {
     "okfFiles": 33,
     "skills": 0,
-    "validationRuns": 43,
-    "evidenceFiles": 69
+    "validationRuns": 44,
+    "evidenceFiles": 71
   },
   "lifecycleStatusCounts": {
     "candidate": 36,
-    "active": 24,
+    "active": 25,
     "needs_review": 0,
     "stale": 16,
     "duplicate": 0,
@@ -24,7 +24,7 @@
   "operatorTrialCounts": {
     "accepted": 3,
     "rejected": 2,
-    "missingDecision": 4,
+    "missingDecision": 5,
     "unsafeMutation": 0
   },
   "handoffPacketCounts": {

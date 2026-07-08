@@ -1,6 +1,6 @@
 # RunForge Alpha-23 Operator Patch Trial UX Hardening
 
-Generated at: 2026-07-07T05:47:04.599Z
+Generated at: 2026-07-08T17:30:26.250Z
 Trial root: /tmp/runforge-alpha23-operator-patch-ux/factory
 
 ## Outcome
@@ -77,7 +77,7 @@ Final verdict: passed
 - (cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)
 - (cd /Users/evgeny/Documents/projects/factory && git status --short)
 - pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha23-operator-patch-ux/factory/index --dashboard-seed
-- # stdout: Indexed 11 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
+- # stdout: Indexed 14 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
 - # stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha23-operator-patch-ux/factory/index --dashboard-seed
 - pnpm dev dashboard build --seed /tmp/runforge-alpha23-operator-patch-ux/factory/index/dashboard-seed.json --out /tmp/runforge-alpha23-operator-patch-ux/factory/dashboard
 - # stdout: Dashboard written: /tmp/runforge-alpha23-operator-patch-ux/factory/dashboard/index.html

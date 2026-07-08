@@ -1,6 +1,6 @@
 # RunForge Alpha-22 Real External Repo Operator Trial
 
-Generated at: 2026-07-07T05:46:53.457Z
+Generated at: 2026-07-08T17:30:13.866Z
 Trial root: /tmp/runforge-alpha22-real-repo-trial/factory
 
 ## Outcome
@@ -73,7 +73,7 @@ Final verdict: passed
 - (cd /Users/evgeny/Documents/projects/factory && git rev-parse HEAD)
 - (cd /Users/evgeny/Documents/projects/factory && git status --short)
 - pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha22-real-repo-trial/factory/index --dashboard-seed
-- # stdout: Indexed 11 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
+- # stdout: Indexed 14 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.
 - # stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha22-real-repo-trial/factory/index --dashboard-seed
 - pnpm dev dashboard build --seed /tmp/runforge-alpha22-real-repo-trial/factory/index/dashboard-seed.json --out /tmp/runforge-alpha22-real-repo-trial/factory/dashboard
 - # stdout: Dashboard written: /tmp/runforge-alpha22-real-repo-trial/factory/dashboard/index.html

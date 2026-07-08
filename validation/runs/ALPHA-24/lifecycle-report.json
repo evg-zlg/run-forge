@@ -1,6 +1,6 @@
 {
   "schemaVersion": "alpha-24-compact-lifecycle-report",
-  "generatedAt": "2026-07-07T06:20:35.438Z",
+  "generatedAt": "2026-07-08T17:30:38.839Z",
   "validation": {
     "ok": true,
     "errors": []
@@ -8,12 +8,12 @@
   "sourceCounts": {
     "okfFiles": 33,
     "skills": 0,
-    "validationRuns": 41,
-    "evidenceFiles": 65
+    "validationRuns": 44,
+    "evidenceFiles": 71
   },
   "lifecycleStatusCounts": {
-    "candidate": 35,
-    "active": 23,
+    "candidate": 36,
+    "active": 25,
     "needs_review": 0,
     "stale": 16,
     "duplicate": 0,
@@ -24,13 +24,17 @@
   "operatorTrialCounts": {
     "accepted": 3,
     "rejected": 2,
-    "missingDecision": 3,
+    "missingDecision": 5,
     "unsafeMutation": 0
   },
   "handoffPacketCounts": {
     "generated": 1,
     "missingReadme": 0,
-    "unsafe": 0
+    "unsafe": 0,
+    "audited": 2,
+    "auditPassed": 1,
+    "auditFailed": 1,
+    "unsafeRejected": 1
   },
   "alpha24": {
     "status": "active",
