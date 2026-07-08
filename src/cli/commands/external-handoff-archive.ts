@@ -1,5 +1,6 @@
 import { Command, InvalidArgumentError } from "commander";
 import { buildHandoffArchive, renderHandoffArchiveMarkdown, renderHandoffSearchMarkdown, renderHandoffSearchTable, searchHandoffArchive, validateHandoffArchiveFile } from "../../run/external-operator-handoff-archive.js";
+import { buildHandoffArchiveViewer, validateHandoffArchiveViewer } from "../../run/external-operator-handoff-archive-viewer.js";
 
 export function handoffArchiveCommand(): Command {
   return new Command("handoff-archive")
@@ -60,6 +61,40 @@ export function handoffArchiveValidateCommand(): Command {
     .action(async (opts) => {
       try {
         const validation = await validateHandoffArchiveFile(opts.archive as string);
+        console.log(JSON.stringify(validation, null, 2));
+        if (!validation.passed) process.exitCode = 1;
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+export function handoffArchiveViewerCommand(): Command {
+  return new Command("handoff-archive-viewer")
+    .description("Generate a read-only local static viewer for a handoff archive.")
+    .requiredOption("--archive <archive-json>", "handoff-archive.json path")
+    .requiredOption("--out <viewer-output-root>", "viewer output directory")
+    .action(async (opts) => {
+      try {
+        const result = await buildHandoffArchiveViewer({ archive: opts.archive as string, out: opts.out as string });
+        console.log(`Handoff archive viewer written: ${result.indexPath}`);
+        console.log(`Records rendered: ${result.records.length}`);
+        console.log(`Validation: ${result.validation.passed ? "passed" : "failed"}`);
+        if (!result.validation.passed) process.exitCode = 1;
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+export function handoffArchiveViewerValidateCommand(): Command {
+  return new Command("handoff-archive-viewer-validate")
+    .description("Validate generated handoff archive viewer files for local-first read-only safety.")
+    .requiredOption("--archive <archive-json>", "handoff-archive.json path")
+    .requiredOption("--viewer <viewer-output-root>", "viewer output directory")
+    .action(async (opts) => {
+      try {
+        const validation = await validateHandoffArchiveViewer({ archivePath: opts.archive as string, outDir: opts.viewer as string });
         console.log(JSON.stringify(validation, null, 2));
         if (!validation.passed) process.exitCode = 1;
       } catch (error) {

@@ -1,0 +1,153 @@
+{
+  "schemaVersion": "alpha-27-handoff-archive-viewer",
+  "generatedAt": "2026-07-08T17:58:10.727Z",
+  "archiveSource": "/tmp/runforge-alpha27-handoff-archive-viewer/archive/handoff-archive.json",
+  "viewer": {
+    "command": "pnpm dev external handoff-archive-viewer --archive /tmp/runforge-alpha27-handoff-archive-viewer/archive/handoff-archive.json --out /tmp/runforge-alpha27-handoff-archive-viewer/viewer",
+    "out": "/tmp/runforge-alpha27-handoff-archive-viewer/viewer",
+    "indexHtml": "/tmp/runforge-alpha27-handoff-archive-viewer/viewer/index.html",
+    "trackedIndexHtml": "validation/runs/ALPHA-27/viewer/index.html",
+    "trackedSummary": "validation/runs/ALPHA-27/viewer/archive-summary.json",
+    "trackedRecords": "validation/runs/ALPHA-27/viewer/records.json",
+    "recordsRendered": 2,
+    "countsRendered": {
+      "records": 2,
+      "byRepo": {
+        "factory": 2
+      },
+      "byDecision": {
+        "accepted": 1,
+        "rejected": 1
+      },
+      "byAuditStatus": {
+        "failed": 1,
+        "passed": 1
+      },
+      "bySafetyStatus": {
+        "safe": 1,
+        "unsafe": 1
+      },
+      "byValidationAfter": {
+        "passed": 1,
+        "skipped": 1
+      }
+    },
+    "validation": {
+      "passed": true,
+      "errors": []
+    }
+  },
+  "filters": {
+    "repoSubstring": true,
+    "decision": true,
+    "auditStatus": true,
+    "safetyStatus": true,
+    "validationStatus": true,
+    "originalMutationVerdict": true,
+    "zeroResultMessage": "No handoff archive records match the current filters."
+  },
+  "unsafeRejectedVisibility": {
+    "unsafeRowsMarked": true,
+    "unsafeBadgeRendered": true,
+    "rejectedUnsafeRecords": 1
+  },
+  "recommendationsRendered": [
+    "Candidate OKF lesson: accepted audited handoff flow works for repo factory.",
+    "Candidate safety lesson: rejected unsafe handoff for repo factory; review handoff safety.pushUsed=true."
+  ],
+  "safety": {
+    "noOriginalExternalRepoMutation": true,
+    "readOnlyStaticViewer": true,
+    "noAutoApplyByRunForge": true,
+    "noProviderCalls": true,
+    "noNetworkRequired": true,
+    "noDbAccess": true,
+    "noPushMergeDeployActions": true,
+    "unsafeCommandsRedacted": true
+  },
+  "visibility": {
+    "packetIndex": "/tmp/runforge-alpha27-handoff-archive-viewer/index/index.json",
+    "dashboardData": "/tmp/runforge-alpha27-handoff-archive-viewer/dashboard/dashboard-data.json",
+    "lifecycleReport": "validation/runs/ALPHA-27/lifecycle-report.json",
+    "archiveViewerPath": "/tmp/runforge-alpha27-handoff-archive-viewer/viewer/index.html",
+    "packetIndexHasViewer": true,
+    "dashboardDataHasViewer": true,
+    "lifecycleHasArchiveCounts": true,
+    "lifecycleArchiveCounts": {
+      "records": 10,
+      "byRepo": {
+        "factory": 8,
+        "smartsql": 1,
+        "source": 1
+      },
+      "byDecision": {
+        "accepted": 4,
+        "handoff_archive_generated": 1,
+        "handoff_archive_viewer_generated": 1,
+        "handoff_generated": 1,
+        "rejected": 3
+      },
+      "byAuditStatus": {
+        "failed": 1,
+        "missing": 6,
+        "passed": 3
+      },
+      "bySafetyStatus": {
+        "safe": 5,
+        "unknown": 4,
+        "unsafe": 1
+      },
+      "byValidationAfter": {
+        "failed": 1,
+        "passed": 4,
+        "pending_operator": 1,
+        "skipped": 1,
+        "unknown": 3
+      }
+    }
+  },
+  "attempts": [
+    {
+      "id": "alpha27-handoff-archive-viewer",
+      "repo": "/tmp/runforge-alpha27-handoff-archive-viewer/repos/factory",
+      "decision": "handoff_archive_viewer_generated",
+      "packet": "/tmp/runforge-alpha27-handoff-archive-viewer/viewer",
+      "viewer": "/tmp/runforge-alpha27-handoff-archive-viewer/viewer/index.html",
+      "outcome": "handoff_archive_viewer_ready",
+      "providerStatus": "disabled",
+      "filesChanged": [],
+      "manualApply": false,
+      "appliedTo": "read_only_static_viewer",
+      "originalRepoMutated": false,
+      "validationBefore": "failed",
+      "validationAfter": "passed",
+      "proposalPatch": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/proposal.patch",
+      "handoffReadme": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/README.md",
+      "handoffJson": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-handoff/handoff.json",
+      "handoffAuditStatus": "passed",
+      "handoffAuditReport": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-audit/audit-report.md",
+      "handoffAuditResult": "/tmp/runforge-alpha27-handoff-archive-viewer/source/ALPHA-27-DEMO/accepted-audit/audit-result.json",
+      "handoffArchive": "/tmp/runforge-alpha27-handoff-archive-viewer/archive/handoff-archive.json",
+      "handoffArchiveRecordCount": 2
+    }
+  ],
+  "commandsRun": [
+    "pnpm dev external handoff-archive --root /tmp/runforge-alpha27-handoff-archive-viewer/source --out /tmp/runforge-alpha27-handoff-archive-viewer/archive",
+    "# stdout: # Operator Handoff Archive",
+    "# stderr: $ tsx src/cli/index.ts external handoff-archive --root /tmp/runforge-alpha27-handoff-archive-viewer/source --out /tmp/runforge-alpha27-handoff-archive-viewer/archive",
+    "pnpm dev external handoff-archive-viewer --archive /tmp/runforge-alpha27-handoff-archive-viewer/archive/handoff-archive.json --out /tmp/runforge-alpha27-handoff-archive-viewer/viewer",
+    "# stdout: Handoff archive viewer written: /tmp/runforge-alpha27-handoff-archive-viewer/viewer/index.html",
+    "# stderr: $ tsx src/cli/index.ts external handoff-archive-viewer --archive /tmp/runforge-alpha27-handoff-archive-viewer/archive/handoff-archive.json --out /tmp/runforge-alpha27-handoff-archive-viewer/viewer",
+    "pnpm dev external handoff-archive-viewer-validate --archive /tmp/runforge-alpha27-handoff-archive-viewer/archive/handoff-archive.json --viewer /tmp/runforge-alpha27-handoff-archive-viewer/viewer",
+    "# stdout: {",
+    "# stderr: $ tsx src/cli/index.ts external handoff-archive-viewer-validate --archive /tmp/runforge-alpha27-handoff-archive-viewer/archive/handoff-archive.json --viewer /tmp/runforge-alpha27-handoff-archive-viewer/viewer",
+    "pnpm dev packet index --root ./validation/runs --out /tmp/runforge-alpha27-handoff-archive-viewer/index --dashboard-seed",
+    "# stdout: Indexed 15 packet/run entries under /Users/evgeny/Documents/projects/RunForge/validation/runs.",
+    "# stderr: $ tsx src/cli/index.ts packet index --root ./validation/runs --out /tmp/runforge-alpha27-handoff-archive-viewer/index --dashboard-seed",
+    "pnpm dev dashboard build --seed /tmp/runforge-alpha27-handoff-archive-viewer/index/dashboard-seed.json --out /tmp/runforge-alpha27-handoff-archive-viewer/dashboard",
+    "# stdout: Dashboard written: /tmp/runforge-alpha27-handoff-archive-viewer/dashboard/index.html",
+    "# stderr: $ tsx src/cli/index.ts dashboard build --seed /tmp/runforge-alpha27-handoff-archive-viewer/index/dashboard-seed.json --out /tmp/runforge-alpha27-handoff-archive-viewer/dashboard"
+  ],
+  "errors": [],
+  "finalVerdict": "passed"
+}

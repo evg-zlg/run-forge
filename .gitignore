@@ -54,6 +54,15 @@ validation/runs/*/*
 !validation/runs/ALPHA-23/results.json
 !validation/runs/ALPHA-23/operator-summary.md
 !validation/runs/ALPHA-23/lifecycle-report.json
+!validation/runs/ALPHA-27/
+!validation/runs/ALPHA-27/summary.md
+!validation/runs/ALPHA-27/results.json
+!validation/runs/ALPHA-27/handoff-archive.json
+!validation/runs/ALPHA-27/lifecycle-report.json
+!validation/runs/ALPHA-27/viewer/
+!validation/runs/ALPHA-27/viewer/index.html
+!validation/runs/ALPHA-27/viewer/archive-summary.json
+!validation/runs/ALPHA-27/viewer/records.json
 !validation/runs/ADMIN-UI-ALPHA/
 !validation/runs/ADMIN-UI-ALPHA/summary.md
 !validation/runs/ADMIN-UI-ALPHA/results.json

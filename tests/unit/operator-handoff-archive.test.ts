@@ -1,8 +1,9 @@
-import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
 import { buildHandoffArchive, searchHandoffArchive, validateHandoffArchiveRecords, type HandoffArchiveRecord } from "../../src/run/external-operator-handoff-archive.js";
+import { buildHandoffArchiveViewer, validateHandoffArchiveViewer } from "../../src/run/external-operator-handoff-archive-viewer.js";
 
 describe("operator handoff archive", () => {
   it("builds and searches a compact handoff/audit archive", async () => {
@@ -77,5 +78,65 @@ describe("operator handoff archive", () => {
     expect(validation.errors.join("\n")).toContain("original repo mutated true");
     expect(validation.errors.join("\n")).toContain("unsafe status requires reasons");
     expect(validation.errors.join("\n")).toContain("malformed local path");
+  });
+
+  it("generates and validates a local static archive viewer", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-handoff-viewer-"));
+    const archivePath = join(root, "handoff-archive.json");
+    const out = join(root, "viewer");
+    const record: HandoffArchiveRecord = {
+      id: "unsafe-rejected",
+      repoPath: "/tmp/factory",
+      repoName: "factory",
+      handoffPath: join(root, "handoff.json"),
+      handoffReadmePath: join(root, "README.md"),
+      patchPath: join(root, "proposal.patch"),
+      auditResultPath: join(root, "audit-result.json"),
+      auditReportPath: join(root, "audit-report.md"),
+      decisionPath: "unknown",
+      operatorSummaryPath: "unknown",
+      lifecycleReportPath: "unknown",
+      auditStatus: "failed",
+      decisionVerdict: "rejected",
+      validationBefore: "failed",
+      validationAfter: "skipped",
+      originalRepoMutated: false,
+      safetyStatus: "unsafe",
+      unsafeReasons: ["audit found forbidden push operation"],
+      lifecycleRefs: [],
+      validationCommands: ["git push origin main"],
+      createdFromAlpha: "ALPHA-27",
+      findings: ["unsafe: audit found forbidden push operation"],
+      recommendations: ["Candidate safety lesson: rejected unsafe handoff for repo factory."]
+    };
+    await writeFile(archivePath, `${JSON.stringify({
+      schemaVersion: "alpha-26-handoff-archive",
+      generatedAt: new Date().toISOString(),
+      root,
+      records: [record],
+      counts: {
+        records: 1,
+        byRepo: { factory: 1 },
+        byDecision: { rejected: 1 },
+        byAuditStatus: { failed: 1 },
+        bySafetyStatus: { unsafe: 1 },
+        byValidationAfter: { skipped: 1 }
+      },
+      findings: record.findings,
+      recommendations: record.recommendations,
+      validation: { passed: true, errors: [] }
+    }, null, 2)}\n`, "utf8");
+
+    const result = await buildHandoffArchiveViewer({ archive: archivePath, out });
+    expect(result.records).toHaveLength(1);
+    expect(result.validation.passed).toBe(true);
+    const html = await readFile(join(out, "index.html"), "utf8");
+    expect(html).toContain("Operator Handoff Archive Viewer");
+    expect(html).toContain("UNSAFE");
+    expect(html).toContain("No handoff archive records match the current filters.");
+    expect(html).toContain("[redacted unsafe command: see handoff and audit artifacts]");
+    expect(html).not.toContain("git push origin main");
+    const validation = await validateHandoffArchiveViewer({ archivePath, outDir: out });
+    expect(validation.passed).toBe(true);
   });
 });
