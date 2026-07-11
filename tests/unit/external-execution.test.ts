@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
-import { assertRepairTargetSafe, reviewPatchText, validateExternalExecutionModes } from "../../src/run/external-execution.js";
+import { assertRepairTargetSafe, ownerDecisionPermitsApply, reviewPatchText, validateExternalExecutionModes, validateOwnerDecisionForContinuation, type ContinuationState, type OwnerDecision } from "../../src/run/external-execution.js";
 
 const valid = {
   task: "repair",
@@ -48,4 +48,27 @@ describe("external execution gates", () => {
     await expect(assertRepairTargetSafe(workspace, join(workspace, "README.md"))).rejects.toThrow("escapes disposable workspace");
     await rm(root, { recursive: true, force: true });
   });
+
+  it("permits apply only for an explicit approve decision", () => {
+    expect(ownerDecisionPermitsApply(decision())).toBe(true);
+    expect(ownerDecisionPermitsApply(decision({ decision: "reject" }))).toBe(false);
+    expect(ownerDecisionPermitsApply(decision({ decision: "hold" }))).toBe(false);
+    expect(ownerDecisionPermitsApply(decision({ decision: "continue" }))).toBe(false);
+  });
+
+  it("rejects stale packet hashes and unsafe or source branches", () => {
+    const state = continuationState();
+    expect(() => validateOwnerDecisionForContinuation(decision(), state, "OWNER-APPROVAL-1")).not.toThrow();
+    expect(() => validateOwnerDecisionForContinuation(decision({ patch_diff_hash: "stale" }), state, "OWNER-APPROVAL-1")).toThrow("Stale owner decision");
+    expect(() => validateOwnerDecisionForContinuation(decision({ target_branch_or_worktree: "main" }), state, "OWNER-APPROVAL-1")).toThrow("safe non-main");
+    expect(() => validateOwnerDecisionForContinuation(decision({ target_branch_or_worktree: "develop" }), state, "OWNER-APPROVAL-1")).toThrow("source repository's current branch");
+  });
 });
+
+function decision(override: Partial<OwnerDecision> = {}): OwnerDecision {
+  return { decision_id: "d87c4eaa-d6b7-48c1-ae86-2e483c48dd78", decision: "approve", run_id: "OWNER-APPROVAL-1", patch_package_hash: "package", patch_diff_hash: "diff", target_mode: "controlled-worktree", target_branch_or_worktree: "runforge/owner-approval-1-demo", owner_note: "Approved.", created_at: "2026-07-11T11:26:14.340Z", ...override };
+}
+
+function continuationState(): ContinuationState {
+  return { repo: "/factory", sourceBranch: "develop", disposable: "/tmp/disposable", controlled: "/tmp/controlled", dockerImage: "runforge:local", commands: [], timeoutMs: 1_000, patchPackageHash: "package", patchDiffHash: "diff", sourceBefore: { path: "/factory", head: "abc", status: "" } };
+}

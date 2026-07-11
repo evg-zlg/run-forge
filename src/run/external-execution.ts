@@ -32,13 +32,13 @@ type Input = {
   repairMode: string; approvalMode: string; applyMode: string; commands: string[]; tmpRoot?: string; timeoutMs: number;
 };
 
-type OwnerDecision = {
+export type OwnerDecision = {
   decision_id: string; decision: "approve" | "reject" | "continue" | "hold"; run_id: string;
   patch_package_hash: string; patch_diff_hash: string; target_mode: "controlled-worktree";
   target_branch_or_worktree: string; owner_note: string; created_at: string;
 };
 
-type ContinuationState = { repo: string; sourceBranch: string; disposable: string; controlled: string; dockerImage: string; commands: string[]; timeoutMs: number; patchPackageHash: string; patchDiffHash: string; sourceBefore: RepoState };
+export type ContinuationState = { repo: string; sourceBranch: string; disposable: string; controlled: string; dockerImage: string; commands: string[]; timeoutMs: number; patchPackageHash: string; patchDiffHash: string; sourceBefore: RepoState };
 
 export async function runExternalExecution(input: Input): Promise<ExternalExecutionResult> {
   validateExternalExecutionModes(input);
@@ -257,13 +257,13 @@ export async function continueExternalExecution(input: { run: string; timeoutMs:
   const state = await readJson<ContinuationState>(join(out, "continuation-state.json"));
   await access(join(out, "owner-decision.json")).catch(() => { throw new Error("Owner decision is absent; apply remains blocked at awaiting_owner_decision."); });
   const decision = await readJson<OwnerDecision>(join(out, "owner-decision.json"));
-  validateDecision(decision, state, runId);
+  validateOwnerDecisionForContinuation(decision, state, runId);
   const currentPackageHash = await hashPatchPackage(join(out, "patch-package"));
   const currentDiffHash = await hashFile(join(out, "patch-package", "patch.diff"));
   if (currentPackageHash !== decision.patch_package_hash || currentDiffHash !== decision.patch_diff_hash) throw new Error("Stale owner decision: patch package changed after approval.");
   const currentSource = await inspectRepoState(state.repo);
   if (currentSource.head !== state.sourceBefore.head || currentSource.status !== state.sourceBefore.status) throw new Error("Source repository is dirty or changed since package preparation.");
-  if (decision.decision !== "approve") {
+  if (!ownerDecisionPermitsApply(decision)) {
     await appendLog(out, `continue stopped: owner decision is ${decision.decision}`);
     throw new Error(`Owner decision '${decision.decision}' does not permit apply.`);
   }
@@ -294,7 +294,8 @@ function decisionTemplate(runId: string, packageHash: string, diffHash: string):
   return { decision_id: "<generated UUID>", decision: "hold", run_id: runId, patch_package_hash: packageHash, patch_diff_hash: diffHash, target_mode: "controlled-worktree", target_branch_or_worktree: "runforge/<owner-selected-branch>", owner_note: "<required owner note>", created_at: "<ISO-8601 timestamp>" };
 }
 function assertSafeBranch(branch: string): void { const value = branch.trim(); if (!value || ["main", "master"].includes(value.toLowerCase()) || value.includes("..") || value.startsWith("-") || value.endsWith("/") || /[~^:?*\\[\\]\\s]/.test(value)) throw new Error("Target branch must be an explicit safe non-main branch name."); }
-function validateDecision(value: OwnerDecision, state: ContinuationState, runId: string): void { if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value.decision_id) || value.run_id !== runId || !Number.isFinite(Date.parse(value.created_at)) || !value.owner_note.trim()) throw new Error("Owner decision is incomplete or references another run."); assertSafeBranch(value.target_branch_or_worktree); if (value.target_branch_or_worktree === state.sourceBranch) throw new Error("Owner decision targets the source repository's current branch."); if (value.target_mode !== "controlled-worktree") throw new Error("Owner decision target mode is invalid."); if (value.patch_package_hash !== state.patchPackageHash || value.patch_diff_hash !== state.patchDiffHash) throw new Error("Stale owner decision: packet hashes do not match continuation state."); }
+export function ownerDecisionPermitsApply(value: OwnerDecision): boolean { return value.decision === "approve"; }
+export function validateOwnerDecisionForContinuation(value: OwnerDecision, state: ContinuationState, runId: string): void { if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value.decision_id) || value.run_id !== runId || !Number.isFinite(Date.parse(value.created_at)) || !value.owner_note.trim()) throw new Error("Owner decision is incomplete or references another run."); assertSafeBranch(value.target_branch_or_worktree); if (value.target_branch_or_worktree === state.sourceBranch) throw new Error("Owner decision targets the source repository's current branch."); if (value.target_mode !== "controlled-worktree") throw new Error("Owner decision target mode is invalid."); if (value.patch_package_hash !== state.patchPackageHash || value.patch_diff_hash !== state.patchDiffHash) throw new Error("Stale owner decision: packet hashes do not match continuation state."); }
 async function hashFile(path: string): Promise<string> { return createHash("sha256").update(await readFile(path)).digest("hex"); }
 async function hashPatchPackage(dir: string): Promise<string> { const names = ["patch.diff", "patch-summary.md", "validation-before.md", "validation-after.md", "providerless-review.md", "apply-instructions.md", "rollback-instructions.md", "safety-review.md"]; const hash = createHash("sha256"); for (const name of names) hash.update(name).update("\0").update(await readFile(join(dir, name))).update("\0"); return hash.digest("hex"); }
 async function readJson<T>(path: string): Promise<T> { return JSON.parse(await readFile(path, "utf8")) as T; }
