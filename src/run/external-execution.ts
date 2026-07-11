@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
 import { access, cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -19,7 +20,8 @@ export type ExternalExecutionResult = {
   runforgeCapability: "passed" | "deterministic failure" | "environment/setup issue" | "unsafe/not runnable" | "needs owner approval";
   factoryBaseline: "passed" | "deterministic failure" | "environment/setup issue" | "unsafe/not runnable" | "needs owner approval";
   disposableRepair: "patch-ready" | "no-safe-repair-found" | "validation-failed-after-repair" | "unsafe/not runnable" | "needs owner approval";
-  controlledApply: "applied-to-controlled-worktree" | "skipped-awaiting-owner-approval" | "validation-failed-after-apply" | "unsafe/not runnable" | "needs owner approval";
+  ownerDecisionGate: "awaiting_owner_decision" | "approved" | "rejected" | "stale_decision" | "invalid_target" | "unsafe/not runnable";
+  controlledApply: "applied-to-controlled-worktree" | "skipped-awaiting-owner-approval" | "skipped-rejected" | "validation-failed-after-apply" | "unsafe/not runnable";
   prReadyPackage: "ready" | "not-created" | "unsafe/not runnable" | "needs owner approval";
   patchPath: string;
   controlledWorkspace: string | null;
@@ -29,6 +31,14 @@ type Input = {
   task: string; out: string; repo?: string; runtime: string; dockerImage: string; prepareRuntime: string;
   repairMode: string; approvalMode: string; applyMode: string; commands: string[]; tmpRoot?: string; timeoutMs: number;
 };
+
+export type OwnerDecision = {
+  decision_id: string; decision: "approve" | "reject" | "continue" | "hold"; run_id: string;
+  patch_package_hash: string; patch_diff_hash: string; target_mode: "controlled-worktree";
+  target_branch_or_worktree: string; owner_note: string; created_at: string;
+};
+
+export type ContinuationState = { repo: string; sourceBranch: string; disposable: string; controlled: string; dockerImage: string; commands: string[]; timeoutMs: number; patchPackageHash: string; patchDiffHash: string; sourceBefore: RepoState };
 
 export async function runExternalExecution(input: Input): Promise<ExternalExecutionResult> {
   validateExternalExecutionModes(input);
@@ -47,7 +57,6 @@ export async function runExternalExecution(input: Input): Promise<ExternalExecut
   await rm(tmpRoot, { recursive: true, force: true });
   await mkdir(outDir, { recursive: true });
   await mkdir(join(outDir, "patch-package"), { recursive: true });
-  await mkdir(join(outDir, "pr-ready-package"), { recursive: true });
   await writeFile(join(outDir, "execution-log.md"), `# Execution Log\n\n- ${new Date().toISOString()}: canonicalized source, output, tmp, and controlled-worktree paths.\n`, "utf8");
 
   const preparation = await prepareExternalRuntime({ repo, workspace: disposable, outDir, image: input.dockerImage });
@@ -59,7 +68,6 @@ export async function runExternalExecution(input: Input): Promise<ExternalExecut
   await assertSourceUnchanged(before, repo, "baseline validation");
   await writeValidation(join(outDir, "patch-package", "validation-before.md"), "Baseline", baseline);
 
-  await cp(disposable, controlled, { recursive: true, verbatimSymlinks: true });
   const repair = await performRepair(disposable);
   if (!repair) throw new Error("No safe deterministic repair was available for this repository.");
   const patchPath = join(outDir, "patch-package", "patch.diff");
@@ -70,32 +78,31 @@ export async function runExternalExecution(input: Input): Promise<ExternalExecut
   await assertSourceUnchanged(before, repo, "disposable repair validation");
   const reviewAccepted = baseline.every(passed) && afterRepair.every(passed) && reviewPatchText(patchText);
   await writePatchPackage(outDir, input, repair, reviewAccepted, baseline, afterRepair);
-
-  let applied: ExecutorResult[] | null = null;
-  let controlledApply: ExternalExecutionResult["controlledApply"] = "skipped-awaiting-owner-approval";
-  if (input.approvalMode === "simulated-owner-approved" && reviewAccepted) {
-    await execFileAsync("git", ["apply", "--check", patchPath], { cwd: controlled });
-    await execFileAsync("git", ["apply", patchPath], { cwd: controlled });
-    applied = await validateStage(executor, runId, "after-apply", controlled, outDir, commands, input.timeoutMs);
-    controlledApply = applied.every(passed) ? "applied-to-controlled-worktree" : "validation-failed-after-apply";
-  }
+  const patchDiffHash = await hashFile(patchPath);
+  const patchPackageHash = await hashPatchPackage(join(outDir, "patch-package"));
+  await writeFile(join(outDir, "patch-package", "owner-decision-template.json"), JSON.stringify(decisionTemplate(runId, patchPackageHash, patchDiffHash), null, 2) + "\n", "utf8");
+  const sourceBranch = (await execFileAsync("git", ["-C", repo, "branch", "--show-current"])).stdout.trim();
+  const state: ContinuationState = { repo, sourceBranch, disposable, controlled, dockerImage: input.dockerImage, commands, timeoutMs: input.timeoutMs, patchPackageHash, patchDiffHash, sourceBefore: before };
+  await writeFile(join(outDir, "continuation-state.json"), JSON.stringify(state, null, 2) + "\n", "utf8");
+  const applied: ExecutorResult[] | null = null;
+  const controlledApply: ExternalExecutionResult["controlledApply"] = "skipped-awaiting-owner-approval";
   await writeOwnerAndApplyReports(outDir, input, controlledApply, applied, controlled, patchPath);
+  await writeFile(join(outDir, "owner-approval-report.md"), "# Owner Approval Report\n\n- Status: **awaiting_owner_decision**\n- Apply performed: no\n- See `patch-package/owner-decision-template.json` and use `task-run owner-decision`.\n", "utf8");
   const after = await inspectRepoState(repo);
   const unchanged = before.head === after.head && before.status === after.status;
   const baselinePassed = baseline.every(passed);
   const repairPassed = afterRepair.every(passed);
-  const prReady = reviewAccepted && (controlledApply === "applied-to-controlled-worktree" || controlledApply === "skipped-awaiting-owner-approval");
-  if (prReady) await writePrReadyPackage(outDir, repair, baseline, afterRepair, applied, controlledApply);
+  const prReady = false;
   const result: ExternalExecutionResult = {
     runId, outDir: relative(root, outDir), source: { before, after, unchanged }, preparation,
-    runforgeCapability: unchanged && baselinePassed && repairPassed && reviewAccepted && controlledApply !== "validation-failed-after-apply" ? "passed" : "deterministic failure",
+    runforgeCapability: unchanged && baselinePassed && repairPassed && reviewAccepted ? "needs owner approval" : "deterministic failure",
     factoryBaseline: baselinePassed ? "passed" : "deterministic failure",
     disposableRepair: repairPassed ? "patch-ready" : "validation-failed-after-repair",
-    controlledApply,
-    prReadyPackage: prReady ? "ready" : "not-created",
-    patchPath: relative(root, patchPath), controlledWorkspace: controlledApply === "applied-to-controlled-worktree" ? controlled : null
+    ownerDecisionGate: "awaiting_owner_decision", controlledApply,
+    prReadyPackage: "needs owner approval",
+    patchPath: relative(root, patchPath), controlledWorkspace: null
   };
-  await writeFinalArtifacts(outDir, input, result, commands, reviewAccepted);
+  await writeFinalArtifacts(outDir, input, result, commands, reviewAccepted, false);
   return result;
 }
 
@@ -104,8 +111,8 @@ export function validateExternalExecutionModes(input: Input): void {
   if (input.runtime !== "docker") throw new Error("External repair requires --runtime docker.");
   if (input.prepareRuntime !== "explicit") throw new Error("External repair requires --prepare-runtime explicit.");
   if (input.repairMode !== "disposable") throw new Error("--repair-mode supports only 'disposable'.");
-  if (!["await-owner", "simulated-owner-approved"].includes(input.approvalMode)) throw new Error("Unsupported --approval-mode.");
-  if (input.applyMode !== "controlled-worktree") throw new Error("--apply-mode supports only 'controlled-worktree'.");
+  if (input.approvalMode !== "require-owner-decision") throw new Error("--approval-mode supports only 'require-owner-decision'.");
+  if (input.applyMode !== "none") throw new Error("--apply-mode supports only 'none' during start.");
 }
 
 async function validateStage(executor: DockerShellExecutor, runId: string, stage: typeof validationStages[number], cwd: string, out: string, commands: string[], timeoutMs: number): Promise<ExecutorResult[]> {
@@ -114,6 +121,7 @@ async function validateStage(executor: DockerShellExecutor, runId: string, stage
     const id = `${stage}-${index + 1}`;
     results.push(await executor.execute(createExecutorRequest({ runId, subtaskId: id, command, cwd, artifactDir: join(out, "validation", stage, id), lane: executor.lane, timeoutMs })));
   }
+  await writeFile(join(out, "validation", stage, "results.json"), JSON.stringify(results, null, 2) + "\n", "utf8");
   await appendLog(out, `${stage} validation completed: ${results.map((item) => item.status).join(", ")}`);
   return results;
 }
@@ -185,7 +193,6 @@ async function writePatchPackage(out: string, input: Input, repair: { file: stri
   await writeFile(join(dir, "safety-review.md"), `# Safety Review\n\n- Risk: low; documentation only.\n- Runtime network: disabled for all validation.\n- Original target mounted for validation: no.\n- Baseline: ${baseline.every(passed) ? "passed" : "failed"}.\n- After repair: ${after.every(passed) ? "passed" : "failed"}.\n`, "utf8");
   await writeFile(join(dir, "apply-instructions.md"), `# Apply Instructions\n\nAfter real owner approval, create a non-main branch/worktree and run \`git apply --check patch.diff && git apply patch.diff\`. Validate before committing. Do not push automatically.\n`, "utf8");
   await writeFile(join(dir, "rollback-instructions.md"), "# Rollback Instructions\n\nBefore commit, run `git apply -R patch.diff` in the controlled worktree or delete the disposable worktree.\n", "utf8");
-  await writeFile(join(dir, "owner-decision.md"), `# Owner Decision\n\n- Approval mode: \`${input.approvalMode}\`\n- Apply permitted: ${input.approvalMode === "simulated-owner-approved" && accepted ? "yes, controlled worktree only" : "no"}.\n`, "utf8");
 }
 
 async function writeOwnerAndApplyReports(out: string, input: Input, result: ExternalExecutionResult["controlledApply"], applied: ExecutorResult[] | null, workspace: string, patch: string): Promise<void> {
@@ -193,17 +200,20 @@ async function writeOwnerAndApplyReports(out: string, input: Input, result: Exte
   await writeFile(join(out, "disposable-repair-report.md"), "# Disposable Repair Report\n\nA deterministic documentation-only repair was performed in the prepared disposable workspace. The original repository was not mounted or modified.\n", "utf8");
 }
 
-async function writePrReadyPackage(out: string, repair: { file: string; summary: string }, baseline: ExecutorResult[], after: ExecutorResult[], applied: ExecutorResult[] | null, apply: ExternalExecutionResult["controlledApply"]): Promise<void> {
-  const dir = join(out, "pr-ready-package");
+async function writePrReadyPackage(out: string, repair: { file: string; summary: string }, baseline: ExecutorResult[], after: ExecutorResult[], applied: ExecutorResult[] | null, apply: ExternalExecutionResult["controlledApply"], branch: string): Promise<void> {
+  const dir = join(out, "pr-creation-package");
+  await mkdir(dir, { recursive: true });
   await writeFile(join(dir, "pr-title.txt"), "Document offline validation workflow\n", "utf8");
   await writeFile(join(dir, "pr-body.md"), `## Summary\n\n- ${repair.summary}\n- Preserve the existing commands and document their offline runtime use.\n\n## Validation\n\n- Baseline: ${baseline.every(passed) ? "passed" : "failed"}\n- After repair: ${after.every(passed) ? "passed" : "failed"}\n- After controlled apply: ${applied ? (applied.every(passed) ? "passed" : "failed") : "not run; awaiting owner approval"}\n`, "utf8");
   await writeFile(join(dir, "changed-files.md"), `# Changed Files\n\n- \`${repair.file}\` — ${repair.summary}\n`, "utf8");
   await writeFile(join(dir, "validation-summary.md"), `# Validation Summary\n\nAll task execution used Docker with \`--network none\`. Baseline=${baseline.every(passed)}, after-repair=${after.every(passed)}, controlled-apply=${apply}.\n`, "utf8");
   await writeFile(join(dir, "risk-assessment.md"), "# Risk Assessment\n\nLow risk. Documentation-only change; no runtime behavior, dependencies, infrastructure, secrets, database, or production access.\n", "utf8");
-  await writeFile(join(dir, "owner-next-actions.md"), "# Owner Next Actions\n\n1. Review `patch-package/patch.diff`.\n2. Create a real non-main branch/worktree.\n3. Apply and validate the patch.\n4. Commit and open a PR manually if accepted.\n", "utf8");
+  await writeFile(join(dir, "branch-plan.md"), `# Branch Plan\n\nOwner-selected branch: \`${branch}\`. The controlled artifact worktree proves the patch; RunForge did not create or push the real branch.\n`, "utf8");
+  await writeFile(join(dir, "manual-create-pr-instructions.md"), `# Manual PR Creation\n\n1. Create \`${branch}\` from the reviewed source HEAD.\n2. Apply \`patch-package/patch.diff\`.\n3. Run the documented offline validation.\n4. Commit, push, and open the PR manually after owner review.\n`, "utf8");
+  await writeFile(join(dir, "owner-next-actions.md"), "# Owner Next Actions\n\nReview the controlled-apply evidence and PR package. Only the owner may create the real branch, push, or open a PR.\n", "utf8");
 }
 
-async function writeFinalArtifacts(out: string, input: Input, result: ExternalExecutionResult, commands: string[], reviewAccepted: boolean): Promise<void> {
+async function writeFinalArtifacts(out: string, input: Input, result: ExternalExecutionResult, commands: string[], reviewAccepted: boolean, continued: boolean): Promise<void> {
   const environment = { node: process.version, platform: process.platform, architecture: process.arch, cwd: process.cwd(), dockerImage: input.dockerImage, runtimeNetwork: "none", preparationNetwork: "bridge" };
   const provenance = { schemaVersion: "external-execution-1", source: result.source.before, runtimePreparation: result.preparation, task: input.task, commands, providerCalls: false, createdAt: new Date().toISOString() };
   await writeFile(join(out, "environment.json"), JSON.stringify(environment, null, 2) + "\n", "utf8");
@@ -214,9 +224,9 @@ async function writeFinalArtifacts(out: string, input: Input, result: ExternalEx
   await writeFile(join(out, "summary.md"), summary, "utf8");
   const required = [
     "summary.md", "results.json", "external-execution-report.md", "runtime-preparation-report.md", "disposable-repair-report.md",
-    "controlled-apply-report.md", "environment.json", "provenance.json", "execution-log.md",
-    ...["patch.diff", "patch-summary.md", "validation-before.md", "validation-after.md", "providerless-review.md", "apply-instructions.md", "rollback-instructions.md", "safety-review.md", "owner-decision.md"].map((name) => `patch-package/${name}`),
-    ...["pr-title.txt", "pr-body.md", "changed-files.md", "validation-summary.md", "risk-assessment.md", "owner-next-actions.md"].map((name) => `pr-ready-package/${name}`)
+    "controlled-apply-report.md", "owner-approval-report.md", "environment.json", "provenance.json", "execution-log.md",
+    ...["patch.diff", "patch-summary.md", "validation-before.md", "validation-after.md", "providerless-review.md", "apply-instructions.md", "rollback-instructions.md", "safety-review.md", "owner-decision-template.json"].map((name) => `patch-package/${name}`),
+    ...(continued ? ["owner-decision.json", "owner-approval-report.md", "pr-creation-package/pr-title.txt", "pr-creation-package/pr-body.md", "pr-creation-package/branch-plan.md", "pr-creation-package/manual-create-pr-instructions.md", "pr-creation-package/changed-files.md", "pr-creation-package/validation-summary.md", "pr-creation-package/risk-assessment.md", "pr-creation-package/owner-next-actions.md"] : ["continuation-state.json"])
   ];
   const missing: string[] = [];
   for (const path of required) await access(join(out, path)).catch(() => missing.push(path));
@@ -224,6 +234,72 @@ async function writeFinalArtifacts(out: string, input: Input, result: ExternalEx
   if (missing.length) throw new Error(`External execution packet validation failed: ${missing.join(", ")}`);
   await appendLog(out, "packet validation passed: all required external-execution files were written");
 }
+
+export async function recordOwnerDecision(input: { run: string; decision: string; targetMode: string; targetBranch: string; ownerNote: string }): Promise<{ decisionId: string; path: string }> {
+  const out = await realpath(resolve(input.run));
+  const state = await readJson<ContinuationState>(join(out, "continuation-state.json"));
+  if (!["approve", "reject", "continue", "hold"].includes(input.decision)) throw new Error("--decision must be approve, reject, continue, or hold.");
+  if (input.targetMode !== "controlled-worktree") throw new Error("--target-mode supports only 'controlled-worktree'.");
+  assertSafeBranch(input.targetBranch);
+  if (input.targetBranch === state.sourceBranch) throw new Error("Target branch must differ from the source repository's current branch.");
+  if (!input.ownerNote.trim()) throw new Error("--note must not be empty.");
+  const decision: OwnerDecision = { decision_id: randomUUID(), decision: input.decision as OwnerDecision["decision"], run_id: basename(out), patch_package_hash: state.patchPackageHash, patch_diff_hash: state.patchDiffHash, target_mode: "controlled-worktree", target_branch_or_worktree: input.targetBranch, owner_note: input.ownerNote.trim(), created_at: new Date().toISOString() };
+  const path = join(out, "owner-decision.json");
+  await writeFile(path, JSON.stringify(decision, null, 2) + "\n", { encoding: "utf8", flag: "wx" });
+  await appendLog(out, `owner decision ${decision.decision_id} recorded: ${decision.decision}`);
+  return { decisionId: decision.decision_id, path };
+}
+
+export async function continueExternalExecution(input: { run: string; timeoutMs: number }): Promise<ExternalExecutionResult> {
+  const root = process.cwd();
+  const out = await realpath(resolve(input.run));
+  const runId = basename(out);
+  const state = await readJson<ContinuationState>(join(out, "continuation-state.json"));
+  await access(join(out, "owner-decision.json")).catch(() => { throw new Error("Owner decision is absent; apply remains blocked at awaiting_owner_decision."); });
+  const decision = await readJson<OwnerDecision>(join(out, "owner-decision.json"));
+  validateOwnerDecisionForContinuation(decision, state, runId);
+  const currentPackageHash = await hashPatchPackage(join(out, "patch-package"));
+  const currentDiffHash = await hashFile(join(out, "patch-package", "patch.diff"));
+  if (currentPackageHash !== decision.patch_package_hash || currentDiffHash !== decision.patch_diff_hash) throw new Error("Stale owner decision: patch package changed after approval.");
+  const currentSource = await inspectRepoState(state.repo);
+  if (currentSource.head !== state.sourceBefore.head || currentSource.status !== state.sourceBefore.status) throw new Error("Source repository is dirty or changed since package preparation.");
+  if (!ownerDecisionPermitsApply(decision)) {
+    await appendLog(out, `continue stopped: owner decision is ${decision.decision}`);
+    throw new Error(`Owner decision '${decision.decision}' does not permit apply.`);
+  }
+  await assertExternalPathsOutsideTarget(state.repo, [out, state.disposable, state.controlled]);
+  await rm(state.controlled, { recursive: true, force: true });
+  await cp(state.disposable, state.controlled, { recursive: true, verbatimSymlinks: true });
+  await cp(join(state.repo, "README.md"), join(state.controlled, "README.md"));
+  const patchPath = join(out, "patch-package", "patch.diff");
+  await execFileAsync("git", ["apply", "--check", patchPath], { cwd: state.controlled });
+  await execFileAsync("git", ["apply", patchPath], { cwd: state.controlled });
+  const executor = new DockerShellExecutor(root, state.dockerImage, true);
+  const applied = await validateStage(executor, runId, "after-apply", state.controlled, out, state.commands, input.timeoutMs);
+  await assertSourceUnchanged(state.sourceBefore, state.repo, "controlled apply");
+  const controlledApply: ExternalExecutionResult["controlledApply"] = applied.every(passed) ? "applied-to-controlled-worktree" : "validation-failed-after-apply";
+  const repair = { file: "README.md", summary: "Document the existing deterministic offline validation sequence." };
+  const baseline = await validationResultsFromArtifacts(out, "baseline", state.commands.length);
+  const afterRepair = await validationResultsFromArtifacts(out, "after-repair", state.commands.length);
+  await writePrReadyPackage(out, repair, baseline, afterRepair, applied, controlledApply, decision.target_branch_or_worktree);
+  const after = await inspectRepoState(state.repo);
+  const result: ExternalExecutionResult = { runId, outDir: relative(root, out), source: { before: state.sourceBefore, after, unchanged: state.sourceBefore.head === after.head && state.sourceBefore.status === after.status }, preparation: (await readJson<{ runtimePreparation: RuntimePreparationResult }>(join(out, "provenance.json"))).runtimePreparation, runforgeCapability: applied.every(passed) ? "passed" : "deterministic failure", factoryBaseline: "passed", disposableRepair: "patch-ready", ownerDecisionGate: "approved", controlledApply, prReadyPackage: applied.every(passed) ? "ready" : "not-created", patchPath: relative(root, patchPath), controlledWorkspace: state.controlled };
+  await writeFile(join(out, "owner-approval-report.md"), `# Owner Approval Report\n\n- Decision ID: \`${decision.decision_id}\`\n- Decision: **${decision.decision}**\n- Target mode: \`${decision.target_mode}\`\n- Target branch: \`${decision.target_branch_or_worktree}\`\n- Package and diff hashes: verified\n- Owner note: ${decision.owner_note}\n`, "utf8");
+  await writeOwnerAndApplyReports(out, { approvalMode: "require-owner-decision", applyMode: "controlled-worktree" } as Input, controlledApply, applied, state.controlled, patchPath);
+  await writeFinalArtifacts(out, { task: "continued owner-approved external repair", dockerImage: state.dockerImage } as Input, result, state.commands, true, true);
+  return result;
+}
+
+function decisionTemplate(runId: string, packageHash: string, diffHash: string): Omit<OwnerDecision, "decision_id" | "created_at"> & { decision_id: string; created_at: string } {
+  return { decision_id: "<generated UUID>", decision: "hold", run_id: runId, patch_package_hash: packageHash, patch_diff_hash: diffHash, target_mode: "controlled-worktree", target_branch_or_worktree: "runforge/<owner-selected-branch>", owner_note: "<required owner note>", created_at: "<ISO-8601 timestamp>" };
+}
+function assertSafeBranch(branch: string): void { const value = branch.trim(); if (!value || ["main", "master"].includes(value.toLowerCase()) || value.includes("..") || value.startsWith("-") || value.endsWith("/") || /[~^:?*\\[\\]\\s]/.test(value)) throw new Error("Target branch must be an explicit safe non-main branch name."); }
+export function ownerDecisionPermitsApply(value: OwnerDecision): boolean { return value.decision === "approve"; }
+export function validateOwnerDecisionForContinuation(value: OwnerDecision, state: ContinuationState, runId: string): void { if (!/^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(value.decision_id) || value.run_id !== runId || !Number.isFinite(Date.parse(value.created_at)) || !value.owner_note.trim()) throw new Error("Owner decision is incomplete or references another run."); assertSafeBranch(value.target_branch_or_worktree); if (value.target_branch_or_worktree === state.sourceBranch) throw new Error("Owner decision targets the source repository's current branch."); if (value.target_mode !== "controlled-worktree") throw new Error("Owner decision target mode is invalid."); if (value.patch_package_hash !== state.patchPackageHash || value.patch_diff_hash !== state.patchDiffHash) throw new Error("Stale owner decision: packet hashes do not match continuation state."); }
+async function hashFile(path: string): Promise<string> { return createHash("sha256").update(await readFile(path)).digest("hex"); }
+async function hashPatchPackage(dir: string): Promise<string> { const names = ["patch.diff", "patch-summary.md", "validation-before.md", "validation-after.md", "providerless-review.md", "apply-instructions.md", "rollback-instructions.md", "safety-review.md"]; const hash = createHash("sha256"); for (const name of names) hash.update(name).update("\0").update(await readFile(join(dir, name))).update("\0"); return hash.digest("hex"); }
+async function readJson<T>(path: string): Promise<T> { return JSON.parse(await readFile(path, "utf8")) as T; }
+async function validationResultsFromArtifacts(out: string, stage: string, _count: number): Promise<ExecutorResult[]> { return readJson<ExecutorResult[]>(join(out, "validation", stage, "results.json")); }
 
 export function renderExternalExecutionCliSummary(result: ExternalExecutionResult): string {
   return [

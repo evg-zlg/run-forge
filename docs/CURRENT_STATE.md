@@ -2,7 +2,7 @@
 
 Status date: 2026-07-11.
 
-RunForge is currently a local, deterministic, artifact-first task-run harness. It has proven providerless local execution and external-repository Docker validation. EXTERNAL-EXECUTION-1 adds deterministic disposable repair, patch review, an explicit owner gate, and controlled-worktree apply without granting access to the original target branch.
+RunForge is currently a local, deterministic, artifact-first task-run harness. PRs #47 and #48 are merged. External validation, explicit runtime preparation, disposable repair, simulated approval, and artifact-contained apply are proven; OWNER-APPROVAL-1 adds a real, hash-bound owner decision artifact and separate controlled continuation command.
 
 ## Current North Star
 
@@ -34,7 +34,8 @@ task
 - Explicit preparation records its network use, lockfile hash, package manager, image identity, target platform, timestamps, and command log. The subsequent task execution remains network-disabled.
 - External task-runs reject output/tmp/workspace paths inside the source repository and treat any before/after source mutation as a blocking safety failure.
 - External repair mode creates a deterministic low-risk patch only in a disposable workspace, validates it offline, runs providerless review, and stops at the owner gate by default.
-- Explicit simulated owner approval may apply an accepted patch only to an artifact-contained controlled worktree, validate it offline, and generate PR-ready instructions. It never pushes, merges, deploys, or changes target `main`.
+- `task-run start` now stops at `awaiting_owner_decision`; `task-run owner-decision` records the owner's decision, target branch, note, timestamp, run ID, and patch hashes; `task-run continue` rejects missing, non-approving, stale, source-changing, or unsafe-target decisions before controlled apply.
+- A valid approval may apply only to an artifact-contained controlled worktree and produces an owner-controlled PR creation package. It never creates the real branch, pushes, opens a PR, merges, deploys, or changes target `main`.
 - Deterministic evidence review as the default offline lane.
 - First governor loop that can select and run the next local providerless task-run without per-step owner approval.
 - MVP failure triage and deterministic classification.
@@ -73,6 +74,7 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 - `TASK-RUN-7`: Docker-isolated task execution lane completed and validated on a real local Docker runtime.
 - `EXTERNAL-RUN-2` and `EXTERNAL-RUN-3`: merged external Docker validation and explicit runtime preparation/safety gates.
 - `EXTERNAL-EXECUTION-1`: disposable repair package, providerless review, owner gate, controlled-worktree apply, and PR-ready package implemented and dogfooded.
+- `OWNER-APPROVAL-1`: real owner decision artifact/CLI gate and controlled continuation implemented; dogfood preparation stops for an actual owner decision before apply.
 
 ## Current Gaps
 
@@ -82,7 +84,7 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 - Richer semantic planning beyond current deterministic heuristics.
 - Stronger owner-ready synthesis across long or multi-domain task-runs.
 - Docs-review planning still needs fresher validation evidence selection; TASK-RUN-6 showed next-milestone readiness evidence still querying TASK-RUN-4 while current evidence reaches TASK-RUN-6.
-- Real owner-approved apply to an owner-selected branch and PR creation remain future owner-gated work; push, merge, and deploy are not supported by this contour.
+- Owner-controlled creation of the real non-main branch and PR remains the next milestone; push, PR creation, merge, and deploy are not supported by this contour.
 
 ## Frozen
 
