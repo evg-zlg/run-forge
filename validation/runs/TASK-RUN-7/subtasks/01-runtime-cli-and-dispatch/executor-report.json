@@ -1,0 +1,25 @@
+{
+  "request": {
+    "id": "TASK-RUN-7:01-runtime-cli-and-dispatch:docker-shell",
+    "subtaskId": "01-runtime-cli-and-dispatch",
+    "command": "rg -n \"runtime|docker-image|DockerShellExecutor|LocalShellExecutor|executor.lane\" src/cli/commands/task-run.ts src/run/task-run-harness.ts",
+    "cwd": "/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-task-run-7/01-runtime-cli-and-dispatch/workspace",
+    "artifactDir": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "docker-shell",
+    "runtime": {
+      "isolation": "docker-container",
+      "image": "runforge:local",
+      "network": "none"
+    },
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/stdout.log",
+    "stderrLog": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/stderr.log",
+    "commandLog": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/command.log"
+  }
+}

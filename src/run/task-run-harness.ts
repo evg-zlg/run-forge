@@ -1,8 +1,8 @@
 import { execFile } from "node:child_process";
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
-import { basename, join, relative, resolve } from "node:path";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { createExecutorRequest, LocalShellExecutor, type ExecutorResult } from "./task-run-executor.js";
+import { createExecutorRequest, DockerShellExecutor, LocalShellExecutor, type ExecutorResult, type TaskRunExecutor } from "./task-run-executor.js";
 import { ownerConclusion, recommendedNextStep, remainingGaps } from "./task-run-owner-decision.js";
 import { planTaskRun, type PlannedSubtask, type TaskKind } from "./task-run-planner.js";
 import {
@@ -21,12 +21,16 @@ import { renderBrief, renderPlan, renderReport, renderSummary, toJsonResult, val
 
 const execFileAsync = promisify(execFile);
 
+export type TaskRunRuntime = "local" | "docker";
+
 type TaskRunInput = {
   task: string;
   out: string;
   tmpRoot?: string;
   checkCommand?: string;
   delegatedReview?: "mock" | "cli";
+  runtime?: TaskRunRuntime;
+  dockerImage?: string;
 };
 
 export type Subtask = {
@@ -70,6 +74,7 @@ export type TaskRunResult = {
   status: "completed" | "failed";
   outDir: string;
   tmpRoot: string;
+  runtime: { mode: TaskRunRuntime; executor: "local-shell" | "docker-shell"; image: string | null };
   plan: string;
   summary: string;
   results: string;
@@ -90,10 +95,13 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
   const repoRoot = process.cwd();
   const outDir = resolve(repoRoot, input.out);
   const runId = basename(outDir);
-  const tmpRoot = input.tmpRoot ? resolve(input.tmpRoot) : join("/tmp", `runforge-${slug(runId)}`);
+  const runtime = input.runtime ?? "local";
+  const defaultTmpRoot = runtime === "docker" ? join(dirname(repoRoot), ".runforge-task-runs", `${slug(basename(repoRoot))}-${slug(runId)}`) : join("/tmp", `runforge-${slug(runId)}`);
+  const tmpRoot = input.tmpRoot ? resolve(input.tmpRoot) : defaultTmpRoot;
   const checkCommand = input.checkCommand ?? "corepack pnpm check:structure";
   const plan = planTaskRun(input.task);
-  const executor = new LocalShellExecutor(repoRoot);
+  const dockerImage = input.dockerImage ?? "runforge:local";
+  const executor: TaskRunExecutor = runtime === "docker" ? new DockerShellExecutor(repoRoot, dockerImage) : new LocalShellExecutor(repoRoot);
 
   await rm(outDir, { recursive: true, force: true });
   await rm(tmpRoot, { recursive: true, force: true });
@@ -102,7 +110,7 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
   await mkdir(tmpRoot, { recursive: true });
 
   const planPath = join(outDir, "plan.md");
-  await writeFile(planPath, renderPlan(runId, input.task, tmpRoot, checkCommand, plan), "utf8");
+  await writeFile(planPath, renderPlan(runId, input.task, tmpRoot, checkCommand, plan, runtime, runtime === "docker" ? dockerImage : undefined), "utf8");
 
   const completedSubtasks: Array<Subtask & { workspace: string; report: string }> = [];
   for (const planned of plan.subtasks) {
@@ -116,7 +124,8 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
       subtaskId: planned.id,
       command: planned.evidenceCommand,
       cwd: workspace,
-      artifactDir: subtaskDir
+      artifactDir: subtaskDir,
+      lane: executor.lane
     });
     const executorResult = await executor.execute(executorRequest);
     const evidence = toEvidenceRecord(planned, executorResult);
@@ -126,7 +135,7 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
   }
 
   const check = await runCheck(checkCommand, repoRoot);
-  const gaps = remainingGaps(plan.kind, input.task);
+  const gaps = remainingGaps(plan.kind, input.task, runtime === "docker");
   const reviewDir = join(outDir, "review");
   const reviewRequestPath = join(reviewDir, "review-request.json");
   const reviewResultPath = join(reviewDir, "review-result.json");
@@ -200,7 +209,8 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
 
   const resultsPath = join(outDir, "results.json");
   const summaryPath = join(outDir, "summary.md");
-  const status = check.result === "passed" && reviewResult.status !== "provider_unavailable" ? "completed" : "failed";
+  const evidencePassed = completedSubtasks.every((subtask) => subtask.executor.status === "passed");
+  const status = check.result === "passed" && evidencePassed && reviewResult.status !== "provider_unavailable" ? "completed" : "failed";
   const result: TaskRunResult = {
     runId,
     task: input.task,
@@ -213,6 +223,11 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
     status,
     outDir: relative(repoRoot, outDir),
     tmpRoot,
+    runtime: {
+      mode: runtime,
+      executor: executor.lane,
+      image: runtime === "docker" ? dockerImage : null
+    },
     plan: relative(repoRoot, planPath),
     summary: relative(repoRoot, summaryPath),
     results: relative(repoRoot, resultsPath),
@@ -244,6 +259,7 @@ export function renderTaskRunCliSummary(result: TaskRunResult): string {
     `Results: ${result.results}`,
     `Review: ${result.review.markdown}`,
     `Tmp isolation root: ${result.tmpRoot}`,
+    `Runtime: ${result.runtime.mode}${result.runtime.image ? ` (${result.runtime.image})` : ""}`,
     `Check: ${result.checks[0]?.command} -> ${result.checks[0]?.result}`
   ].join("\n");
 }
@@ -263,7 +279,7 @@ async function copyWorkspace(repoRoot: string, workspace: string, outPath: strin
 function shouldSkipSnapshotPath(path: string, outPath: string): boolean {
   const first = path.split("/")[0];
   if (path === outPath || path.startsWith(`${outPath}/`)) return true;
-  return first === "node_modules" || first === "dist" || first === ".git" || first === "artifacts" || first === "runforge-artifacts";
+  return first === "node_modules" || first === "dist" || first === ".git" || first === ".runforge" || first === "artifacts" || first === "runforge-artifacts";
 }
 
 async function runCheck(command: string, cwd: string): Promise<CheckResult> {

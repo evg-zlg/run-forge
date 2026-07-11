@@ -1,8 +1,20 @@
-import type { Subtask, TaskRunResult } from "./task-run-harness.js";
+import type { Subtask, TaskRunResult, TaskRunRuntime } from "./task-run-harness.js";
 import type { PlannedSubtask, TaskRunPlan } from "./task-run-planner.js";
 import { reviewSafety } from "./task-run-review-safety.js";
 
-export function renderPlan(runId: string, task: string, tmpRoot: string, checkCommand: string, plan: TaskRunPlan): string {
+export function renderPlan(
+  runId: string,
+  task: string,
+  tmpRoot: string,
+  checkCommand: string,
+  plan: TaskRunPlan,
+  runtime: TaskRunRuntime = "local",
+  dockerImage?: string
+): string {
+  const executor = runtime === "docker" ? "DockerShellExecutor" : "LocalShellExecutor";
+  const isolation = runtime === "docker"
+    ? `Each subtask snapshot is mounted read-only into a network-disabled container using the prebuilt local image \`${dockerImage}\`.`
+    : `Each subtask uses a disposable tmp workspace snapshot under \`${tmpRoot}/<subtask>/workspace\`.`;
   return `# ${runId} Plan
 
 Run ID: \`${runId}\`
@@ -22,7 +34,7 @@ ${plan.planningBasis.map((item) => `- ${item}`).join("\n")}
 
 - Do not start Alpha-28.
 - Do not add archive/viewer/handoff/OKF features.
-- Do not add Docker, scheduler, provider routing, daemon, provider catalog, or dashboard work.
+- Do not add scheduler, provider routing, daemon, provider catalog, or dashboard work.
 - Implement only enough to improve the task-run execution contour.
 
 ## Inputs
@@ -39,13 +51,11 @@ ${plan.subtasks.map((item) => `- \`${item.id}\`: \`${item.evidenceCommand}\``).j
 
 ## Executor
 
-Each subtask evidence command is dispatched through \`LocalShellExecutor\` as an executor request. The executor writes \`command.log\`, \`stdout.log\`, \`stderr.log\`, and \`executor-report.json\` into the subtask artifact directory.
+Each subtask evidence command is dispatched through \`${executor}\` as an executor request. The executor writes \`command.log\`, \`stdout.log\`, \`stderr.log\`, and \`executor-report.json\` into the subtask artifact directory.
 
 ## Isolation
 
-Each subtask uses a disposable tmp workspace snapshot under \`${tmpRoot}/<subtask>/workspace\`.
-
-Docker/container isolation is a future gap and is not implemented in this run.
+${isolation}
 
 ## Checks
 
@@ -124,9 +134,10 @@ Task kind: \`${result.taskKind}\`
 - Plan artifact: \`${result.plan}\`
 - Results artifact: \`${result.results}\`
 - Subtask artifact root: \`${result.outDir}/subtasks/\`
-- Executor lane: \`LocalShellExecutor\`
+- Executor lane: \`${result.runtime.executor}\`
+- Runtime mode: \`${result.runtime.mode}\`${result.runtime.image ? ` with image \`${result.runtime.image}\`` : ""}
 - Review lane: \`${result.review.resultPayload.reviewer}\` using \`${result.review.resultPayload.provider}\`
-- Selected milestone: \`${result.selectedMilestone}\`
+- Recommended next milestone: \`${result.selectedMilestone}\`
 
 ## Delegated Review
 
@@ -171,11 +182,11 @@ Disposable tmp workspace snapshots were created under \`${result.tmpRoot}\`.
 
 ${result.subtasks.map((item) => `- \`${item.id}\`: \`${item.workspace}\``).join("\n")}
 
-Docker/container isolation was not implemented. It remains a future gap.
+${result.runtime.mode === "docker" ? `Each snapshot was mounted read-only into a network-disabled container using \`${result.runtime.image}\`.` : "Container isolation was not selected; execution used the local host process lane."}
 
 ## Executor Dispatch
 
-Subtasks were dispatched through \`LocalShellExecutor\`; planner output was converted into executor requests, and aggregation used executor results.
+Subtasks were dispatched through \`${result.runtime.executor}\`; planner output was converted into executor requests, and aggregation used executor results.
 
 ${result.subtasks.map((item) => `- \`${item.id}\`: request \`${item.executor.requestId}\` -> ${item.executor.status}; report \`${item.executor.artifactPaths.report}\``).join("\n")}
 
@@ -217,7 +228,8 @@ export function validateSummaryFreshness(result: TaskRunResult, summary: string)
 function taskRunCommand(result: TaskRunResult): string {
   const mode = result.review.providerMetadataPayload?.mode;
   const delegated = mode === "delegated-cli" ? " --delegated-review cli" : mode === "delegated-mock" ? " --delegated-review mock" : "";
-  return `corepack pnpm dev task-run start --task "${result.task}" --out ${result.outDir}${delegated}`;
+  const runtime = result.runtime.mode === "docker" ? ` --runtime docker --docker-image ${result.runtime.image}` : "";
+  return `corepack pnpm dev task-run start --task "${result.task}" --out ${result.outDir}${runtime}${delegated}`;
 }
 
 export function toJsonResult(result: TaskRunResult): unknown {
@@ -240,14 +252,15 @@ export function toJsonResult(result: TaskRunResult): unknown {
       subtasks: `${result.outDir}/subtasks/`
     },
     isolation: {
-      method: "disposable tmp workspace snapshots",
+      method: result.runtime.mode === "docker" ? "read-only Docker container over disposable tmp workspace snapshot" : "disposable tmp workspace snapshots",
       root: result.tmpRoot,
-      containerUsed: false,
-      containerGap: "Docker/container isolation is recorded as a future gap, not current task-run scope."
+      containerUsed: result.runtime.mode === "docker",
+      image: result.runtime.image,
+      network: result.runtime.mode === "docker" ? "none" : "host"
     },
     selectedMilestone: result.selectedMilestone,
     executor: {
-      lane: "local-shell",
+      lane: result.runtime.executor,
       dispatch: "planner subtasks are converted into executor requests before command execution"
     },
     subtasks: result.subtasks.map((item) => ({

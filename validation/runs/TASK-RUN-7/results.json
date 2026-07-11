@@ -1,0 +1,236 @@
+{
+  "runId": "TASK-RUN-7",
+  "date": "2026-07-10",
+  "taskAccepted": "Add an opt-in Docker-isolated task execution lane with offline read-only evidence commands and owner-visible runtime metadata",
+  "taskKind": "code-inspection",
+  "planningBasis": [
+    "Task asks for a concrete isolated runtime implementation.",
+    "Use CLI wiring, executor policy, container build, tests, and owner-visible artifacts as primary evidence."
+  ],
+  "mode": "task-specific repeatable harness",
+  "status": "completed",
+  "artifacts": {
+    "plan": "validation/runs/TASK-RUN-7/plan.md",
+    "summary": "validation/runs/TASK-RUN-7/summary.md",
+    "results": "validation/runs/TASK-RUN-7/results.json",
+    "reviewRequest": "validation/runs/TASK-RUN-7/review/review-request.json",
+    "reviewResult": "validation/runs/TASK-RUN-7/review/review-result.json",
+    "reviewMarkdown": "validation/runs/TASK-RUN-7/review/review.md",
+    "providerReviewMetadata": null,
+    "subtasks": "validation/runs/TASK-RUN-7/subtasks/"
+  },
+  "isolation": {
+    "method": "read-only Docker container over disposable tmp workspace snapshot",
+    "root": "/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-task-run-7",
+    "containerUsed": true,
+    "image": "runforge:local",
+    "network": "none"
+  },
+  "selectedMilestone": "external-repo check/triage through Docker runtime",
+  "executor": {
+    "lane": "docker-shell",
+    "dispatch": "planner subtasks are converted into executor requests before command execution"
+  },
+  "subtasks": [
+    {
+      "id": "01-runtime-cli-and-dispatch",
+      "goal": "Verify explicit local/Docker runtime selection reaches executor dispatch.",
+      "workspace": "/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-task-run-7/01-runtime-cli-and-dispatch/workspace",
+      "inputsInspected": [
+        "src/cli/commands/task-run.ts",
+        "src/run/task-run-harness.ts"
+      ],
+      "findings": [
+        "Runtime CLI contract, safe default, and executor selection. Evidence command passed with exit code 0.",
+        "01-runtime-cli-and-dispatch inspected 2 input(s) and captured 19 stdout line(s). Sample: src/cli/commands/task-run.ts:18:    .option(\"--runtime <mode>\", \"subtask runtime; supported: 'local', 'docker'\", \"local\") | src/cli/commands/task-run.ts:19:    .option(\"--docker-image <image>\", \"prebuilt local image for --runtime docker\", \"runforge:local\") | src/cli/commands/task-run.ts:23:        const runtime = parseRuntime(opts.runtime as string);"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "rg -n \"runtime|docker-image|DockerShellExecutor|LocalShellExecutor|executor.lane\" src/cli/commands/task-run.ts src/run/task-run-harness.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/command.log",
+        "inspected": [
+          "src/cli/commands/task-run.ts",
+          "src/run/task-run-harness.ts"
+        ],
+        "summary": "01-runtime-cli-and-dispatch inspected 2 input(s) and captured 19 stdout line(s). Sample: src/cli/commands/task-run.ts:18:    .option(\"--runtime <mode>\", \"subtask runtime; supported: 'local', 'docker'\", \"local\") | src/cli/commands/task-run.ts:19:    .option(\"--docker-image <image>\", \"prebuilt local image for --runtime docker\", \"runforge:local\") | src/cli/commands/task-run.ts:23:        const runtime = parseRuntime(opts.runtime as string);",
+        "executorReport": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/executor-report.json"
+      },
+      "executor": {
+        "requestId": "TASK-RUN-7:01-runtime-cli-and-dispatch:docker-shell",
+        "lane": "docker-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/command.log",
+          "stdoutLog": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/stdout.log",
+          "stderrLog": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/stderr.log",
+          "report": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/executor-report.json"
+        }
+      },
+      "report": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/report.md"
+    },
+    {
+      "id": "02-container-safety-policy",
+      "goal": "Verify the Docker lane is offline, read-only, bounded, and uses a prebuilt image.",
+      "workspace": "/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-task-run-7/02-container-safety-policy/workspace",
+      "inputsInspected": [
+        "src/run/task-run-executor.ts",
+        "docker/Dockerfile"
+      ],
+      "findings": [
+        "Container mount, network, privilege, resource, image, and timeout controls. Evidence command passed with exit code 0.",
+        "02-container-safety-policy inspected 2 input(s) and captured 22 stdout line(s). Sample: src/run/task-run-executor.ts:26:    network: \"host\" | \"none\"; | src/run/task-run-executor.ts:48:  readonly lane = \"local-shell\" as const; | src/run/task-run-executor.ts:50:  constructor(private readonly repoRoot: string) {}"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "rg -n \"pull|network|cap-drop|read-only|pids-limit|memory|cpus|tmpfs|readonly|removeContainer|FROM|ripgrep\" src/run/task-run-executor.ts docker/Dockerfile",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/command.log",
+        "inspected": [
+          "src/run/task-run-executor.ts",
+          "docker/Dockerfile"
+        ],
+        "summary": "02-container-safety-policy inspected 2 input(s) and captured 22 stdout line(s). Sample: src/run/task-run-executor.ts:26:    network: \"host\" | \"none\"; | src/run/task-run-executor.ts:48:  readonly lane = \"local-shell\" as const; | src/run/task-run-executor.ts:50:  constructor(private readonly repoRoot: string) {}",
+        "executorReport": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/executor-report.json"
+      },
+      "executor": {
+        "requestId": "TASK-RUN-7:02-container-safety-policy:docker-shell",
+        "lane": "docker-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/command.log",
+          "stdoutLog": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/stdout.log",
+          "stderrLog": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/stderr.log",
+          "report": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/executor-report.json"
+        }
+      },
+      "report": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/report.md"
+    },
+    {
+      "id": "03-runtime-evidence-contract",
+      "goal": "Verify runtime metadata is tested and rendered into owner-visible artifacts.",
+      "workspace": "/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-task-run-7/03-runtime-evidence-contract/workspace",
+      "inputsInspected": [
+        "src/run/task-run-renderer.ts",
+        "tests/unit/task-run-executor.test.ts",
+        "tests/unit/task-run-renderer.test.ts"
+      ],
+      "findings": [
+        "Runtime metadata in summaries/results and regression coverage. Evidence command passed with exit code 0.",
+        "03-runtime-evidence-contract inspected 3 input(s) and captured 28 stdout line(s). Sample: src/run/task-run-renderer.ts:11:  runtime: TaskRunRuntime = \"local\", | src/run/task-run-renderer.ts:14:  const executor = runtime === \"docker\" ? \"DockerShellExecutor\" : \"LocalShellExecutor\"; | src/run/task-run-renderer.ts:15:  const isolation = runtime === \"docker\""
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "rg -n \"Runtime mode|containerUsed|docker-shell|dockerRunArgs|network.*none|runtime\" src/run/task-run-renderer.ts tests/unit/task-run-executor.test.ts tests/unit/task-run-renderer.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/command.log",
+        "inspected": [
+          "src/run/task-run-renderer.ts",
+          "tests/unit/task-run-executor.test.ts",
+          "tests/unit/task-run-renderer.test.ts"
+        ],
+        "summary": "03-runtime-evidence-contract inspected 3 input(s) and captured 28 stdout line(s). Sample: src/run/task-run-renderer.ts:11:  runtime: TaskRunRuntime = \"local\", | src/run/task-run-renderer.ts:14:  const executor = runtime === \"docker\" ? \"DockerShellExecutor\" : \"LocalShellExecutor\"; | src/run/task-run-renderer.ts:15:  const isolation = runtime === \"docker\"",
+        "executorReport": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/executor-report.json"
+      },
+      "executor": {
+        "requestId": "TASK-RUN-7:03-runtime-evidence-contract:docker-shell",
+        "lane": "docker-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/command.log",
+          "stdoutLog": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/stdout.log",
+          "stderrLog": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/stderr.log",
+          "report": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/executor-report.json"
+        }
+      },
+      "report": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/report.md"
+    }
+  ],
+  "checks": [
+    {
+      "command": "corepack pnpm check:structure",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "review": {
+    "request": "validation/runs/TASK-RUN-7/review/review-request.json",
+    "result": "validation/runs/TASK-RUN-7/review/review-result.json",
+    "markdown": "validation/runs/TASK-RUN-7/review/review.md",
+    "reviewer": "deterministic-evidence-reviewer",
+    "provider": "providerless",
+    "providerMetadata": null,
+    "safety": {
+      "mode": "providerless",
+      "readOnly": true,
+      "mutationForbidden": true,
+      "networkAccess": "not_requested",
+      "secretsAccess": "not_requested",
+      "repoAccess": "evidence_packet_only"
+    },
+    "status": "accepted",
+    "confidence": "medium",
+    "humanDecisionRequired": true,
+    "recommendedNextAction": "Owner can use the summary and review artifacts as evidence for the next milestone decision.",
+    "evidenceReferences": [
+      "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/report.md",
+      "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/report.md",
+      "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/report.md",
+      "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/command.log",
+      "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/stdout.log",
+      "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/stderr.log",
+      "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/executor-report.json",
+      "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/command.log",
+      "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/stdout.log",
+      "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/stderr.log",
+      "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/executor-report.json",
+      "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/command.log",
+      "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/stdout.log",
+      "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/stderr.log",
+      "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/executor-report.json"
+    ]
+  },
+  "ownerConclusion": "The accepted runtime task was answered from implementation evidence: Docker execution is now an explicit opt-in lane with a read-only workspace mount, disabled network, dropped capabilities, bounded resources, and owner-visible runtime metadata.",
+  "remainingGaps": [
+    "Docker isolation is available for evidence commands; runtime selection is not yet available for full coding-agent execution.",
+    "The Docker lane executes deterministic evidence commands; full coding-agent execution remains a separate owner-gated milestone."
+  ],
+  "recommendedNextMilestone": "external-repo check/triage through Docker runtime",
+  "recommendedNextStep": "Recommended next milestone: external-repo check/triage through Docker runtime."
+}

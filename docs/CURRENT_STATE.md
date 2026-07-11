@@ -28,7 +28,8 @@ task
 - Repeatable `task-run start` harness for local providerless task-runs.
 - Deterministic task classification for docs review, code inspection, and general review.
 - Planner/subtask artifacts, disposable workspace snapshots, executor logs, review artifacts, summary, and results.
-- Local shell executor dispatch with per-subtask command logs and executor reports.
+- Local shell executor dispatch plus an opt-in Docker lane for deterministic evidence commands, with per-subtask command logs and executor reports.
+- Docker task-run isolation uses a prebuilt local image, `--pull never`, disabled network, read-only workspace mounts, dropped capabilities, bounded resources, and owner-visible runtime metadata.
 - Deterministic evidence review as the default offline lane.
 - First governor loop that can select and run the next local providerless task-run without per-step owner approval.
 - MVP failure triage and deterministic classification.
@@ -64,10 +65,11 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 - `GOVERNOR-1`: first self-driving roadmap loop completed.
 - `TASK-RUN-5`: semantic task-specific planning / owner-decision binding completed for the non-provider implementation gap.
 - `TASK-RUN-6`: roadmap/current-state synchronization from validation evidence completed.
+- `TASK-RUN-7`: Docker-isolated task execution lane completed and validated on a real local Docker runtime.
 
 ## Current Gaps
 
-- Runtime selection across local worktree, Docker/container, VPS, or other isolated execution lanes.
+- Runtime selection beyond local host and Docker evidence commands, including full coding-agent, VPS, or other isolated execution lanes.
 - Executor assignment to CLI agents, models, shell tools, integrations, or providers.
 - Aggregation/compression across subtask logs and artifacts.
 - Richer semantic planning beyond current deterministic heuristics.
@@ -109,4 +111,4 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 
 ## Immediate Constraint
 
-Do not continue Alpha-28. The current milestone is `TASK-RUN-7: Evidence-aware docs/task-run planner refresh`. The governor may continue local providerless milestones from validation evidence, while stopping for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, or a strategic fork.
+Do not continue Alpha-28. TASK-RUN-7 completed the Docker-isolated evidence-command lane. The next useful contour is one real external-repository check/triage task run through that runtime; stop for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, full coding-agent runtime expansion, or another strategic fork.

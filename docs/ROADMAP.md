@@ -65,23 +65,15 @@ Validation evidence now shows the first practical value has moved from target to
 - `GOVERNOR-1`: completed the first self-driving roadmap loop and selected the next task-run without per-step owner approval.
 - `TASK-RUN-5`: completed semantic task-specific planning / owner-decision binding for the non-provider implementation gap.
 - `TASK-RUN-6`: completed roadmap/current-state synchronization from validation evidence.
+- `TASK-RUN-7`: completed an opt-in Docker-isolated evidence-command lane with read-only mounts, disabled network, bounded resources, and owner-visible runtime metadata.
 
-The loop is still local and providerless by default. It uses disposable workspace snapshots, local shell executor dispatch, deterministic evidence review, and owner-ready artifacts. Docker/container isolation, remote/VPS execution, provider-backed reviewers, and push/merge/deploy remain outside the default autonomous lane.
+The loop is still local and providerless by default. It uses disposable workspace snapshots, local shell or opt-in Docker executor dispatch, deterministic evidence review, and owner-ready artifacts. Remote/VPS execution, provider-backed reviewers, full coding-agent container execution, and push/merge/deploy remain outside the default autonomous lane.
 
 ## Current Milestone
 
-The current milestone is `TASK-RUN-7: Evidence-aware docs/task-run planner refresh`.
+`TASK-RUN-7: Docker-isolated task execution lane` is complete. Its validation packet proves three planner-generated evidence commands ran in prebuilt local containers with read-only workspace mounts, `network=none`, dropped capabilities, bounded resources, and runtime metadata in owner-visible artifacts.
 
-TASK-RUN-6 synchronized docs with validation evidence and removed stale TASK-RUN-1-only framing. TASK-RUN-7 should close the next evidence-backed gap found during TASK-RUN-6: docs-review planning still used an older TASK-RUN-4 evidence query even though current evidence reaches TASK-RUN-6.
-
-`TASK-RUN-7` must:
-
-- make docs/task-run planning choose recent validation evidence dynamically enough to avoid stale TASK-RUN-4-only readiness checks;
-- keep the default providerless/offline;
-- avoid new viewer/archive/handoff/OKF work and other platform expansion;
-- preserve stop gates for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, and strategic forks.
-
-The next milestone after TASK-RUN-7 should again be selected from validation evidence, not from a static roadmap line.
+The next milestone should extend this runtime into one real external-repository check/triage task run, not return to docs-only synchronization. Full coding-agent execution, provider routing, remote/VPS execution, and apply/merge/deploy remain separate owner-gated decisions.
 
 ## Supporting Substrate
 

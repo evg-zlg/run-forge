@@ -1,0 +1,38 @@
+$ rg -n "pull|network|cap-drop|read-only|pids-limit|memory|cpus|tmpfs|readonly|removeContainer|FROM|ripgrep" src/run/task-run-executor.ts docker/Dockerfile
+executor: docker-shell
+isolation: docker-container
+image: runforge:local
+network: none
+requestId: TASK-RUN-7:02-container-safety-policy:docker-shell
+cwd: /Users/evgeny/Documents/projects/.runforge-task-runs/runforge-task-run-7/02-container-safety-policy/workspace
+timeoutMs: 30000
+status: passed
+exitCode: 0
+signal: null
+
+## stdout
+src/run/task-run-executor.ts:26:    network: "host" | "none";
+src/run/task-run-executor.ts:48:  readonly lane = "local-shell" as const;
+src/run/task-run-executor.ts:50:  constructor(private readonly repoRoot: string) {}
+src/run/task-run-executor.ts:92:        network: "host"
+src/run/task-run-executor.ts:117:  readonly lane = "docker-shell" as const;
+src/run/task-run-executor.ts:120:    private readonly repoRoot: string,
+src/run/task-run-executor.ts:121:    private readonly image: string
+src/run/task-run-executor.ts:148:      if (timedOut) await removeContainer(containerName);
+src/run/task-run-executor.ts:165:        network: "none"
+src/run/task-run-executor.ts:193:    "--pull",
+src/run/task-run-executor.ts:197:    "--network",
+src/run/task-run-executor.ts:201:    "--cap-drop",
+src/run/task-run-executor.ts:203:    "--pids-limit",
+src/run/task-run-executor.ts:205:    "--memory",
+src/run/task-run-executor.ts:207:    "--cpus",
+src/run/task-run-executor.ts:209:    "--read-only",
+src/run/task-run-executor.ts:210:    "--tmpfs",
+src/run/task-run-executor.ts:213:    `type=bind,src=${request.cwd},dst=/workspace,readonly`,
+src/run/task-run-executor.ts:224:async function removeContainer(name: string): Promise<void> {
+src/run/task-run-executor.ts:243:    `network: ${result.runtime.network}`,
+docker/Dockerfile:1:FROM node:22-bookworm-slim
+docker/Dockerfile:5:  && apt-get install -y --no-install-recommends ripgrep \
+
+## stderr
+(empty)

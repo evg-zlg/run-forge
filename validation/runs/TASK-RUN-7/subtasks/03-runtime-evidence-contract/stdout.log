@@ -1,0 +1,28 @@
+src/run/task-run-renderer.ts:11:  runtime: TaskRunRuntime = "local",
+src/run/task-run-renderer.ts:14:  const executor = runtime === "docker" ? "DockerShellExecutor" : "LocalShellExecutor";
+src/run/task-run-renderer.ts:15:  const isolation = runtime === "docker"
+src/run/task-run-renderer.ts:137:- Executor lane: \`${result.runtime.executor}\`
+src/run/task-run-renderer.ts:138:- Runtime mode: \`${result.runtime.mode}\`${result.runtime.image ? ` with image \`${result.runtime.image}\`` : ""}
+src/run/task-run-renderer.ts:185:${result.runtime.mode === "docker" ? `Each snapshot was mounted read-only into a network-disabled container using \`${result.runtime.image}\`.` : "Container isolation was not selected; execution used the local host process lane."}
+src/run/task-run-renderer.ts:189:Subtasks were dispatched through \`${result.runtime.executor}\`; planner output was converted into executor requests, and aggregation used executor results.
+src/run/task-run-renderer.ts:231:  const runtime = result.runtime.mode === "docker" ? ` --runtime docker --docker-image ${result.runtime.image}` : "";
+src/run/task-run-renderer.ts:232:  return `corepack pnpm dev task-run start --task "${result.task}" --out ${result.outDir}${runtime}${delegated}`;
+src/run/task-run-renderer.ts:255:      method: result.runtime.mode === "docker" ? "read-only Docker container over disposable tmp workspace snapshot" : "disposable tmp workspace snapshots",
+src/run/task-run-renderer.ts:257:      containerUsed: result.runtime.mode === "docker",
+src/run/task-run-renderer.ts:258:      image: result.runtime.image,
+src/run/task-run-renderer.ts:259:      network: result.runtime.mode === "docker" ? "none" : "host"
+src/run/task-run-renderer.ts:263:      lane: result.runtime.executor,
+tests/unit/task-run-executor.test.ts:5:import { createExecutorRequest, dockerRunArgs, LocalShellExecutor } from "../../src/run/task-run-executor.js";
+tests/unit/task-run-executor.test.ts:19:      command: "rg -n runtime src",
+tests/unit/task-run-executor.test.ts:22:      lane: "docker-shell"
+tests/unit/task-run-executor.test.ts:25:    const args = dockerRunArgs(request, "runforge:local", "runforge-test");
+tests/unit/task-run-executor.test.ts:27:    expect(request.id).toContain("docker-shell");
+tests/unit/task-run-executor.test.ts:30:      "--network", "none",
+tests/unit/task-run-executor.test.ts:35:      "rg -n runtime src"
+tests/unit/task-run-renderer.test.ts:239:  it("routes Docker runtime work to code evidence instead of matching doc inside docker", () => {
+tests/unit/task-run-renderer.test.ts:240:    const plan = planTaskRun("Add an opt-in Docker-isolated task execution lane with owner-visible runtime metadata");
+tests/unit/task-run-renderer.test.ts:243:    expect(plan.recommendedNextMilestone).toBe("external-repo check/triage through Docker runtime");
+tests/unit/task-run-renderer.test.ts:245:      "01-runtime-cli-and-dispatch",
+tests/unit/task-run-renderer.test.ts:247:      "03-runtime-evidence-contract"
+tests/unit/task-run-renderer.test.ts:287:    runtime: {
+tests/unit/task-run-renderer.test.ts:388:          runtime: {

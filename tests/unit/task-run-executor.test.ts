@@ -2,12 +2,40 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
-import { createExecutorRequest, LocalShellExecutor } from "../../src/run/task-run-executor.js";
+import { createExecutorRequest, dockerRunArgs, LocalShellExecutor } from "../../src/run/task-run-executor.js";
 
 const tempRoots: string[] = [];
 
 afterEach(async () => {
   await Promise.all(tempRoots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+
+describe("DockerShellExecutor policy", () => {
+  it("builds an offline, read-only, capability-dropped container command", async () => {
+    const root = await tempRoot();
+    const request = createExecutorRequest({
+      runId: "TASK-RUN-7",
+      subtaskId: "01-container",
+      command: "rg -n runtime src",
+      cwd: root,
+      artifactDir: join(root, "subtasks", "01-container"),
+      lane: "docker-shell"
+    });
+
+    const args = dockerRunArgs(request, "runforge:local", "runforge-test");
+
+    expect(request.id).toContain("docker-shell");
+    expect(args).toEqual(expect.arrayContaining([
+      "--pull", "never",
+      "--network", "none",
+      "--cap-drop", "ALL",
+      "--read-only",
+      "--entrypoint", "/bin/sh",
+      "runforge:local",
+      "rg -n runtime src"
+    ]));
+    expect(args.find((item) => item.startsWith("type=bind"))).toContain("readonly");
+  });
 });
 
 describe("LocalShellExecutor", () => {
