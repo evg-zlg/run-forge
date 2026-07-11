@@ -1,0 +1,18 @@
+$ npm run typecheck
+executor: docker-shell
+isolation: docker-container
+image: runforge:local
+network: none
+requestId: EXTERNAL-RUN-3:01-typecheck:docker-shell
+cwd: /Users/evgeny/Documents/projects/.runforge-task-runs/runforge-external-run-3/prepared-workspace
+timeoutMs: 300000
+status: passed
+exitCode: 0
+signal: null
+
+## stdout
+> factory-loop@0.1.0 typecheck
+> tsc -p tsconfig.json --noEmit
+
+## stderr
+(empty)

@@ -75,8 +75,6 @@ export class LocalShellExecutor implements TaskRunExecutor {
       timedOut = err.killed === true && signal === "SIGTERM";
     }
 
-    stdout = normalizeCapturedLog(stdout);
-    stderr = normalizeCapturedLog(stderr);
     const status = timedOut ? "timed_out" : exitCode === 0 ? "passed" : "failed";
     const paths = {
       commandLog: join(request.artifactDir, "command.log"),
@@ -121,7 +119,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
   constructor(
     private readonly repoRoot: string,
     private readonly image: string,
-    private readonly externalRepo?: string
+    private readonly writableWorkspace = false
   ) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
@@ -135,7 +133,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
     let timedOut = false;
 
     try {
-      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.externalRepo), {
+      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace), {
         maxBuffer: 1024 * 1024 * 8,
         timeout: request.timeoutMs
       });
@@ -151,8 +149,6 @@ export class DockerShellExecutor implements TaskRunExecutor {
       if (timedOut) await removeContainer(containerName);
     }
 
-    stdout = normalizeCapturedLog(stdout);
-    stderr = normalizeCapturedLog(stderr);
     const status = timedOut ? "timed_out" : exitCode === 0 ? "passed" : "failed";
     const paths = {
       commandLog: join(request.artifactDir, "command.log"),
@@ -191,23 +187,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
   }
 }
 
-export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, externalRepo?: string): string[] {
-  const externalMounts = externalRepo ? ["--mount", `type=bind,src=${externalRepo},dst=/source,readonly`] : [];
-  const containerCommand = externalRepo
-    ? [
-        "printf '%s\\n' RUNFORGE_SOURCE_BEFORE_HEAD",
-        "git -C /source rev-parse HEAD",
-        "printf '%s\\n' RUNFORGE_SOURCE_BEFORE_STATUS",
-        "git -C /source status --short",
-        request.command,
-        "runforge_status=$?",
-        "printf '%s\\n' RUNFORGE_SOURCE_AFTER_HEAD",
-        "git -C /source rev-parse HEAD",
-        "printf '%s\\n' RUNFORGE_SOURCE_AFTER_STATUS",
-        "git -C /source status --short",
-        "exit $runforge_status"
-      ].join("\n")
-    : request.command;
+export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false): string[] {
   return [
     "run",
     "--rm",
@@ -222,24 +202,30 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "--cap-drop",
     "ALL",
     "--pids-limit",
-    externalRepo ? "512" : "256",
+    "512",
     "--memory",
-    externalRepo ? "2g" : "512m",
+    "2g",
     "--cpus",
-    externalRepo ? "2" : "1",
+    "2",
     "--read-only",
     "--tmpfs",
-    "/tmp:rw,exec,nosuid,nodev,size=256m",
-    ...externalMounts,
+    "/tmp:rw,nosuid,size=256m",
+    "--env",
+    "HOME=/tmp",
+    "--env",
+    "npm_config_cache=/tmp/npm-cache",
+    "--env",
+    "TMPDIR=/runforge-tmp",
     "--mount",
-    `type=bind,src=${request.cwd},dst=/workspace${externalRepo ? "" : ",readonly"}`,
+    `type=bind,src=${request.cwd},dst=/workspace${writableWorkspace ? "" : ",readonly"}`,
+    ...(writableWorkspace ? ["--mount", `type=bind,src=${request.cwd}/.runforge-tmp,dst=/runforge-tmp`] : []),
     "--workdir",
     "/workspace",
     "--entrypoint",
     "/bin/sh",
     image,
     "-lc",
-    containerCommand
+    request.command
   ];
 }
 
@@ -254,10 +240,6 @@ async function removeContainer(name: string): Promise<void> {
 function dockerContainerName(requestId: string): string {
   const safe = requestId.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
   return `runforge-${safe}-${process.pid}`;
-}
-
-function normalizeCapturedLog(value: string): string {
-  return value ? `${value.replace(/\n+$/, "")}\n` : value;
 }
 
 function renderCommandLog(request: ExecutorRequest, result: ExecutorResult): string {

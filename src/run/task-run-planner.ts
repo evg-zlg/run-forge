@@ -33,23 +33,21 @@ export function planTaskRun(task: string): TaskRunPlan {
   return generalPlan(task);
 }
 
-export function planExternalTaskRun(commands: string[]): TaskRunPlan {
+export function planExternalValidationTaskRun(task: string, lockfile: string): TaskRunPlan {
+  const runner = lockfile === "pnpm-lock.yaml" ? "corepack pnpm" : lockfile === "yarn.lock" ? "corepack yarn" : "npm";
   return {
-    kind: "external-validation",
+    kind: "code-inspection",
     planningBasis: [
-      "An explicit external repository target was supplied.",
-      "Validation runs in disposable writable workspaces through the opt-in Docker executor.",
-      "The original repository is mounted read-only and checked before and after execution."
+      "Task targets an explicitly declared external JavaScript/TypeScript repository.",
+      "Validation commands run sequentially in a prepared disposable Linux workspace with runtime network disabled."
     ],
-    inputs: ["package.json", "package-lock.json", "src", "tests"],
-    recommendedNextMilestone: "broaden external task-run package-manager fixtures",
-    subtasks: commands.map((command, index) => ({
-      id: `${String(index + 1).padStart(2, "0")}-external-validation`,
-      goal: `Run external validation command: ${command}`,
-      inputs: ["package.json", "src", "tests"],
-      evidenceFocus: "External target validation in a disposable Docker workspace.",
-      evidenceCommand: command
-    }))
+    inputs: ["package.json", lockfile, "tsconfig.json", "src", "tests"],
+    recommendedNextMilestone: "safe disposable repair execution",
+    subtasks: [
+      { id: "01-typecheck", goal: "Run the target repository typecheck.", inputs: ["package.json", "tsconfig.json", "src"], evidenceFocus: "TypeScript validation result.", evidenceCommand: `${runner} run typecheck` },
+      { id: "02-test", goal: "Run the target repository test suite through collection and execution.", inputs: ["package.json", "tests", "src"], evidenceFocus: "Actual test collection and execution result.", evidenceCommand: `${runner} test` },
+      { id: "03-build", goal: "Run the target repository production build.", inputs: ["package.json", "tsconfig.json", "src"], evidenceFocus: "Build validation result.", evidenceCommand: `${runner} run build` }
+    ]
   };
 }
 

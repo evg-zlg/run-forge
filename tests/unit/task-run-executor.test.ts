@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -37,25 +37,23 @@ describe("DockerShellExecutor policy", () => {
     expect(args.find((item) => item.startsWith("type=bind"))).toContain("readonly");
   });
 
-  it("mounts an external source read-only and its disposable workspace writable", async () => {
-    const workspace = await tempRoot();
-    const externalRepo = await tempRoot();
-    await mkdir(join(externalRepo, "node_modules"));
+  it("allows writes only when the caller declares a disposable prepared workspace", async () => {
+    const root = await tempRoot();
     const request = createExecutorRequest({
-      runId: "EXTERNAL-RUN-2", subtaskId: "01-typecheck", command: "npm run typecheck",
-      cwd: workspace, artifactDir: join(workspace, "artifacts"), lane: "docker-shell"
+      runId: "EXTERNAL-RUN-3",
+      subtaskId: "03-build",
+      command: "npm run build",
+      cwd: root,
+      artifactDir: join(root, "subtasks", "03-build"),
+      lane: "docker-shell"
     });
 
-    const args = dockerRunArgs(request, "runforge:local", "runforge-external", externalRepo);
-    const mounts = args.filter((item) => item.startsWith("type=bind"));
-    expect(mounts).toContain(`type=bind,src=${externalRepo},dst=/source,readonly`);
-    expect(mounts).not.toContain(`type=bind,src=${join(externalRepo, "node_modules")},dst=/workspace/node_modules,readonly`);
-    expect(mounts).toContain(`type=bind,src=${workspace},dst=/workspace`);
-    expect(args).toContain("/tmp:rw,exec,nosuid,nodev,size=256m");
-    expect(args).toEqual(expect.arrayContaining(["--memory", "2g", "--cpus", "2", "--pids-limit", "512"]));
-    expect(args.at(-1)).toContain("git -C /source rev-parse HEAD");
-    expect(args.at(-1)).toContain("npm run typecheck");
-    expect(args.at(-1)).toContain("exit $runforge_status");
+    const args = dockerRunArgs(request, "runforge:local", "runforge-test", true);
+
+    expect(args).toEqual(expect.arrayContaining(["--network", "none", "--read-only", "--memory", "2g", "HOME=/tmp", "TMPDIR=/runforge-tmp"]));
+    expect(args).toContain(`type=bind,src=${root}/.runforge-tmp,dst=/runforge-tmp`);
+    expect(args.join(" ")).not.toContain("noexec");
+    expect(args.find((item) => item.startsWith("type=bind"))).not.toContain("readonly");
   });
 });
 

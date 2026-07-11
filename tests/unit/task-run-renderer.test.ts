@@ -289,6 +289,13 @@ function taskRunResult(input: { runId: string; task: string; outDir: string }): 
       executor: "local-shell",
       image: null
     },
+    sourceRepository: {
+      external: false,
+      before: null,
+      after: null,
+      unchanged: null
+    },
+    preparation: null,
     plan: `${input.outDir}/plan.md`,
     summary: `${input.outDir}/summary.md`,
     results: `${input.outDir}/results.json`,

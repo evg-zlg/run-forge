@@ -13,14 +13,12 @@ export function renderPlan(
 ): string {
   const executor = runtime === "docker" ? "DockerShellExecutor" : "LocalShellExecutor";
   const isolation = runtime === "docker"
-    ? plan.kind === "external-validation"
-      ? `The original repository is mounted read-only at \`/source\`; each disposable snapshot is mounted writable at \`/workspace\` in a network-disabled container using \`${dockerImage}\`.`
-      : `Each subtask snapshot is mounted read-only into a network-disabled container using the prebuilt local image \`${dockerImage}\`.`
+    ? `Each subtask snapshot is mounted read-only into a network-disabled container using the prebuilt local image \`${dockerImage}\`.`
     : `Each subtask uses a disposable tmp workspace snapshot under \`${tmpRoot}/<subtask>/workspace\`.`;
   return `# ${runId} Plan
 
 Run ID: \`${runId}\`
-Date: 2026-07-10
+Date: ${new Date().toISOString().slice(0, 10)}
 Mode: task-specific repeatable harness
 Task kind: \`${plan.kind}\`
 
@@ -138,9 +136,10 @@ Task kind: \`${result.taskKind}\`
 - Subtask artifact root: \`${result.outDir}/subtasks/\`
 - Executor lane: \`${result.runtime.executor}\`
 - Runtime mode: \`${result.runtime.mode}\`${result.runtime.image ? ` with image \`${result.runtime.image}\`` : ""}
+- Source repository: \`${result.sourceRepository.before?.path ?? "current RunForge checkout"}\`
+- Runtime preparation: \`${result.preparation?.status ?? "not requested"}\`
 - Review lane: \`${result.review.resultPayload.reviewer}\` using \`${result.review.resultPayload.provider}\`
 - Recommended next milestone: \`${result.selectedMilestone}\`
-${result.externalTarget ? `- External target: \`${result.externalTarget.path}\`\n- Original repo mutation verdict: \`${result.externalTarget.mutationVerdict}\`\n- RunForge capability classification: \`${result.externalTarget.capabilityClassification}\`\n- Target validation classification: \`${result.externalTarget.targetClassification}\`` : ""}
 
 ## Delegated Review
 
@@ -177,7 +176,6 @@ ${result.planningBasis.map((item) => `- ${item}`).join("\n")}
 - \`${result.review.result}\`
 - \`${result.review.markdown}\`
 ${result.review.providerMetadata ? `- \`${result.review.providerMetadata}\`` : ""}
-${result.externalTarget ? `- \`${result.externalTarget.environment}\`\n- \`${result.externalTarget.executionLog}\`\n- \`${result.externalTarget.triageReport}\`` : ""}
 - \`${result.outDir}/subtasks/\`
 
 ## Isolation Method
@@ -186,7 +184,11 @@ Disposable tmp workspace snapshots were created under \`${result.tmpRoot}\`.
 
 ${result.subtasks.map((item) => `- \`${item.id}\`: \`${item.workspace}\``).join("\n")}
 
-${result.runtime.mode === "docker" ? result.externalTarget ? `The original target was mounted read-only at \`/source\`; each disposable snapshot was writable at \`/workspace\`; networking was disabled; image \`${result.runtime.image}\` was used.` : `Each snapshot was mounted read-only into a network-disabled container using \`${result.runtime.image}\`.` : "Container isolation was not selected; execution used the local host process lane."}
+${result.runtime.mode === "docker"
+  ? result.sourceRepository.external
+    ? `The original repository was never mounted. The prepared disposable workspace was mounted writable into network-disabled containers using \`${result.runtime.image}\` so tests and builds could create temporary/output files.`
+    : `Each snapshot was mounted read-only into a network-disabled container using \`${result.runtime.image}\`.`
+  : "Container isolation was not selected; execution used the local host process lane."}
 
 ## Executor Dispatch
 
@@ -233,16 +235,16 @@ function taskRunCommand(result: TaskRunResult): string {
   const mode = result.review.providerMetadataPayload?.mode;
   const delegated = mode === "delegated-cli" ? " --delegated-review cli" : mode === "delegated-mock" ? " --delegated-review mock" : "";
   const runtime = result.runtime.mode === "docker" ? ` --runtime docker --docker-image ${result.runtime.image}` : "";
-  const external = result.externalTarget
-    ? ` --repo ${result.externalTarget.path}${result.externalTarget.commands.map((command) => ` --command "${command}"`).join("")}`
-    : "";
-  return `corepack pnpm dev task-run start --task "${result.task}" --out ${result.outDir}${external}${runtime}${delegated}`;
+  const repo = result.sourceRepository.external ? ` --repo ${result.sourceRepository.before?.path}` : "";
+  const preparation = result.preparation ? " --prepare-runtime explicit" : "";
+  const check = ` --check-command "${result.checks[0]?.command}"`;
+  return `corepack pnpm dev task-run start --task "${result.task}" --out ${result.outDir}${repo}${runtime}${preparation}${check}${delegated}`;
 }
 
 export function toJsonResult(result: TaskRunResult): unknown {
   return {
     runId: result.runId,
-    date: "2026-07-10",
+    date: new Date().toISOString().slice(0, 10),
     taskAccepted: result.task,
     taskKind: result.taskKind,
     planningBasis: result.planningBasis,
@@ -256,18 +258,17 @@ export function toJsonResult(result: TaskRunResult): unknown {
       reviewResult: result.review.result,
       reviewMarkdown: result.review.markdown,
       providerReviewMetadata: result.review.providerMetadata ?? null,
-      environment: result.externalTarget?.environment ?? null,
-      executionLog: result.externalTarget?.executionLog ?? null,
-      externalTriageReport: result.externalTarget?.triageReport ?? null,
       subtasks: `${result.outDir}/subtasks/`
     },
     isolation: {
-      method: result.externalTarget ? "read-only external source plus writable disposable Docker workspace" : result.runtime.mode === "docker" ? "read-only Docker container over disposable tmp workspace snapshot" : "disposable tmp workspace snapshots",
+      method: result.runtime.mode === "docker" ? "read-only Docker container over disposable tmp workspace snapshot" : "disposable tmp workspace snapshots",
       root: result.tmpRoot,
       containerUsed: result.runtime.mode === "docker",
       image: result.runtime.image,
       network: result.runtime.mode === "docker" ? "none" : "host"
     },
+    sourceRepository: result.sourceRepository,
+    preparation: result.preparation,
     selectedMilestone: result.selectedMilestone,
     executor: {
       lane: result.runtime.executor,
@@ -315,7 +316,6 @@ export function toJsonResult(result: TaskRunResult): unknown {
     ownerConclusion: result.ownerConclusion,
     remainingGaps: result.gaps,
     recommendedNextMilestone: result.selectedMilestone,
-    recommendedNextStep: result.recommendedNextStep,
-    externalTarget: result.externalTarget ?? null
+    recommendedNextStep: result.recommendedNextStep
   };
 }

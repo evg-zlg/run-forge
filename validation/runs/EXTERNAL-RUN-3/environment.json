@@ -1,0 +1,25 @@
+{
+  "capturedAt": "2026-07-11T07:05:27.981Z",
+  "runForge": {
+    "path": "/Users/evgeny/Documents/projects/RunForge",
+    "head": "95e3d8050110597ccbe8b9f6d805340188cbc793"
+  },
+  "target": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "status": ""
+  },
+  "runtime": {
+    "mode": "docker",
+    "image": {
+      "name": "runforge:local",
+      "id": "sha256:44dc2dd1e3af867ff1c8346761bcc7451a4852fe2bf6f20e39dc4cd87765fa14"
+    },
+    "target": {
+      "platform": "linux",
+      "architecture": "arm64"
+    },
+    "preparationNetwork": true,
+    "executionNetwork": "none"
+  }
+}
