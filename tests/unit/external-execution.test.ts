@@ -12,8 +12,8 @@ const valid = {
   dockerImage: "runforge:local",
   prepareRuntime: "explicit",
   repairMode: "disposable",
-  approvalMode: "await-owner",
-  applyMode: "controlled-worktree",
+  approvalMode: "require-owner-decision",
+  applyMode: "none",
   commands: [],
   timeoutMs: 1_000
 };
@@ -27,8 +27,8 @@ describe("external execution gates", () => {
     [{ runtime: "local" }, "--runtime docker"],
     [{ prepareRuntime: "none" }, "--prepare-runtime explicit"],
     [{ repairMode: "in-place" }, "only 'disposable'"],
-    [{ approvalMode: "automatic" }, "Unsupported --approval-mode"],
-    [{ applyMode: "main" }, "only 'controlled-worktree'"]
+    [{ approvalMode: "automatic" }, "only 'require-owner-decision'"],
+    [{ applyMode: "main" }, "only 'none'"]
   ])("rejects unsafe mode %j", (override, message) => {
     expect(() => validateExternalExecutionModes({ ...valid, ...override })).toThrow(message);
   });

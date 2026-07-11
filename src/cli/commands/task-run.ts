@@ -1,10 +1,12 @@
 import { Command, InvalidArgumentError } from "commander";
 import { renderTaskRunCliSummary, runTaskRunHarness } from "../../run/task-run-harness.js";
-import { renderExternalExecutionCliSummary, runExternalExecution } from "../../run/external-execution.js";
+import { continueExternalExecution, recordOwnerDecision, renderExternalExecutionCliSummary, runExternalExecution } from "../../run/external-execution.js";
 
 export function taskRunCommand(): Command {
   const taskRun = new Command("task-run").description("Run a narrow repeatable Agent OS task-run harness.");
   taskRun.addCommand(startCommand());
+  taskRun.addCommand(ownerDecisionCommand());
+  taskRun.addCommand(continueCommand());
   return taskRun;
 }
 
@@ -22,8 +24,8 @@ function startCommand(): Command {
     .option("--docker-image <image>", "prebuilt local image for --runtime docker", "runforge:local")
     .option("--prepare-runtime <mode>", "explicit dependency preparation; supported: 'explicit'", "none")
     .option("--repair-mode <mode>", "external repair mode; supported: 'disposable'")
-    .option("--approval-mode <mode>", "owner gate; supported: 'await-owner', 'simulated-owner-approved'", "await-owner")
-    .option("--apply-mode <mode>", "controlled apply mode; supported: 'controlled-worktree'", "controlled-worktree")
+    .option("--approval-mode <mode>", "owner gate; supported: 'require-owner-decision'", "require-owner-decision")
+    .option("--apply-mode <mode>", "apply during start; supported: 'none'", "none")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger, 300_000)
     .action(async (opts) => {
       try {
@@ -43,7 +45,7 @@ function startCommand(): Command {
             timeoutMs: opts.timeoutMs as number
           });
           console.log(renderExternalExecutionCliSummary(result));
-          if (result.runforgeCapability !== "passed") process.exitCode = 1;
+          if (!["passed", "needs owner approval"].includes(result.runforgeCapability)) process.exitCode = 1;
           return;
         }
         const delegatedReview = parseDelegatedReview(opts.delegatedReview as string | undefined);
@@ -66,6 +68,36 @@ function startCommand(): Command {
       } catch (error) {
         throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
       }
+    });
+}
+
+function ownerDecisionCommand(): Command {
+  return new Command("owner-decision")
+    .description("Record an explicit owner decision bound to an external execution packet.")
+    .requiredOption("--run <path>", "external execution artifact root")
+    .requiredOption("--decision <decision>", "approve, reject, continue, or hold")
+    .requiredOption("--target-mode <mode>", "controlled-worktree")
+    .requiredOption("--target-branch <branch>", "explicit non-main target branch")
+    .requiredOption("--note <text>", "owner note")
+    .action(async (opts) => {
+      try {
+        const result = await recordOwnerDecision({ run: opts.run as string, decision: opts.decision as string, targetMode: opts.targetMode as string, targetBranch: opts.targetBranch as string, ownerNote: opts.note as string });
+        console.log(`Owner decision recorded: ${result.decisionId}\nArtifact: ${result.path}`);
+      } catch (error) { throw new InvalidArgumentError(error instanceof Error ? error.message : String(error)); }
+    });
+}
+
+function continueCommand(): Command {
+  return new Command("continue")
+    .description("Validate the owner decision, apply to the selected controlled worktree, and validate it.")
+    .requiredOption("--run <path>", "external execution artifact root")
+    .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger, 300_000)
+    .action(async (opts) => {
+      try {
+        const result = await continueExternalExecution({ run: opts.run as string, timeoutMs: opts.timeoutMs as number });
+        console.log(renderExternalExecutionCliSummary(result));
+        if (result.runforgeCapability !== "passed") process.exitCode = 1;
+      } catch (error) { throw new InvalidArgumentError(error instanceof Error ? error.message : String(error)); }
     });
 }
 
