@@ -1,0 +1,48 @@
+$ rg -n "Agent OS|Task Factory|TASK-RUN|Next Milestone|Frozen|Alpha-28|Docker|isolated|owner" docs/ROADMAP.md docs/CURRENT_STATE.md docs/DECISIONS.md docs/NON_GOALS.md
+exitCode: 0
+
+## stdout
+docs/NON_GOALS.md:5:## Frozen Until TASK-RUN-1
+docs/NON_GOALS.md:7:- Alpha-28 trends.
+docs/NON_GOALS.md:24:These are safety/evidence substrate for Agent OS. They are useful only when they help a task run, produce evidence, pass review, and return a decision point.
+docs/NON_GOALS.md:31:- Autonomous patch apply without owner control.
+docs/NON_GOALS.md:36:- Dashboards that require the owner to inspect raw internals before seeing the task outcome.
+docs/NON_GOALS.md:40:If a feature cannot answer "how does this improve the first end-to-end Agent OS task run?", it is outside the current roadmap.
+docs/ROADMAP.md:1:# Agent OS / Task Factory Roadmap
+docs/ROADMAP.md:5:RunForge / Factory is an Agent OS: a portable task execution factory.
+docs/ROADMAP.md:15:-> isolated sandbox/runtime execution
+docs/ROADMAP.md:22:The product is not the internal artifact machinery. The product is reliable end-to-end task execution with enough isolation, evidence, verification, and owner control that a human can safely decide what happens next.
+docs/ROADMAP.md:26:The first user is an owner/operator who delegates real work across codebases, models, agents, tools, local machines, and VPS executors.
+docs/ROADMAP.md:36:   Break large tasks into small isolated subtasks with clear inputs, outputs, constraints, and verification.
+docs/ROADMAP.md:39:   Execute locally or on VPS in a worktree, Docker/container, disposable workspace, or other bounded runtime.
+docs/ROADMAP.md:55:The first practical value is one real end-to-end task run: the system accepts a meaningful task, plans it, decomposes it into 2-5 isolated subtasks, runs them in controlled environments, gathers artifacts, verifies the result, and returns an owner-ready report.
+docs/ROADMAP.md:57:## Next Milestone
+docs/ROADMAP.md:59:The only next milestone is `TASK-RUN-1: First End-to-End Agent OS Task`.
+docs/ROADMAP.md:61:`TASK-RUN-1` must:
+docs/ROADMAP.md:67:- execute subtasks in isolated environments;
+docs/ROADMAP.md:70:- return an owner-ready report with evidence and a decision point.
+docs/ROADMAP.md:72:No other milestone should be started before `TASK-RUN-1` proves the loop.
+docs/ROADMAP.md:85:These are not the product highway. They are the safety/evidence substrate for Agent OS and should be used only when they help complete end-to-end task execution.
+docs/ROADMAP.md:87:## Frozen Until TASK-RUN-1
+docs/ROADMAP.md:89:- Alpha-28 trends.
+docs/ROADMAP.md:94:- Internal artifact work that does not make `TASK-RUN-1` more executable, verifiable, or decision-ready.
+docs/ROADMAP.md:112:The project is on course when a real task can enter the factory, be decomposed, run in isolated execution contexts, produce evidence, pass or fail checks honestly, and return a short owner-ready decision report.
+docs/DECISIONS.md:7:Decision: RunForge / Factory is now framed as Agent OS / Task Factory, a portable task execution factory for routing meaningful tasks through intake, planning, decomposition, isolated execution, verification, aggregation, and human decision.
+docs/DECISIONS.md:9:This replaces the previous "choose one of owner brief / CI triage / task loop" milestone framing. Owner briefs, CI triage, PR readiness, handoffs, packets, and archives remain useful only as parts of end-to-end task execution.
+docs/DECISIONS.md:21:-> isolated sandbox/runtime execution
+docs/DECISIONS.md:51:- owner-ready report;
+docs/DECISIONS.md:56:## Next Milestone Rule
+docs/DECISIONS.md:60:- `TASK-RUN-1: First End-to-End Agent OS Task`.
+docs/DECISIONS.md:62:Do not start Alpha-28, new archive/viewer work, new handoff/audit features, new OKF/skills lifecycle work, or new safety layers before `TASK-RUN-1`.
+docs/CURRENT_STATE.md:5:RunForge is currently a local, deterministic, artifact-first engineering harness. It can collect evidence, run bounded checks, classify failures, produce proposal/readiness packets, render packet views, record operator decisions, and preserve handoff/archive evidence. It is not yet a complete Agent OS / Task Factory because it has not proven one end-to-end task run.
+docs/CURRENT_STATE.md:9:RunForge / Factory is an Agent OS: a portable task execution factory.
+docs/CURRENT_STATE.md:19:-> isolated sandbox/runtime execution
+docs/CURRENT_STATE.md:50:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision.
+docs/CURRENT_STATE.md:52:## Missing For TASK-RUN-1
+docs/CURRENT_STATE.md:56:- Runtime selection across local worktree, disposable workspace, Docker/container, or VPS.
+docs/CURRENT_STATE.md:62:## Frozen
+docs/CURRENT_STATE.md:64:- Alpha-28 trends.
+docs/CURRENT_STATE.md:88:Do not continue Alpha-28. The next milestone is only `TASK-RUN-1: First End-to-End Agent OS Task`.
+
+## stderr
+(empty)

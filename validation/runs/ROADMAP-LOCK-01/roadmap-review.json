@@ -1,0 +1,71 @@
+{
+  "runId": "ROADMAP-LOCK-01",
+  "date": "2026-07-09",
+  "verdict": "locked_pending_owner_approval",
+  "restoredGoal": "Owner-ready execution visibility for the factory/forge loop: task to plan to executor/session to checks to PR/CI to evidence to owner brief to owner decision to next step.",
+  "currentDrift": [
+    "setup/preflight policy as a standalone line",
+    "handoff lifecycle growth",
+    "handoff replay/audit growth",
+    "archive/search/viewer growth",
+    "OKF/skills lifecycle growth",
+    "viewer/dashboard expansion before owner workflows"
+  ],
+  "canonicalDocs": [
+    "docs/ROADMAP.md",
+    "docs/DECISIONS.md",
+    "docs/NON_GOALS.md",
+    "docs/USE_CASES.md",
+    "docs/CURRENT_STATE.md"
+  ],
+  "usefulBricks": [
+    "failure triage",
+    "external command-check packets",
+    "proposal readiness",
+    "setup/preflight classification",
+    "packet/evidence model",
+    "packet validation and inspection",
+    "proposal-only safety model",
+    "operator decision recording",
+    "handoff packet",
+    "replay/audit",
+    "archive evidence",
+    "OKF/skills lifecycle as internal context"
+  ],
+  "frozenUntilOwnerApproval": [
+    "Alpha-28 trends",
+    "new viewer/dashboard layers",
+    "new archive features",
+    "new handoff features",
+    "new OKF/skills improvements",
+    "new safety layers without a named owner workflow"
+  ],
+  "allowedNextMilestones": [
+    "USE-1: Owner Daily Brief",
+    "USE-2: Real CI Failure Triage",
+    "USE-3: Real Task Execution Loop"
+  ],
+  "recommendedFirstMilestone": "USE-1: Owner Daily Brief",
+  "driftGuardQuestions": [
+    "Which real workflow does this improve?",
+    "Which owner pain does it close?",
+    "Which user-facing artifact will appear?",
+    "Can it be used tomorrow?",
+    "What will we not do in this task?"
+  ],
+  "evidenceSources": [
+    "README.md",
+    "docs/concept.md",
+    "docs/mvp-scope.md",
+    "docs/product-scope.md",
+    "docs/focused-roadmap.md",
+    "docs/alpha-snapshot-2026-07-02.md",
+    "validation/runs/ALPHA-3/summary.md",
+    "validation/runs/ALPHA-15/summary.md",
+    "validation/runs/ALPHA-19/summary.md",
+    "validation/runs/ALPHA-21/summary.md",
+    "validation/runs/ALPHA-22/summary.md",
+    "validation/runs/ALPHA-23/summary.md",
+    "validation/runs/ALPHA-27/summary.md"
+  ]
+}

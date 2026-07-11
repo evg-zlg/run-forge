@@ -1,0 +1,53 @@
+{
+  "runId": "AGENT-OS-DOGFOOD-1",
+  "date": "2026-07-11",
+  "branch": "codex/agent-os-governor-1",
+  "status": "pr_ready_with_approval_gate",
+  "requiredFirstStep": {
+    "branch": "codex/agent-os-governor-1",
+    "uncommittedChangesExist": true,
+    "coherentAsOnePr": true,
+    "oldAlpha27Contamination": "No new Alpha-27 work detected; Alpha-27 is the inherited branch base. Ignored AGENT-OS-3/4 validation dirs and local zip files should not be included.",
+    "cleanupBeforePr": [
+      "Exclude ROADMAP-LOCK-01.zip.",
+      "Exclude RunForge-documents-2026-07-11.zip.",
+      "Do not force-add ignored AGENT-OS-3/4 validation directories.",
+      "Commit coherent Agent OS implementation, docs, tests, and selected validation evidence."
+    ]
+  },
+  "capabilities": [
+    "task-run CLI",
+    "task-specific deterministic planning",
+    "local shell executor dispatch",
+    "providerless deterministic review",
+    "gated mock delegated review",
+    "gated CLI reviewer contract",
+    "provider_unavailable handling",
+    "governor loop",
+    "TASK-RUN-1 through TASK-RUN-6 evidence",
+    "roadmap/current-state synchronization"
+  ],
+  "validation": {
+    "taskRunReadiness": "passed",
+    "typecheck": "passed",
+    "test": "passed",
+    "testFiles": 22,
+    "tests": 178,
+    "build": "passed",
+    "checkStructure": "passed"
+  },
+  "pr": {
+    "ready": true,
+    "opened": false,
+    "notOpenedReason": "Push/PR creation requires explicit owner approval.",
+    "title": "Add providerless Agent OS task-run harness and governor evidence"
+  },
+  "artifacts": {
+    "summary": "validation/runs/AGENT-OS-DOGFOOD-1/summary.md",
+    "results": "validation/runs/AGENT-OS-DOGFOOD-1/results.json",
+    "readinessReport": "validation/runs/AGENT-OS-DOGFOOD-1/readiness-report.md",
+    "taskRunReadiness": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/"
+  },
+  "ownerDecision": "Approve commit and PR creation, excluding local zip artifacts.",
+  "nextAutonomousCycle": "TASK-RUN-7: Evidence-aware docs/task-run planner refresh"
+}

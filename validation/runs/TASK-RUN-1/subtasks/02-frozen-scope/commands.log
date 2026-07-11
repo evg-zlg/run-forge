@@ -1,0 +1,77 @@
+$ rg -n "Frozen|Alpha-28|viewer|archive|handoff|OKF|safety layers|Internal artifact|not the product|Not The Product Highway|Out Of Scope" docs validation/runs/AGENT-OS-ROADMAP-01
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:30:    "handoff",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:32:    "archive/search/viewer",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:33:    "OKF/skills lifecycle"
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:36:    "Alpha-28 trends",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:37:    "new viewer/dashboard/archive features",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:38:    "new handoff/audit features",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:39:    "new OKF/skills lifecycle features",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:40:    "new safety layers without direct connection to task execution"
+docs/DECISIONS.md:9:This replaces the previous "choose one of owner brief / CI triage / task loop" milestone framing. Owner briefs, CI triage, PR readiness, handoffs, packets, and archives remain useful only as parts of end-to-end task execution.
+docs/DECISIONS.md:54:Packets, viewers, archives, handoffs, schemas, lifecycle reports, and setup policies are implementation capabilities. They are not product goals.
+docs/DECISIONS.md:62:Do not start Alpha-28, new archive/viewer work, new handoff/audit features, new OKF/skills lifecycle work, or new safety layers before `TASK-RUN-1`.
+docs/alpha-snapshot-2026-07-02.md:13:- leave the final apply decision to a human reviewer.
+docs/alpha-snapshot-2026-07-02.md:39:`proposal-status.json` is the machine-readable outcome record. `patch-summary.md` and `human-review.md` are reviewer-facing. `proposal.patch` is a proposal artifact only; a human may apply it manually outside RunForge after review.
+docs/alpha-snapshot-2026-07-02.md:71:- Improve reviewer ergonomics in the packet before adding hosting or automation.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:9:## What Is Frozen
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:11:- Alpha-28 trends.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:12:- New viewer/dashboard/archive features.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:13:- New handoff/audit features.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:14:- New OKF/skills lifecycle features.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:15:- New safety layers without direct connection to task execution.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:16:- Internal artifact work before the first end-to-end task run.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:38:- Archive/search/viewer.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:39:- OKF/skills lifecycle.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:41:These are safety/evidence substrate for Agent OS, not the product highway.
+docs/git-worktree-rules.md:41:   - Do not remove a task worktree while its branch, PR, review, or handoff is still active.
+docs/git-worktree-rules.md:61:Before final handoff:
+docs/safety-model.md:15:The root worktree status is captured in `human-review.md` so reviewers can see whether the surrounding repository was clean or already had unrelated changes.
+docs/dogfooding.md:5:Use `pnpm dogfood:rails` when changing the unified run rails or before release-like handoff. It first builds the local package bin, then runs a deterministic subset of RunForge's own checks through `runforge run --task command-check`:
+docs/dogfooding.md:18:`pnpm dogfood:rails` proves that RunForge can route its own local checks through command-check rails, preserve the command-result schema, and leave inspectable artifacts for every command. It does not prove hosted execution, remote scheduling, reviewer quality, or automatic code application. It is local-first only: commands run in the current checkout with `trusted-local`, artifacts stay under ignored local `artifacts/`, and no push or merge path is involved.
+docs/dogfooding.md:20:`pnpm dogfood` does not call `pnpm dogfood:rails`. Keeping them separate avoids recursive dogfood loops and keeps the default handoff check from becoming slower than necessary.
+docs/NON_GOALS.md:3:RunForge must not become an internal DevOps artifact machine that keeps expanding viewers, archives, handoffs, and safety layers without proving end-to-end task execution.
+docs/NON_GOALS.md:5:## Frozen Until TASK-RUN-1
+docs/NON_GOALS.md:7:- Alpha-28 trends.
+docs/NON_GOALS.md:8:- New viewer/dashboard/archive features.
+docs/NON_GOALS.md:9:- New handoff/audit features.
+docs/NON_GOALS.md:10:- New OKF/skills lifecycle features.
+docs/NON_GOALS.md:11:- New safety layers without direct connection to task execution.
+docs/NON_GOALS.md:12:- Internal artifact work that does not help a real task move from intake to verified result.
+docs/NON_GOALS.md:14:## Not The Product Highway
+docs/NON_GOALS.md:20:- Archive/search/viewer by itself.
+docs/NON_GOALS.md:21:- OKF/skills lifecycle by itself.
+docs/NON_GOALS.md:26:## Out Of Scope For The Current Roadmap
+docs/CURRENT_STATE.md:5:RunForge is currently a local, deterministic, artifact-first engineering harness. It can collect evidence, run bounded checks, classify failures, produce proposal/readiness packets, render packet views, record operator decisions, and preserve handoff/archive evidence. It is not yet a complete Agent OS / Task Factory because it has not proven one end-to-end task run.
+docs/CURRENT_STATE.md:31:- Packet schema, packet validation, packet inspector, and static packet viewer.
+docs/CURRENT_STATE.md:36:- Handoff packet, replay/audit, and archive evidence.
+docs/CURRENT_STATE.md:37:- Lifecycle reports and OKF/skills inventory as internal context.
+docs/CURRENT_STATE.md:45:- handoff;
+docs/CURRENT_STATE.md:47:- archive/search/viewer;
+docs/CURRENT_STATE.md:48:- OKF/skills lifecycle.
+docs/CURRENT_STATE.md:50:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision.
+docs/CURRENT_STATE.md:62:## Frozen
+docs/CURRENT_STATE.md:64:- Alpha-28 trends.
+docs/CURRENT_STATE.md:65:- New viewer/dashboard/archive features.
+docs/CURRENT_STATE.md:66:- New handoff/audit features.
+docs/CURRENT_STATE.md:67:- New OKF/skills lifecycle features.
+docs/CURRENT_STATE.md:68:- New safety layers without direct connection to task execution.
+docs/CURRENT_STATE.md:69:- Internal artifact work before the first end-to-end task run.
+docs/CURRENT_STATE.md:88:Do not continue Alpha-28. The next milestone is only `TASK-RUN-1: First End-to-End Agent OS Task`.
+docs/engineering-rules.md:8:   - Checks must not require network services, hosted mode, SaaS infrastructure, BYOC setup, dashboards, billing, marketplaces, persona reviewers, auto-fix flows, workflow engines, or self-improvement overlays.
+docs/engineering-rules.md:31:   - Agents inspect branch, status, and base commit before work, stage explicit paths, avoid destructive git operations without approval, and report status, diff summary, checks, and commit hash at handoff.
+docs/demo-walkthrough.md:20:Start with `human-review.md`. It is the reviewer entry point and explains what task was attempted, which context was collected, which checks were used, which patch is proposed, why the packet is safe, whether the repo changed, and what a human should do next.
+docs/packet-schema.md:189:- `proposal-status.json.reviewerDecision`: deterministic reviewer decision
+docs/packet-schema.md:213:- Expected deterministic code proposal worker roles are `readiness_loader`, `context_scout`, `failure_analyst`, `proposal_planner`, `patch_writer`, `verifier`, `proposal_reviewer`, and `packet_writer`.
+docs/packet-schema.md:214:- Provider-backed packets also emit `provider_input_builder`, `provider_runner`, `provider_patch_validator`, and `provider_safety_reviewer`.
+docs/ROADMAP.md:80:- handoff;
+docs/ROADMAP.md:82:- archive/search/viewer;
+docs/ROADMAP.md:83:- OKF/skills lifecycle.
+docs/ROADMAP.md:85:These are not the product highway. They are the safety/evidence substrate for Agent OS and should be used only when they help complete end-to-end task execution.
+docs/ROADMAP.md:87:## Frozen Until TASK-RUN-1
+docs/ROADMAP.md:89:- Alpha-28 trends.
+docs/ROADMAP.md:90:- New viewer/dashboard/archive features.
+docs/ROADMAP.md:91:- New handoff/audit features.
+docs/ROADMAP.md:92:- New OKF/skills lifecycle features.
+docs/ROADMAP.md:93:- New safety layers without direct connection to task execution.
+docs/ROADMAP.md:94:- Internal artifact work that does not make `TASK-RUN-1` more executable, verifiable, or decision-ready.
+docs/ROADMAP.md:110:The project is drifting when the main output is a new internal viewer, archive, schema, handoff shape, safety layer, or lifecycle report that does not help a task move from intake to verified result to human decision.

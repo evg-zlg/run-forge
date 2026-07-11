@@ -1,0 +1,144 @@
+{
+  "runId": "AGENT-OS-2-DOCS",
+  "date": "2026-07-10",
+  "taskAccepted": "Review Agent OS roadmap docs and report contradictions, gaps, and next milestone.",
+  "taskKind": "docs-review",
+  "planningBasis": [
+    "Task asks for roadmap documentation review.",
+    "Use roadmap/current/non-goal/decision docs as primary evidence."
+  ],
+  "mode": "task-specific repeatable harness",
+  "status": "completed",
+  "artifacts": {
+    "plan": "validation/runs/AGENT-OS-2-DOCS/plan.md",
+    "summary": "validation/runs/AGENT-OS-2-DOCS/summary.md",
+    "results": "validation/runs/AGENT-OS-2-DOCS/results.json",
+    "subtasks": "validation/runs/AGENT-OS-2-DOCS/subtasks/"
+  },
+  "isolation": {
+    "method": "disposable tmp workspace snapshots",
+    "root": "/tmp/runforge-agent-os-2-docs",
+    "containerUsed": false,
+    "containerGap": "Docker/container isolation is recorded as a future gap, not current task-run scope."
+  },
+  "subtasks": [
+    {
+      "id": "01-roadmap-source-map",
+      "goal": "Map the Agent OS roadmap claims, current state, and frozen scope.",
+      "workspace": "/tmp/runforge-agent-os-2-docs/01-roadmap-source-map/workspace",
+      "inputsInspected": [
+        "docs/ROADMAP.md",
+        "docs/CURRENT_STATE.md",
+        "docs/DECISIONS.md",
+        "docs/NON_GOALS.md"
+      ],
+      "findings": [
+        "Roadmap/current-state claims and frozen constraints. Evidence command passed with exit code 0.",
+        "01-roadmap-source-map inspected 4 input(s) and captured 41 stdout line(s). Sample: docs/NON_GOALS.md:5:## Frozen Until TASK-RUN-1 | docs/NON_GOALS.md:7:- Alpha-28 trends. | docs/NON_GOALS.md:24:These are safety/evidence substrate for Agent OS. They are useful only when they help a task run, produce evidence, pass review, and return a decision point."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log"
+      ],
+      "evidence": {
+        "command": "rg -n \"Agent OS|Task Factory|TASK-RUN|Next Milestone|Frozen|Alpha-28|Docker|isolated|owner\" docs/ROADMAP.md docs/CURRENT_STATE.md docs/DECISIONS.md docs/NON_GOALS.md",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/AGENT-OS-2-DOCS/subtasks/01-roadmap-source-map/command.log",
+        "inspected": [
+          "docs/ROADMAP.md",
+          "docs/CURRENT_STATE.md",
+          "docs/DECISIONS.md",
+          "docs/NON_GOALS.md"
+        ],
+        "summary": "01-roadmap-source-map inspected 4 input(s) and captured 41 stdout line(s). Sample: docs/NON_GOALS.md:5:## Frozen Until TASK-RUN-1 | docs/NON_GOALS.md:7:- Alpha-28 trends. | docs/NON_GOALS.md:24:These are safety/evidence substrate for Agent OS. They are useful only when they help a task run, produce evidence, pass review, and return a decision point."
+      },
+      "report": "validation/runs/AGENT-OS-2-DOCS/subtasks/01-roadmap-source-map/report.md"
+    },
+    {
+      "id": "02-contradiction-and-gap-scan",
+      "goal": "Scan roadmap docs for contradictions, missing loop stages, and scope drift risks.",
+      "workspace": "/tmp/runforge-agent-os-2-docs/02-contradiction-and-gap-scan/workspace",
+      "inputsInspected": [
+        "docs/ROADMAP.md",
+        "docs/CURRENT_STATE.md",
+        "docs/DECISIONS.md",
+        "docs/NON_GOALS.md",
+        "docs/USE_CASES.md"
+      ],
+      "findings": [
+        "Contradictions, missing task-run stages, and platform drift signals. Evidence command passed with exit code 0.",
+        "02-contradiction-and-gap-scan inspected 5 input(s) and captured 30 stdout line(s). Sample: docs/NON_GOALS.md:28:- SaaS hosting before the local/VPS task loop works. | docs/NON_GOALS.md:31:- Autonomous patch apply without owner control. | docs/NON_GOALS.md:36:- Dashboards that require the owner to inspect raw internals before seeing the task outcome."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log"
+      ],
+      "evidence": {
+        "command": "rg -n \"missing|gap|not yet|future|frozen|out of scope|not the product|drift|container|VPS|executor|aggregation|owner\" docs/ROADMAP.md docs/CURRENT_STATE.md docs/DECISIONS.md docs/NON_GOALS.md docs/USE_CASES.md",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/AGENT-OS-2-DOCS/subtasks/02-contradiction-and-gap-scan/command.log",
+        "inspected": [
+          "docs/ROADMAP.md",
+          "docs/CURRENT_STATE.md",
+          "docs/DECISIONS.md",
+          "docs/NON_GOALS.md",
+          "docs/USE_CASES.md"
+        ],
+        "summary": "02-contradiction-and-gap-scan inspected 5 input(s) and captured 30 stdout line(s). Sample: docs/NON_GOALS.md:28:- SaaS hosting before the local/VPS task loop works. | docs/NON_GOALS.md:31:- Autonomous patch apply without owner control. | docs/NON_GOALS.md:36:- Dashboards that require the owner to inspect raw internals before seeing the task outcome."
+      },
+      "report": "validation/runs/AGENT-OS-2-DOCS/subtasks/02-contradiction-and-gap-scan/report.md"
+    },
+    {
+      "id": "03-next-milestone-readiness",
+      "goal": "Identify the next milestone that best closes the documented roadmap gap.",
+      "workspace": "/tmp/runforge-agent-os-2-docs/03-next-milestone-readiness/workspace",
+      "inputsInspected": [
+        "docs/ROADMAP.md",
+        "docs/CURRENT_STATE.md",
+        "validation/runs/TASK-RUN-4/summary.md"
+      ],
+      "findings": [
+        "Next milestone evidence and TASK-RUN harness gaps. Evidence command passed with exit code 0.",
+        "03-next-milestone-readiness inspected 3 input(s) and captured 28 stdout line(s). Sample: docs/CURRENT_STATE.md:50:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision. | docs/CURRENT_STATE.md:52:## Missing For TASK-RUN-1 | docs/CURRENT_STATE.md:56:- Runtime selection across local worktree, disposable workspace, Docker/container, or VPS."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log"
+      ],
+      "evidence": {
+        "command": "rg -n \"Next Milestone|TASK-RUN|Remaining Gaps|Recommended Next Milestone|semantic planning|executor dispatch|aggregation|Docker\" docs/ROADMAP.md docs/CURRENT_STATE.md validation/runs/TASK-RUN-4/summary.md",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/AGENT-OS-2-DOCS/subtasks/03-next-milestone-readiness/command.log",
+        "inspected": [
+          "docs/ROADMAP.md",
+          "docs/CURRENT_STATE.md",
+          "validation/runs/TASK-RUN-4/summary.md"
+        ],
+        "summary": "03-next-milestone-readiness inspected 3 input(s) and captured 28 stdout line(s). Sample: docs/CURRENT_STATE.md:50:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision. | docs/CURRENT_STATE.md:52:## Missing For TASK-RUN-1 | docs/CURRENT_STATE.md:56:- Runtime selection across local worktree, disposable workspace, Docker/container, or VPS."
+      },
+      "report": "validation/runs/AGENT-OS-2-DOCS/subtasks/03-next-milestone-readiness/report.md"
+    }
+  ],
+  "checks": [
+    {
+      "command": "corepack pnpm check:structure",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "ownerConclusion": "The accepted docs task was answered from roadmap/current-state evidence: the docs agree on the Agent OS loop, but the main gap is still executable planning/evidence rather than another archive or viewer layer.",
+  "remainingGaps": [
+    "Docker/container isolation is still recorded as a gap; disposable tmp workspace snapshots are used now.",
+    "Docs review is deterministic keyword evidence, not semantic contradiction reasoning."
+  ],
+  "recommendedNextStep": "Recommended next milestone: semantic planner."
+}

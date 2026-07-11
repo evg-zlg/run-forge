@@ -1,0 +1,67 @@
+{
+  "runId": "AGENT-OS-ROADMAP-01",
+  "date": "2026-07-10",
+  "verdict": "agent_os_roadmap_fixed",
+  "northStar": "RunForge / Factory is an Agent OS: a portable task execution factory.",
+  "executionLoop": [
+    "task",
+    "clarification or execute-as-is",
+    "plan",
+    "decomposition",
+    "model/tool/provider selection",
+    "isolated sandbox/runtime execution",
+    "logs and artifacts",
+    "checks and review",
+    "human decision",
+    "apply / merge / send / continue"
+  ],
+  "architectureLayers": [
+    "Task Intake",
+    "Planner / Decomposer",
+    "Runtime / Sandbox",
+    "Executor Agents",
+    "Verification",
+    "Aggregation / Compression",
+    "Owner Control"
+  ],
+  "supportingSubstrate": [
+    "setup/preflight",
+    "packets/evidence",
+    "handoff",
+    "audit/replay",
+    "archive/search/viewer",
+    "OKF/skills lifecycle"
+  ],
+  "frozenUntilTaskRun1": [
+    "Alpha-28 trends",
+    "new viewer/dashboard/archive features",
+    "new handoff/audit features",
+    "new OKF/skills lifecycle features",
+    "new safety layers without direct connection to task execution"
+  ],
+  "nextMilestone": "TASK-RUN-1: First End-to-End Agent OS Task",
+  "taskRun1Goal": [
+    "take one real task",
+    "accept it",
+    "build a plan",
+    "split it into 2-5 subtasks",
+    "execute subtasks in isolated environments",
+    "collect artifacts",
+    "run checks",
+    "return an owner-ready report"
+  ],
+  "driftGuardQuestions": [
+    "Which end-to-end workflow does this improve?",
+    "Which user pain does it close?",
+    "Which externally useful artifact will appear?",
+    "Can it be used tomorrow?",
+    "What will we not do in this task?"
+  ],
+  "updatedDocs": [
+    "docs/ROADMAP.md",
+    "docs/DECISIONS.md",
+    "docs/NON_GOALS.md",
+    "docs/USE_CASES.md",
+    "docs/CURRENT_STATE.md"
+  ]
+}

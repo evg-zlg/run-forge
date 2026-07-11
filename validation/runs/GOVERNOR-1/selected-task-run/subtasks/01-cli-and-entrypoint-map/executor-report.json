@@ -1,0 +1,20 @@
+{
+  "request": {
+    "id": "selected-task-run:01-cli-and-entrypoint-map:local-shell",
+    "subtaskId": "01-cli-and-entrypoint-map",
+    "command": "sed -n '1,220p' src/cli/commands/task-run.ts && rg -n \"task-run\" package.json",
+    "cwd": "/tmp/runforge-selected-task-run/01-cli-and-entrypoint-map/workspace",
+    "artifactDir": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/01-cli-and-entrypoint-map",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "local-shell",
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/01-cli-and-entrypoint-map/stdout.log",
+    "stderrLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/01-cli-and-entrypoint-map/stderr.log",
+    "commandLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/01-cli-and-entrypoint-map/command.log"
+  }
+}

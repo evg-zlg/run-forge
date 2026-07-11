@@ -1,0 +1,20 @@
+{
+  "request": {
+    "id": "TASK-RUN-6:01-roadmap-source-map:local-shell",
+    "subtaskId": "01-roadmap-source-map",
+    "command": "rg -n \"Agent OS|Task Factory|TASK-RUN|Next Milestone|Frozen|Alpha-28|Docker|isolated|owner\" docs/ROADMAP.md docs/CURRENT_STATE.md docs/DECISIONS.md docs/NON_GOALS.md",
+    "cwd": "/tmp/runforge-task-run-6/01-roadmap-source-map/workspace",
+    "artifactDir": "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "local-shell",
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/stdout.log",
+    "stderrLog": "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/stderr.log",
+    "commandLog": "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/command.log"
+  }
+}

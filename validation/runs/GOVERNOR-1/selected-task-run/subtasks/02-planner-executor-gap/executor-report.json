@@ -1,0 +1,20 @@
+{
+  "request": {
+    "id": "selected-task-run:02-planner-executor-gap:local-shell",
+    "subtaskId": "02-planner-executor-gap",
+    "command": "rg -n \"subtasks|renderPlan|renderReport|runCheck|copyWorkspace|evidence|aggregation|recommended\" src/run/task-run-harness.ts src/run/task-run-renderer.ts",
+    "cwd": "/tmp/runforge-selected-task-run/02-planner-executor-gap/workspace",
+    "artifactDir": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/02-planner-executor-gap",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "local-shell",
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/02-planner-executor-gap/stdout.log",
+    "stderrLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/02-planner-executor-gap/stderr.log",
+    "commandLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/02-planner-executor-gap/command.log"
+  }
+}

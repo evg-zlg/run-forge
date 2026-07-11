@@ -1,0 +1,54 @@
+src/run/task-run-renderer.ts:5:export function renderPlan(runId: string, task: string, tmpRoot: string, checkCommand: string, plan: TaskRunPlan): string {
+src/run/task-run-renderer.ts:34:${plan.subtasks.map((item, index) => `${index + 1}. \`${item.id}\`: ${item.goal}`).join("\n")}
+src/run/task-run-renderer.ts:38:${plan.subtasks.map((item) => `- \`${item.id}\`: \`${item.evidenceCommand}\``).join("\n")}
+src/run/task-run-renderer.ts:42:Each subtask evidence command is dispatched through \`LocalShellExecutor\` as an executor request. The executor writes \`command.log\`, \`stdout.log\`, \`stderr.log\`, and \`executor-report.json\` into the subtask artifact directory.
+src/run/task-run-renderer.ts:70:${subtask.evidenceCommand}
+src/run/task-run-renderer.ts:73:Required output: \`report.md\` with status, findings, command evidence, and artifacts.
+src/run/task-run-renderer.ts:77:export function renderReport(subtask: Subtask, workspace: string): string {
+src/run/task-run-renderer.ts:93:- Command: \`${subtask.evidence.command}\`
+src/run/task-run-renderer.ts:94:- Status: ${subtask.evidence.status}
+src/run/task-run-renderer.ts:95:- Exit code: ${subtask.evidence.exitCode}
+src/run/task-run-renderer.ts:96:- Log: \`${subtask.evidence.logPath}\`
+src/run/task-run-renderer.ts:99:- Executor report: \`${subtask.evidence.executorReport}\`
+src/run/task-run-renderer.ts:126:- Subtask artifact root: \`${result.outDir}/subtasks/\`
+src/run/task-run-renderer.ts:146:${result.recommendedNextStep}
+src/run/task-run-renderer.ts:165:- \`${result.outDir}/subtasks/\`
+src/run/task-run-renderer.ts:171:${result.subtasks.map((item) => `- \`${item.id}\`: \`${item.workspace}\``).join("\n")}
+src/run/task-run-renderer.ts:177:Subtasks were dispatched through \`LocalShellExecutor\`; planner output was converted into executor requests, and aggregation used executor results.
+src/run/task-run-renderer.ts:179:${result.subtasks.map((item) => `- \`${item.id}\`: request \`${item.executor.requestId}\` -> ${item.executor.status}; report \`${item.executor.artifactPaths.report}\``).join("\n")}
+src/run/task-run-renderer.ts:183:${result.subtasks.map((item) => `- \`${item.id}\`: ${item.findings.join(" ")}`).join("\n")}
+src/run/task-run-renderer.ts:191:${result.subtasks.map((item) => `- \`${item.id}\`: \`${item.evidence.command}\` -> ${item.evidence.status}; log \`${item.evidence.logPath}\`; executor report \`${item.evidence.executorReport}\``).join("\n")}
+src/run/task-run-renderer.ts:199:${result.recommendedNextStep}
+src/run/task-run-renderer.ts:239:      subtasks: `${result.outDir}/subtasks/`
+src/run/task-run-renderer.ts:249:      dispatch: "planner subtasks are converted into executor requests before command execution"
+src/run/task-run-renderer.ts:251:    subtasks: result.subtasks.map((item) => ({
+src/run/task-run-renderer.ts:259:      evidence: item.evidence,
+src/run/task-run-renderer.ts:287:      recommendedNextAction: result.review.resultPayload.recommendedNextAction,
+src/run/task-run-renderer.ts:288:      evidenceReferences: result.review.resultPayload.evidenceReferences
+src/run/task-run-renderer.ts:292:    recommendedNextStep: result.recommendedNextStep
+src/run/task-run-harness.ts:6:import { ownerConclusion, recommendedNextStep, remainingGaps } from "./task-run-owner-decision.js";
+src/run/task-run-harness.ts:20:import { renderBrief, renderPlan, renderReport, renderSummary, toJsonResult, validateSummaryFreshness } from "./task-run-renderer.js";
+src/run/task-run-harness.ts:39:  evidence: EvidenceRecord;
+src/run/task-run-harness.ts:67:  recommendedNextStep: string;
+src/run/task-run-harness.ts:84:  subtasks: Array<Subtask & { workspace: string; report: string }>;
+src/run/task-run-harness.ts:99:  await mkdir(join(outDir, "subtasks"), { recursive: true });
+src/run/task-run-harness.ts:104:  await writeFile(planPath, renderPlan(runId, input.task, tmpRoot, checkCommand, plan), "utf8");
+src/run/task-run-harness.ts:107:  for (const planned of plan.subtasks) {
+src/run/task-run-harness.ts:108:    const subtaskDir = join(outDir, "subtasks", planned.id);
+src/run/task-run-harness.ts:111:    await copyWorkspace(repoRoot, workspace, relative(repoRoot, outDir));
+src/run/task-run-harness.ts:116:      command: planned.evidenceCommand,
+src/run/task-run-harness.ts:121:    const evidence = toEvidenceRecord(planned, executorResult);
+src/run/task-run-harness.ts:122:    const subtask = completeSubtask(planned, evidence, executorResult);
+src/run/task-run-harness.ts:123:    await writeFile(join(subtaskDir, "report.md"), renderReport(subtask, workspace), "utf8");
+src/run/task-run-harness.ts:127:  const check = await runCheck(checkCommand, repoRoot);
+src/run/task-run-harness.ts:141:    subtasks: completedSubtasks,
+src/run/task-run-harness.ts:190:        evidenceReferences: reviewResult.evidenceReferences
+src/run/task-run-harness.ts:209:    recommendedNextStep: recommendedNextStep(plan.recommendedNextMilestone),
+src/run/task-run-harness.ts:226:    subtasks: completedSubtasks,
+src/run/task-run-harness.ts:249:async function copyWorkspace(repoRoot: string, workspace: string, outPath: string): Promise<void> {
+src/run/task-run-harness.ts:267:async function runCheck(command: string, cwd: string): Promise<CheckResult> {
+src/run/task-run-harness.ts:285:    command: subtask.evidenceCommand,
+src/run/task-run-harness.ts:295:function completeSubtask(subtask: PlannedSubtask, evidence: EvidenceRecord, executor: ExecutorResult): Subtask {
+src/run/task-run-harness.ts:301:      `${subtask.evidenceFocus} Evidence command ${evidence.status} with exit code ${evidence.exitCode}.`,
+src/run/task-run-harness.ts:302:      evidence.summary
+src/run/task-run-harness.ts:306:    evidence,

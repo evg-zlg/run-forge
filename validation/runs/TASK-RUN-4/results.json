@@ -1,0 +1,126 @@
+{
+  "runId": "TASK-RUN-4",
+  "date": "2026-07-10",
+  "taskAccepted": "Inspect the task-run harness and add one narrow guard that prevents stale copied task wording in generated TASK-RUN summaries",
+  "mode": "guided repeatable harness",
+  "status": "completed",
+  "artifacts": {
+    "plan": "validation/runs/TASK-RUN-4/plan.md",
+    "summary": "validation/runs/TASK-RUN-4/summary.md",
+    "results": "validation/runs/TASK-RUN-4/results.json",
+    "subtasks": "validation/runs/TASK-RUN-4/subtasks/"
+  },
+  "isolation": {
+    "method": "disposable tmp workspace snapshots",
+    "root": "/tmp/runforge-task-run-4",
+    "containerUsed": false,
+    "containerGap": "Docker/container isolation is recorded as a future gap, not current task-run scope."
+  },
+  "subtasks": [
+    {
+      "id": "01-intake-and-plan",
+      "goal": "Verify the harness accepts one task input and creates a concrete plan artifact.",
+      "workspace": "/tmp/runforge-task-run-4/01-intake-and-plan/workspace",
+      "inputsInspected": [
+        "validation/runs/TASK-RUN-1/plan.md",
+        "validation/runs/TASK-RUN-1/summary.md"
+      ],
+      "findings": [
+        "TASK-RUN-1 used a stable task -> plan -> decomposition -> isolated snapshot -> report pattern.",
+        "TASK-RUN-2 preserves the same shape with a single guided command instead of a broad platform."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md"
+      ],
+      "report": "validation/runs/TASK-RUN-4/subtasks/01-intake-and-plan/report.md"
+    },
+    {
+      "id": "02-subtask-isolation",
+      "goal": "Create one disposable tmp workspace snapshot per subtask, including untracked roadmap docs.",
+      "workspace": "/tmp/runforge-task-run-4/02-subtask-isolation/workspace",
+      "inputsInspected": [
+        ".gitignore",
+        "docs/ROADMAP.md",
+        "docs/CURRENT_STATE.md"
+      ],
+      "findings": [
+        "Each subtask receives its own copied workspace under /tmp rather than a shared mutable directory.",
+        "The snapshot copies the current working tree, so untracked roadmap docs are present for review."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md"
+      ],
+      "report": "validation/runs/TASK-RUN-4/subtasks/02-subtask-isolation/report.md"
+    },
+    {
+      "id": "03-roadmap-consistency-demo",
+      "goal": "Repeat the roadmap consistency style from TASK-RUN-1 without proposing a source-doc patch.",
+      "workspace": "/tmp/runforge-task-run-4/03-roadmap-consistency-demo/workspace",
+      "inputsInspected": [
+        "docs/ROADMAP.md",
+        "docs/DECISIONS.md",
+        "docs/NON_GOALS.md",
+        "docs/USE_CASES.md",
+        "docs/CURRENT_STATE.md",
+        "validation/runs/AGENT-OS-ROADMAP-01/summary.md",
+        "validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json",
+        "validation/runs/TASK-RUN-1/summary.md",
+        "validation/runs/TASK-RUN-1/results.json"
+      ],
+      "findings": [
+        "The run remains scoped to repeatability of the Agent OS loop, not Alpha-28 or platform expansion.",
+        "Docker/container execution is recorded as a future gap, not implemented in this milestone."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md"
+      ],
+      "report": "validation/runs/TASK-RUN-4/subtasks/03-roadmap-consistency-demo/report.md"
+    },
+    {
+      "id": "04-check-and-owner-summary",
+      "goal": "Inspect summary rendering, run the configured check command, and aggregate owner-ready summary/results artifacts.",
+      "workspace": "/tmp/runforge-task-run-4/04-check-and-owner-summary/workspace",
+      "inputsInspected": [
+        "package.json",
+        "scripts/check-structure.mjs",
+        "src/run/task-run-renderer.ts",
+        "validation/runs/TASK-RUN-4"
+      ],
+      "findings": [
+        "The summary renderer was inspected for stale copied task wording and current-run command evidence.",
+        "The harness records the check command and result in results.json."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md"
+      ],
+      "report": "validation/runs/TASK-RUN-4/subtasks/04-check-and-owner-summary/report.md"
+    }
+  ],
+  "checks": [
+    {
+      "command": "corepack pnpm check:structure",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "improvedTaskRun1Gaps": [
+    "Generated instructions use corepack pnpm.",
+    "TASK-RUN validation artifacts are no longer hidden by default gitignore policy.",
+    "Snapshots copy the working tree so untracked roadmap docs are included.",
+    "Semantic notes call out where regex checks are insufficient."
+  ],
+  "remainingGaps": [
+    "No Docker/container lane.",
+    "No broad scheduler/provider/dashboard platform.",
+    "Semantic planning, executor dispatch, aggregation, per-lane command evidence, and owner-brief correctness remain mostly manual/simulated."
+  ],
+  "recommendedNextMilestone": "Make the plan/decomposition and subtask evidence derive from the accepted task instead of the remaining static TASK-RUN template."
+}

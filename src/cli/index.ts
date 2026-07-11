@@ -10,6 +10,7 @@ import { knowledgeCommand } from "./commands/knowledge.js";
 import { packetCommand } from "./commands/packet.js";
 import { runCommand } from "./commands/run.js";
 import { skillsCommand } from "./commands/skills.js";
+import { taskRunCommand } from "./commands/task-run.js";
 import { triageCommand } from "./commands/triage.js";
 
 const program = new Command();
@@ -28,6 +29,7 @@ program.addCommand(knowledgeCommand());
 program.addCommand(packetCommand());
 program.addCommand(runCommand());
 program.addCommand(skillsCommand());
+program.addCommand(taskRunCommand());
 program.addCommand(triageCommand());
 
 await program.parseAsync();

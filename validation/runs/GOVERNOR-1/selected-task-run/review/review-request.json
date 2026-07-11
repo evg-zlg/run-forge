@@ -1,0 +1,165 @@
+{
+  "runId": "selected-task-run",
+  "acceptedTask": "Inspect task-run harness and identify the next non-provider implementation gap after executor dispatch",
+  "taskKind": "code-inspection",
+  "plan": {
+    "kind": "code-inspection",
+    "planningBasis": [
+      "Task asks for harness code inspection.",
+      "Use CLI, harness, renderer, tests, and prior run artifacts as primary evidence."
+    ],
+    "inputs": [
+      "src/cli/commands/task-run.ts",
+      "src/run/task-run-harness.ts",
+      "src/run/task-run-renderer.ts",
+      "tests/unit/task-run-renderer.test.ts",
+      "package.json",
+      "validation/runs/TASK-RUN-4"
+    ],
+    "recommendedNextMilestone": "executor hardening and delegated review lane",
+    "subtasks": [
+      {
+        "id": "01-cli-and-entrypoint-map",
+        "goal": "Map how the task-run command accepts a task and writes run artifacts.",
+        "inputs": [
+          "src/cli/commands/task-run.ts",
+          "package.json"
+        ],
+        "evidenceFocus": "CLI options, default check command, and demo command wiring.",
+        "evidenceCommand": "sed -n '1,220p' src/cli/commands/task-run.ts && rg -n \"task-run\" package.json"
+      },
+      {
+        "id": "02-planner-executor-gap",
+        "goal": "Inspect planner, isolation, evidence, and aggregation behavior in harness code.",
+        "inputs": [
+          "src/run/task-run-harness.ts",
+          "src/run/task-run-renderer.ts"
+        ],
+        "evidenceFocus": "Static versus task-derived planning and whether commands/logs are captured per subtask.",
+        "evidenceCommand": "rg -n \"subtasks|renderPlan|renderReport|runCheck|copyWorkspace|evidence|aggregation|recommended\" src/run/task-run-harness.ts src/run/task-run-renderer.ts"
+      },
+      {
+        "id": "03-test-and-artifact-gap",
+        "goal": "Check whether tests and prior artifacts prove task-specific plans and evidence.",
+        "inputs": [
+          "tests/unit/task-run-renderer.test.ts",
+          "validation/runs/TASK-RUN-4/results.json"
+        ],
+        "evidenceFocus": "Coverage of planning/aggregation and previous artifact limitations.",
+        "evidenceCommand": "sed -n '1,220p' tests/unit/task-run-renderer.test.ts && rg -n \"taskKind|planningBasis|evidence|Remaining Gaps|subtasks\" validation/runs/TASK-RUN-4/results.json"
+      }
+    ]
+  },
+  "subtaskReports": [
+    {
+      "id": "01-cli-and-entrypoint-map",
+      "goal": "Map how the task-run command accepts a task and writes run artifacts.",
+      "reportPath": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/01-cli-and-entrypoint-map/report.md",
+      "findings": [
+        "CLI options, default check command, and demo command wiring. Evidence command passed with exit code 0.",
+        "01-cli-and-entrypoint-map inspected 2 input(s) and captured 38 stdout line(s). Sample: import { Command, InvalidArgumentError } from \"commander\"; | import { renderTaskRunCliSummary, runTaskRunHarness } from \"../../run/task-run-harness.js\"; | export function taskRunCommand(): Command {"
+      ],
+      "status": "done"
+    },
+    {
+      "id": "02-planner-executor-gap",
+      "goal": "Inspect planner, isolation, evidence, and aggregation behavior in harness code.",
+      "reportPath": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/02-planner-executor-gap/report.md",
+      "findings": [
+        "Static versus task-derived planning and whether commands/logs are captured per subtask. Evidence command passed with exit code 0.",
+        "02-planner-executor-gap inspected 2 input(s) and captured 54 stdout line(s). Sample: src/run/task-run-renderer.ts:5:export function renderPlan(runId: string, task: string, tmpRoot: string, checkCommand: string, plan: TaskRunPlan): string { | src/run/task-run-renderer.ts:34:${plan.subtasks.map((item, index) => `${index + 1}. \\`${item.id}\\`: ${item.goal}`).join(\"\\n\")} | src/run/task-run-renderer.ts:38:${plan.subtasks.map((item) => `- \\`${item.id}\\`: \\`${item.evidenceCommand}\\``).join(\"\\n\")}"
+      ],
+      "status": "done"
+    },
+    {
+      "id": "03-test-and-artifact-gap",
+      "goal": "Check whether tests and prior artifacts prove task-specific plans and evidence.",
+      "reportPath": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/03-test-and-artifact-gap/report.md",
+      "findings": [
+        "Coverage of planning/aggregation and previous artifact limitations. Evidence command passed with exit code 0.",
+        "03-test-and-artifact-gap inspected 2 input(s) and captured 210 stdout line(s). Sample: import { describe, expect, it } from \"vitest\"; | import { mkdtemp, mkdir, writeFile } from \"node:fs/promises\"; | import { tmpdir } from \"node:os\";"
+      ],
+      "status": "done"
+    }
+  ],
+  "executorResults": [
+    {
+      "subtaskId": "01-cli-and-entrypoint-map",
+      "requestId": "selected-task-run:01-cli-and-entrypoint-map:local-shell",
+      "executor": "local-shell",
+      "status": "passed",
+      "exitCode": 0,
+      "timedOut": false
+    },
+    {
+      "subtaskId": "02-planner-executor-gap",
+      "requestId": "selected-task-run:02-planner-executor-gap:local-shell",
+      "executor": "local-shell",
+      "status": "passed",
+      "exitCode": 0,
+      "timedOut": false
+    },
+    {
+      "subtaskId": "03-test-and-artifact-gap",
+      "requestId": "selected-task-run:03-test-and-artifact-gap:local-shell",
+      "executor": "local-shell",
+      "status": "passed",
+      "exitCode": 0,
+      "timedOut": false
+    }
+  ],
+  "commandStatuses": [
+    {
+      "subtaskId": "01-cli-and-entrypoint-map",
+      "command": "sed -n '1,220p' src/cli/commands/task-run.ts && rg -n \"task-run\" package.json",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "subtaskId": "02-planner-executor-gap",
+      "command": "rg -n \"subtasks|renderPlan|renderReport|runCheck|copyWorkspace|evidence|aggregation|recommended\" src/run/task-run-harness.ts src/run/task-run-renderer.ts",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "subtaskId": "03-test-and-artifact-gap",
+      "command": "sed -n '1,220p' tests/unit/task-run-renderer.test.ts && rg -n \"taskKind|planningBasis|evidence|Remaining Gaps|subtasks\" validation/runs/TASK-RUN-4/results.json",
+      "status": "passed",
+      "exitCode": 0
+    }
+  ],
+  "logPaths": [
+    {
+      "subtaskId": "01-cli-and-entrypoint-map",
+      "commandLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/01-cli-and-entrypoint-map/command.log",
+      "stdoutLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/01-cli-and-entrypoint-map/stdout.log",
+      "stderrLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/01-cli-and-entrypoint-map/stderr.log",
+      "executorReport": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/01-cli-and-entrypoint-map/executor-report.json"
+    },
+    {
+      "subtaskId": "02-planner-executor-gap",
+      "commandLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/02-planner-executor-gap/command.log",
+      "stdoutLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/02-planner-executor-gap/stdout.log",
+      "stderrLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/02-planner-executor-gap/stderr.log",
+      "executorReport": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/02-planner-executor-gap/executor-report.json"
+    },
+    {
+      "subtaskId": "03-test-and-artifact-gap",
+      "commandLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/03-test-and-artifact-gap/command.log",
+      "stdoutLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/03-test-and-artifact-gap/stdout.log",
+      "stderrLog": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/03-test-and-artifact-gap/stderr.log",
+      "executorReport": "validation/runs/GOVERNOR-1/selected-task-run/subtasks/03-test-and-artifact-gap/executor-report.json"
+    }
+  ],
+  "checks": [
+    {
+      "command": "corepack pnpm check:structure",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "gaps": [
+    "Docker/container isolation is still recorded as a gap; disposable tmp workspace snapshots are used now.",
+    "Subtask execution uses the local shell executor, not delegated coding/review agents."
+  ]
+}

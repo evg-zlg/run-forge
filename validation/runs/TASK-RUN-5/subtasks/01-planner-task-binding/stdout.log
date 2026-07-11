@@ -1,0 +1,27 @@
+validation/runs/GOVERNOR-1/results.json:29:    "currentUsefulGap": "Semantic task-specific planning and owner-decision binding.",
+validation/runs/GOVERNOR-1/results.json:40:    "rationale": "TASK-RUN-4 recommended deriving plan/decomposition/evidence from accepted task text, and GOVERNOR-1 selected-task-run still showed stale provider-oriented owner synthesis for a non-provider task."
+validation/runs/GOVERNOR-1/results.json:43:    "command": "corepack pnpm dev task-run start --task \"Inspect task-run harness and identify the next non-provider implementation gap after executor dispatch\" --out validation/runs/GOVERNOR-1/selected-task-run",
+validation/runs/GOVERNOR-1/results.json:78:  "recommendedNextMilestone": "Implement TASK-RUN-5: Semantic task-specific planning."
+src/run/task-run-planner.ts:16:  recommendedNextMilestone: string;
+src/run/task-run-planner.ts:29:export function planTaskRun(task: string): TaskRunPlan {
+src/run/task-run-planner.ts:32:  if (kind === "code-inspection") return codePlan(task);
+src/run/task-run-planner.ts:50:    recommendedNextMilestone: selectedMilestone(task, "docs"),
+src/run/task-run-planner.ts:80:function codePlan(task: string): TaskRunPlan {
+src/run/task-run-planner.ts:86:    recommendedNextMilestone: "executor hardening and delegated review lane",
+src/run/task-run-planner.ts:116:  const milestone = "semantic task-specific planning / owner-decision binding";
+src/run/task-run-planner.ts:120:      "Task asks for a non-provider harness implementation gap after executor dispatch.",
+src/run/task-run-planner.ts:121:      "Recent governor evidence identified owner-conclusion drift toward provider work for non-provider tasks.",
+src/run/task-run-planner.ts:122:      "Use planner, owner-decision, renderer, tests, and GOVERNOR-1 artifacts as primary evidence."
+src/run/task-run-planner.ts:126:      "src/run/task-run-owner-decision.ts",
+src/run/task-run-planner.ts:132:    recommendedNextMilestone: milestone,
+src/run/task-run-planner.ts:138:        evidenceFocus: "Planner task binding, selected milestone propagation, and non-provider intent.",
+src/run/task-run-planner.ts:140:          "rg -n \"semantic task-specific planning|owner-decision|non-provider|recommendedNextMilestone|codePlan|planTaskRun\" src/run/task-run-planner.ts validation/runs/GOVERNOR-1/results.json"
+src/run/task-run-planner.ts:143:        id: "02-owner-decision-binding",
+src/run/task-run-planner.ts:145:        inputs: ["src/run/task-run-owner-decision.ts", "tests/unit/task-run-renderer.test.ts"],
+src/run/task-run-planner.ts:146:        evidenceFocus: "Owner conclusion and remaining-gap logic for non-provider code tasks.",
+src/run/task-run-planner.ts:148:          "rg -n \"semantic task-specific planning|owner-decision binding|non-provider|provider|delegated\" src/run/task-run-owner-decision.ts tests/unit/task-run-renderer.test.ts"
+src/run/task-run-planner.ts:156:          "rg -n \"selectedMilestone|recommendedNextMilestone|Recommended Next Milestone|Selected Milestone|review\" src/run/task-run-renderer.ts src/run/task-run-reviewer.ts"
+src/run/task-run-planner.ts:167:    recommendedNextMilestone: "semantic planner",
+src/run/task-run-planner.ts:188:  if (asksForSemanticPlanning(task)) return "semantic task-specific planning / owner-decision binding";
+src/run/task-run-planner.ts:195:    normalized.includes("non-provider") ||
+src/run/task-run-planner.ts:197:    normalized.includes("owner-decision") ||

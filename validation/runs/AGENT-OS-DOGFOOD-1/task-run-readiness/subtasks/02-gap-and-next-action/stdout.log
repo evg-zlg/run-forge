@@ -1,0 +1,11 @@
+docs/ROADMAP.md:18:-> human decision
+docs/ROADMAP.md:48:   Collect results, compress context, detect conflicts, expose missing evidence, and identify gaps between subtasks.
+docs/ROADMAP.md:51:   Return a short report, evidence, and a decision point: approve, reject, apply, merge, send, or continue.
+docs/ROADMAP.md:63:- `TASK-RUN-3`: completed a gap review and exposed static planning/owner-summary limits.
+docs/ROADMAP.md:66:- `TASK-RUN-5`: completed semantic task-specific planning / owner-decision binding for the non-provider implementation gap.
+docs/ROADMAP.md:75:TASK-RUN-6 synchronized docs with validation evidence and removed stale TASK-RUN-1-only framing. TASK-RUN-7 should close the next evidence-backed gap found during TASK-RUN-6: docs-review planning still used an older TASK-RUN-4 evidence query even though current evidence reaches TASK-RUN-6.
+docs/ROADMAP.md:123:The project is drifting when the main output is a new internal viewer, archive, schema, handoff shape, safety layer, or lifecycle report that does not help a task move from intake to verified result to human decision.
+docs/ROADMAP.md:125:The project is on course when a real task can enter the factory, be decomposed, run in isolated execution contexts, produce evidence, pass or fail checks honestly, and return a short owner-ready decision report.
+docs/NON_GOALS.md:25:These are safety/evidence substrate for Agent OS. They are useful only when they help a task run, produce evidence, pass review, and return a decision point.
+docs/NON_GOALS.md:27:## Out Of Scope For The Current Roadmap
+docs/NON_GOALS.md:41:If a feature cannot answer "how does this improve the local providerless task-run/governor loop from intake to evidence to owner decision?", it is outside the current roadmap.

@@ -1,0 +1,125 @@
+$ node machine consistency scan with negated Alpha-28 guard
+{
+  "status": "failed",
+  "files": [
+    {
+      "file": "docs/ROADMAP.md",
+      "bytes": 4058,
+      "terms": {
+        "RunForge / Factory is an Agent OS": true,
+        "TASK-RUN-1": true,
+        "Alpha-28": true,
+        "viewer": true,
+        "archive": true,
+        "handoff": true,
+        "OKF": true
+      },
+      "taskRun1Count": 5,
+      "alpha28Count": 1,
+      "hasAgentOsNorthStar": true
+    },
+    {
+      "file": "docs/DECISIONS.md",
+      "bytes": 2180,
+      "terms": {
+        "RunForge / Factory is an Agent OS": false,
+        "TASK-RUN-1": true,
+        "Alpha-28": true,
+        "viewer": true,
+        "archive": true,
+        "handoff": true,
+        "OKF": true
+      },
+      "taskRun1Count": 2,
+      "alpha28Count": 1,
+      "hasAgentOsNorthStar": true
+    },
+    {
+      "file": "docs/NON_GOALS.md",
+      "bytes": 1515,
+      "terms": {
+        "RunForge / Factory is an Agent OS": false,
+        "TASK-RUN-1": true,
+        "Alpha-28": true,
+        "viewer": true,
+        "archive": true,
+        "handoff": true,
+        "OKF": true
+      },
+      "taskRun1Count": 1,
+      "alpha28Count": 1,
+      "hasAgentOsNorthStar": false
+    },
+    {
+      "file": "docs/USE_CASES.md",
+      "bytes": 2095,
+      "terms": {
+        "RunForge / Factory is an Agent OS": false,
+        "TASK-RUN-1": true,
+        "Alpha-28": false,
+        "viewer": false,
+        "archive": false,
+        "handoff": false,
+        "OKF": false
+      },
+      "taskRun1Count": 2,
+      "alpha28Count": 0,
+      "hasAgentOsNorthStar": false
+    },
+    {
+      "file": "docs/CURRENT_STATE.md",
+      "bytes": 3189,
+      "terms": {
+        "RunForge / Factory is an Agent OS": true,
+        "TASK-RUN-1": true,
+        "Alpha-28": true,
+        "viewer": true,
+        "archive": true,
+        "handoff": true,
+        "OKF": true
+      },
+      "taskRun1Count": 2,
+      "alpha28Count": 2,
+      "hasAgentOsNorthStar": true
+    },
+    {
+      "file": "validation/runs/AGENT-OS-ROADMAP-01/summary.md",
+      "bytes": 2019,
+      "terms": {
+        "RunForge / Factory is an Agent OS": true,
+        "TASK-RUN-1": true,
+        "Alpha-28": true,
+        "viewer": true,
+        "archive": true,
+        "handoff": true,
+        "OKF": true
+      },
+      "taskRun1Count": 1,
+      "alpha28Count": 1,
+      "hasAgentOsNorthStar": true
+    },
+    {
+      "file": "validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json",
+      "bytes": 1810,
+      "terms": {
+        "RunForge / Factory is an Agent OS": true,
+        "TASK-RUN-1": true,
+        "Alpha-28": true,
+        "viewer": true,
+        "archive": true,
+        "handoff": true,
+        "OKF": true
+      },
+      "taskRun1Count": 1,
+      "alpha28Count": 1,
+      "hasAgentOsNorthStar": true
+    }
+  ],
+  "aggregate": {
+    "northStarMentions": 4,
+    "taskRun1Mentions": 14,
+    "alpha28Mentions": 7,
+    "forbiddenAlpha28AsNextMilestoneDetected": true,
+    "note": "The scan intentionally ignores negated frozen-scope phrases such as \"Do not start Alpha-28\"."
+  }
+}

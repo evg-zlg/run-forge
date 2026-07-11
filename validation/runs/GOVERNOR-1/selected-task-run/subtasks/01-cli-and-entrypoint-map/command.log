@@ -1,0 +1,54 @@
+$ sed -n '1,220p' src/cli/commands/task-run.ts && rg -n "task-run" package.json
+executor: local-shell
+requestId: selected-task-run:01-cli-and-entrypoint-map:local-shell
+cwd: /tmp/runforge-selected-task-run/01-cli-and-entrypoint-map/workspace
+timeoutMs: 30000
+status: passed
+exitCode: 0
+signal: null
+
+## stdout
+import { Command, InvalidArgumentError } from "commander";
+import { renderTaskRunCliSummary, runTaskRunHarness } from "../../run/task-run-harness.js";
+
+export function taskRunCommand(): Command {
+  const taskRun = new Command("task-run").description("Run a narrow repeatable Agent OS task-run harness.");
+  taskRun.addCommand(startCommand());
+  return taskRun;
+}
+
+function startCommand(): Command {
+  return new Command("start")
+    .description("Create plan, isolated subtask snapshots, reports, checks, summary, and results for one task run.")
+    .requiredOption("--task <text>", "task input accepted by the harness")
+    .requiredOption("--out <path>", "artifact output root, for example validation/runs/TASK-RUN-2")
+    .option("--tmp-root <path>", "tmp workspace root")
+    .option("--check-command <command>", "validation command to run", "corepack pnpm check:structure")
+    .option("--delegated-review <mode>", "explicit delegated review lane; supported: 'mock', 'cli'")
+    .action(async (opts) => {
+      try {
+        const delegatedReview = parseDelegatedReview(opts.delegatedReview as string | undefined);
+        const result = await runTaskRunHarness({
+          task: opts.task as string,
+          out: opts.out as string,
+          tmpRoot: opts.tmpRoot as string | undefined,
+          checkCommand: opts.checkCommand as string | undefined,
+          delegatedReview
+        });
+        console.log(renderTaskRunCliSummary(result));
+        if (result.status !== "completed") process.exitCode = 1;
+      } catch (error) {
+        throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
+      }
+    });
+}
+
+function parseDelegatedReview(value: string | undefined): "mock" | "cli" | undefined {
+  if (value === undefined) return undefined;
+  if (value === "mock" || value === "cli") return value;
+  throw new InvalidArgumentError("--delegated-review supports only 'mock' or 'cli'.");
+}
+38:    "task-run:demo": "tsx src/cli/index.ts task-run start --task \"Check roadmap docs consistency\" --out validation/runs/TASK-RUN-2",
+
+## stderr
+(empty)

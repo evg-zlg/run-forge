@@ -1,0 +1,80 @@
+$ rg -n "Agent OS|Task Factory|TASK-RUN|Next Milestone|Frozen|Alpha-28|Docker|isolated|owner" docs/ROADMAP.md docs/CURRENT_STATE.md docs/DECISIONS.md docs/NON_GOALS.md
+executor: local-shell
+requestId: TASK-RUN-6:01-roadmap-source-map:local-shell
+cwd: /tmp/runforge-task-run-6/01-roadmap-source-map/workspace
+timeoutMs: 30000
+status: passed
+exitCode: 0
+signal: null
+
+## stdout
+docs/NON_GOALS.md:7:- Alpha-28 trends.
+docs/NON_GOALS.md:13:- Push, merge, deploy, DB/prod access, secrets, or provider configuration without owner approval.
+docs/NON_GOALS.md:25:These are safety/evidence substrate for Agent OS. They are useful only when they help a task run, produce evidence, pass review, and return a decision point.
+docs/NON_GOALS.md:32:- Autonomous patch apply without owner control.
+docs/NON_GOALS.md:37:- Dashboards that require the owner to inspect raw internals before seeing the task outcome.
+docs/NON_GOALS.md:41:If a feature cannot answer "how does this improve the local providerless task-run/governor loop from intake to evidence to owner decision?", it is outside the current roadmap.
+docs/NON_GOALS.md:45:TASK-RUN-1 was the first end-to-end milestone and is complete. References to TASK-RUN-1 as the only next milestone are historical only; current next work must be selected from validation evidence.
+docs/CURRENT_STATE.md:5:RunForge is currently a local, deterministic, artifact-first task-run harness. It has proven a providerless local Agent OS loop for bounded roadmap/code tasks: intake by CLI, deterministic planning/decomposition, disposable workspace snapshots, local shell executor dispatch, logs/artifacts, checks, deterministic review, and owner-ready summaries. It is not yet a complete portable Agent OS because runtime isolation, remote/VPS execution, provider-backed review, richer semantic planning, and apply/merge/deploy control remain gated or missing.
+docs/CURRENT_STATE.md:9:RunForge / Factory is an Agent OS: a portable task execution factory.
+docs/CURRENT_STATE.md:19:-> isolated sandbox/runtime execution
+docs/CURRENT_STATE.md:33:- First governor loop that can select and run the next local providerless task-run without per-step owner approval.
+docs/CURRENT_STATE.md:56:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision.
+docs/CURRENT_STATE.md:60:- `TASK-RUN-1`: first manual end-to-end roadmap task run completed.
+docs/CURRENT_STATE.md:61:- `TASK-RUN-2`: repeatable task-run harness completed.
+docs/CURRENT_STATE.md:62:- `TASK-RUN-3`: gap review completed; static planning and weak owner synthesis exposed.
+docs/CURRENT_STATE.md:63:- `TASK-RUN-4`: stale-summary/current-command guard completed.
+docs/CURRENT_STATE.md:65:- `TASK-RUN-5`: semantic task-specific planning / owner-decision binding completed for the non-provider implementation gap.
+docs/CURRENT_STATE.md:69:- Runtime selection across local worktree, Docker/container, VPS, or other isolated execution lanes.
+docs/CURRENT_STATE.md:73:- Stronger owner-ready synthesis across long or multi-domain task-runs.
+docs/CURRENT_STATE.md:74:- Apply / merge / send / continue controls remain owner-gated and are not autonomous.
+docs/CURRENT_STATE.md:76:## Frozen
+docs/CURRENT_STATE.md:78:- Alpha-28 trends.
+docs/CURRENT_STATE.md:83:- Internal artifact work that does not improve local providerless task execution, evidence, verification, or owner decisions.
+docs/CURRENT_STATE.md:84:- Push, merge, deploy, DB/prod access, secrets, or provider config without owner approval.
+docs/CURRENT_STATE.md:100:- `validation/runs/TASK-RUN-1/summary.md`
+docs/CURRENT_STATE.md:101:- `validation/runs/TASK-RUN-2/summary.md`
+docs/CURRENT_STATE.md:102:- `validation/runs/TASK-RUN-3/summary.md`
+docs/CURRENT_STATE.md:103:- `validation/runs/TASK-RUN-4/summary.md`
+docs/CURRENT_STATE.md:105:- `validation/runs/TASK-RUN-5/summary.md`
+docs/CURRENT_STATE.md:109:Do not continue Alpha-28. The current milestone is `TASK-RUN-6: Roadmap/current-state synchronization from validation evidence`. After TASK-RUN-6, the governor may select the next local providerless milestone from validation evidence, while stopping for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, or a strategic fork.
+docs/DECISIONS.md:7:Decision: RunForge / Factory is now framed as Agent OS / Task Factory, a portable task execution factory for routing meaningful tasks through intake, planning, decomposition, isolated execution, verification, aggregation, and human decision.
+docs/DECISIONS.md:9:This replaces the previous "choose one of owner brief / CI triage / task loop" milestone framing. Owner briefs, CI triage, PR readiness, handoffs, packets, and archives remain useful only as parts of end-to-end task execution.
+docs/DECISIONS.md:21:-> isolated sandbox/runtime execution
+docs/DECISIONS.md:51:- owner-ready report;
+docs/DECISIONS.md:56:## Next Milestone Rule
+docs/DECISIONS.md:60:- `TASK-RUN-1: First End-to-End Agent OS Task`.
+docs/DECISIONS.md:62:TASK-RUN-1 is now complete. The next milestone must be selected from validation evidence rather than a static roadmap line.
+docs/DECISIONS.md:64:Current evidence through `TASK-RUN-5` and `GOVERNOR-1` supports `TASK-RUN-6: Roadmap/current-state synchronization from validation evidence`.
+docs/DECISIONS.md:66:Do not start Alpha-28, new archive/viewer work, new handoff/audit features, new OKF/skills lifecycle work, or new safety layers unless the selected task-run directly needs them.
+docs/DECISIONS.md:72:Decision: the governor may continue autonomously for local providerless task-runs, evidence checks, documentation synchronization, and owner-ready reports.
+docs/DECISIONS.md:78:- Alpha-28;
+docs/ROADMAP.md:1:# Agent OS / Task Factory Roadmap
+docs/ROADMAP.md:5:RunForge / Factory is an Agent OS: a portable task execution factory.
+docs/ROADMAP.md:15:-> isolated sandbox/runtime execution
+docs/ROADMAP.md:22:The product is not the internal artifact machinery. The product is reliable end-to-end task execution with enough isolation, evidence, verification, and owner control that a human can safely decide what happens next.
+docs/ROADMAP.md:26:The first user is an owner/operator who delegates real work across codebases, models, agents, tools, local machines, and VPS executors.
+docs/ROADMAP.md:36:   Break large tasks into small isolated subtasks with clear inputs, outputs, constraints, and verification.
+docs/ROADMAP.md:39:   Execute locally or on VPS in a worktree, Docker/container, disposable workspace, or other bounded runtime.
+docs/ROADMAP.md:55:The first practical value is one real end-to-end task run: the system accepts a meaningful task, plans it, decomposes it into 2-5 isolated subtasks, runs them in controlled environments, gathers artifacts, verifies the result, and returns an owner-ready report.
+docs/ROADMAP.md:61:- `TASK-RUN-1`: completed the first manual end-to-end roadmap task run.
+docs/ROADMAP.md:62:- `TASK-RUN-2`: completed the repeatable task-run harness.
+docs/ROADMAP.md:63:- `TASK-RUN-3`: completed a gap review and exposed static planning/owner-summary limits.
+docs/ROADMAP.md:64:- `TASK-RUN-4`: completed stale-summary/current-command guard work.
+docs/ROADMAP.md:65:- `GOVERNOR-1`: completed the first self-driving roadmap loop and selected the next task-run without per-step owner approval.
+docs/ROADMAP.md:66:- `TASK-RUN-5`: completed semantic task-specific planning / owner-decision binding for the non-provider implementation gap.
+docs/ROADMAP.md:68:The loop is still local and providerless by default. It uses disposable workspace snapshots, local shell executor dispatch, deterministic evidence review, and owner-ready artifacts. Docker/container isolation, remote/VPS execution, provider-backed reviewers, and push/merge/deploy remain outside the default autonomous lane.
+docs/ROADMAP.md:72:The current milestone is `TASK-RUN-6: Roadmap/current-state synchronization from validation evidence`.
+docs/ROADMAP.md:74:`TASK-RUN-6` must:
+docs/ROADMAP.md:76:- read roadmap/current/use-case/decision/non-goal docs and TASK-RUN/GOVERNOR validation evidence;
+docs/ROADMAP.md:77:- remove stale language that treats TASK-RUN-1 as the only next milestone, except as historical context;
+docs/ROADMAP.md:79:- preserve stop gates for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, and strategic forks;
+docs/ROADMAP.md:82:The next milestone after TASK-RUN-6 should be selected from validation evidence, not from a static roadmap line.
+docs/ROADMAP.md:95:These are not the product highway. They are the safety/evidence substrate for Agent OS and should be used only when they help complete end-to-end task execution.
+docs/ROADMAP.md:99:- Alpha-28 trends.
+docs/ROADMAP.md:105:- Push, merge, deploy, DB/prod access, or secrets without owner approval.
+docs/ROADMAP.md:123:The project is on course when a real task can enter the factory, be decomposed, run in isolated execution contexts, produce evidence, pass or fail checks honestly, and return a short owner-ready decision report.
+docs/ROADMAP.md:127:The governor may continue autonomously for local providerless task-runs, evidence checks, documentation synchronization, and owner-ready reports. It must stop for owner approval before secrets, provider configuration, push/merge/deploy, DB/prod access, Alpha-28, or a strategic product fork.
+
+## stderr
+(empty)
