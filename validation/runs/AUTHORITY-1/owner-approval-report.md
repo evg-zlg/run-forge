@@ -1,6 +1,6 @@
 # Owner Approval Report
 
-- Decision ID: `990fb40d-d4f7-4600-8a35-b9c908c180db`
+- Decision ID: `de6f4570-2389-48b5-a1d7-3a01f0ea4954`
 - Decision: **approve**
 - Target mode: `controlled-worktree`
 - Target branch: `runforge/authority-1-demo`

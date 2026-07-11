@@ -29,6 +29,11 @@ describe("delegated authority", () => {
     }
   });
 
+  it("rejects contradictory authority that explicitly allows a hard-denied action", async () => {
+    const repo = await tempDir(); const value = envelope(repo); value.allowed_actions.push = true;
+    expect((await load(repo, value)).classification).toBe("too_broad");
+  });
+
   it("rejects main and accepts the bounded envelope", async () => {
     const repo = await tempDir(); const unsafe = envelope(repo); unsafe.controlled_apply.branch_name = "main";
     expect((await load(repo, unsafe)).classification).toBe("too_broad");
@@ -39,6 +44,11 @@ describe("delegated authority", () => {
     const repo = await tempDir(); const value = envelope(repo);
     expect(evaluatePatchAuthority(value, { files: ["src/index.ts"], risk: "low", controlledPath: join(await tempDir(), "controlled"), sourceRepo: repo }).classification).toBe("too_narrow");
     expect(evaluatePatchAuthority(value, { files: ["README.md"], risk: "low", controlledPath: join(repo, "artifacts", "controlled"), sourceRepo: repo }).classification).toBe("mismatched");
+  });
+
+  it("rechecks expiry at the controlled apply gate", async () => {
+    const repo = await tempDir(); const value = envelope(repo, { expires_at: "2020-01-01T00:00:00Z" });
+    expect(evaluatePatchAuthority(value, { files: ["README.md"], risk: "low", controlledPath: join(await tempDir(), "controlled"), sourceRepo: repo }).classification).toBe("expired");
   });
 });
 

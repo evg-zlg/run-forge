@@ -242,7 +242,8 @@ async function writeFinalArtifacts(out: string, input: Input, result: ExternalEx
   await writeFile(join(out, "summary.md"), summary, "utf8");
   const required = [
     "summary.md", "results.json", "external-execution-report.md", "runtime-preparation-report.md", "disposable-repair-report.md",
-    "controlled-apply-report.md", "owner-approval-report.md", "environment.json", "provenance.json", "execution-log.md",
+    "controlled-apply-report.md", "owner-approval-report.md", "environment.json", "provenance.json", "execution-log.md", "authority-decision-log.jsonl", "authority-report.md",
+    ...(result.authorityEnvelope === "accepted" ? ["authority.json"] : []),
     ...["patch.diff", "patch-summary.md", "validation-before.md", "validation-after.md", "providerless-review.md", "apply-instructions.md", "rollback-instructions.md", "safety-review.md", "owner-decision-template.json"].map((name) => `patch-package/${name}`),
     ...(continued ? ["owner-decision.json", "owner-approval-report.md", "pr-creation-package/pr-title.txt", "pr-creation-package/pr-body.md", "pr-creation-package/branch-plan.md", "pr-creation-package/manual-create-pr-instructions.md", "pr-creation-package/changed-files.md", "pr-creation-package/validation-summary.md", "pr-creation-package/risk-assessment.md", "pr-creation-package/owner-next-actions.md"] : ["continuation-state.json"])
   ];

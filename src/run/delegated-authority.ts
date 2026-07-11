@@ -17,12 +17,14 @@ export async function loadAuthority(path: string | undefined, repo: string): Pro
   if (target !== canonicalRepo) return { classification: "mismatched", reason: "Authority repository does not match the canonical target repository." };
   if (value.expires_at !== null) { const expiry = Date.parse(value.expires_at); if (!Number.isFinite(expiry)) return { classification: "invalid", reason: "Authority expiry is invalid." }; if (expiry <= Date.now()) return { classification: "expired", reason: "Authority envelope has expired." }; }
   if (hardForbidden.some((name) => value.forbidden_actions[name] !== true)) return { classification: "too_broad", reason: "Authority attempts to relax a hard safety boundary." };
+  if (hardForbidden.some((name) => value.allowed_actions[name] === true)) return { classification: "too_broad", reason: "Authority explicitly allows a hard-forbidden action." };
   if (requiredActions.some((name) => value.allowed_actions[name] !== true) || !value.controlled_apply.allowed) return { classification: "too_narrow", reason: "Authority does not cover the delegated action class." };
   if (value.controlled_apply.mode !== "artifact-contained-worktree" || ["main", "master"].includes(value.controlled_apply.branch_name.toLowerCase())) return { classification: "too_broad", reason: "Authority controlled target is unsafe." };
   return { classification: "accepted", envelope: value, reason: "Authority is valid and bound to the canonical target." };
 }
 
 export function evaluatePatchAuthority(envelope: AuthorityEnvelope, input: { files: string[]; risk: "low"; controlledPath: string; sourceRepo: string }): { classification: AuthorityClassification; reason: string } {
+  if (envelope.expires_at !== null && Date.parse(envelope.expires_at) <= Date.now()) return { classification: "expired", reason: "Authority expired before the controlled apply decision." };
   const inside = relative(resolve(input.sourceRepo), resolve(input.controlledPath));
   if (inside === "" || (!inside.startsWith("..") && !isAbsolute(inside))) return { classification: "mismatched", reason: "Controlled apply target resolves inside the source repository." };
   for (const file of input.files) { if (envelope.allowed_patch_risk.forbidden_file_patterns.some((p) => matches(p, file))) return { classification: "too_broad", reason: `Patch file is forbidden: ${file}` }; if (!envelope.allowed_patch_risk.allowed_file_patterns.some((p) => matches(p, file))) return { classification: "too_narrow", reason: `Patch file is outside delegated patterns: ${file}` }; }

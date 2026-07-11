@@ -7,7 +7,7 @@ hostNodeModulesReused: false
 exitCode: 0
 
 ## stdout
-added 141 packages in 17s
+added 141 packages in 14s
 
 ## stderr
 npm warn deprecated glob@11.1.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
