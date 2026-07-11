@@ -1,0 +1,21 @@
+# Runtime Preparation Report
+
+- Status: `prepared`
+- Strategy: `disposable-workspace-snapshot`
+- Source repository: `/Users/evgeny/Documents/projects/factory`
+- Source HEAD: `d65ab9a9c8130f5d2c9214e8fdde2a278578afed`
+- Source status: clean
+- Package manager: `npm`
+- Lockfile: `package-lock.json`
+- Lockfile SHA-256: `848a8ca54f03c062c557d29edd0b00985368da29518405d861c5b6a798c2c1ce`
+- Target: `linux/arm64`
+- Image: `runforge:local` (`sha256:44dc2dd1e3af867ff1c8346761bcc7451a4852fe2bf6f20e39dc4cd87765fa14`)
+- Dependency strategy: Linux dependencies installed into a disposable workspace
+- Host node_modules reused: no
+- Linux-compatible dependency environment created: yes
+- Preparation network used: yes
+- Package lifecycle scripts: package-manager defaults (inside the disposable preparation container only)
+- Original repository mounted or mutated: no
+- Command log: `validation/runs/EXTERNAL-EXECUTION-1/runtime-preparation-command.log`
+- Started: `2026-07-11T11:02:26.793Z`
+- Completed: `2026-07-11T11:02:46.393Z`

@@ -159,6 +159,7 @@ async function inspectImage(image: string): Promise<{ id: string; architecture: 
 async function copyExternalWorkspace(repo: string, workspace: string): Promise<void> {
   await cp(repo, workspace, {
     recursive: true,
+    verbatimSymlinks: true,
     filter: (source) => {
       const path = relative(repo, source);
       if (!path) return true;

@@ -1,5 +1,6 @@
 import { Command, InvalidArgumentError } from "commander";
 import { renderTaskRunCliSummary, runTaskRunHarness } from "../../run/task-run-harness.js";
+import { renderExternalExecutionCliSummary, runExternalExecution } from "../../run/external-execution.js";
 
 export function taskRunCommand(): Command {
   const taskRun = new Command("task-run").description("Run a narrow repeatable Agent OS task-run harness.");
@@ -20,9 +21,31 @@ function startCommand(): Command {
     .option("--runtime <mode>", "subtask runtime; supported: 'local', 'docker'", "local")
     .option("--docker-image <image>", "prebuilt local image for --runtime docker", "runforge:local")
     .option("--prepare-runtime <mode>", "explicit dependency preparation; supported: 'explicit'", "none")
+    .option("--repair-mode <mode>", "external repair mode; supported: 'disposable'")
+    .option("--approval-mode <mode>", "owner gate; supported: 'await-owner', 'simulated-owner-approved'", "await-owner")
+    .option("--apply-mode <mode>", "controlled apply mode; supported: 'controlled-worktree'", "controlled-worktree")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger, 300_000)
     .action(async (opts) => {
       try {
+        if (opts.repairMode !== undefined) {
+          const result = await runExternalExecution({
+            task: opts.task as string,
+            out: opts.out as string,
+            repo: opts.repo as string | undefined,
+            runtime: opts.runtime as string,
+            dockerImage: opts.dockerImage as string,
+            prepareRuntime: opts.prepareRuntime as string,
+            repairMode: opts.repairMode as string,
+            approvalMode: opts.approvalMode as string,
+            applyMode: opts.applyMode as string,
+            commands: opts.command as string[],
+            tmpRoot: opts.tmpRoot as string | undefined,
+            timeoutMs: opts.timeoutMs as number
+          });
+          console.log(renderExternalExecutionCliSummary(result));
+          if (result.runforgeCapability !== "passed") process.exitCode = 1;
+          return;
+        }
         const delegatedReview = parseDelegatedReview(opts.delegatedReview as string | undefined);
         const runtime = parseRuntime(opts.runtime as string);
         const result = await runTaskRunHarness({
