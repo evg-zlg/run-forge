@@ -1,0 +1,31 @@
+{
+  "schemaVersion": "external-execution-1",
+  "status": "passed",
+  "requiredFiles": [
+    "summary.md",
+    "results.json",
+    "external-execution-report.md",
+    "runtime-preparation-report.md",
+    "disposable-repair-report.md",
+    "controlled-apply-report.md",
+    "environment.json",
+    "provenance.json",
+    "execution-log.md",
+    "patch-package/patch.diff",
+    "patch-package/patch-summary.md",
+    "patch-package/validation-before.md",
+    "patch-package/validation-after.md",
+    "patch-package/providerless-review.md",
+    "patch-package/apply-instructions.md",
+    "patch-package/rollback-instructions.md",
+    "patch-package/safety-review.md",
+    "patch-package/owner-decision.md",
+    "pr-ready-package/pr-title.txt",
+    "pr-ready-package/pr-body.md",
+    "pr-ready-package/changed-files.md",
+    "pr-ready-package/validation-summary.md",
+    "pr-ready-package/risk-assessment.md",
+    "pr-ready-package/owner-next-actions.md"
+  ],
+  "missing": []
+}

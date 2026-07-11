@@ -1,0 +1,18 @@
+diff --git a/a/README.md b/b/README.md
+index 5cc723c..d91fbe4 100644
+--- a/a/README.md
++++ b/b/README.md
+@@ -360,3 +360,13 @@ Recommended night order:
+ 3. WP-004 Reference Scout.
+ 4. WP-005 Security and Policy Review.
+ 5. WP-003 Minimal Controller UI after the API shape settles.
++
++## Offline Validation
++
++After dependencies are prepared, the deterministic validation suite can run without runtime network access:
++
++```bash
++npm run typecheck
++npm test
++npm run build
++```

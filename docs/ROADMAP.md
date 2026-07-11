@@ -73,7 +73,7 @@ The loop is still local and providerless by default. It uses disposable workspac
 
 `TASK-RUN-7: Docker-isolated task execution lane` is complete. Its validation packet proves three planner-generated evidence commands ran in prebuilt local containers with read-only workspace mounts, `network=none`, dropped capabilities, bounded resources, and runtime metadata in owner-visible artifacts.
 
-The next milestone should extend this runtime into one real external-repository check/triage task run, not return to docs-only synchronization. Full coding-agent execution, provider routing, remote/VPS execution, and apply/merge/deploy remain separate owner-gated decisions.
+EXTERNAL-RUN-2/3 extended this runtime into real external-repository Docker validation with explicit Linux runtime preparation. EXTERNAL-EXECUTION-1 adds disposable repair, patch packaging, providerless review, an explicit owner gate, isolated controlled-worktree apply, and PR-ready instructions. The next milestone should prove a real owner-approved non-main apply/PR workflow; push, merge, deploy, provider routing, DB/prod, and target-main mutation remain outside this contour.
 
 ## Supporting Substrate
 

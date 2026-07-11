@@ -2,7 +2,7 @@
 
 Status date: 2026-07-11.
 
-RunForge is currently a local, deterministic, artifact-first task-run harness. It has proven a providerless local Agent OS loop for bounded roadmap/code tasks: intake by CLI, deterministic planning/decomposition, disposable workspace snapshots, local shell executor dispatch, logs/artifacts, checks, deterministic review, and owner-ready summaries. It is not yet a complete portable Agent OS because runtime isolation, remote/VPS execution, provider-backed review, richer semantic planning, and apply/merge/deploy control remain gated or missing.
+RunForge is currently a local, deterministic, artifact-first task-run harness. It has proven providerless local execution and external-repository Docker validation. EXTERNAL-EXECUTION-1 adds deterministic disposable repair, patch review, an explicit owner gate, and controlled-worktree apply without granting access to the original target branch.
 
 ## Current North Star
 
@@ -33,6 +33,8 @@ task
 - External Docker task-runs support two explicit dependency modes: `--prepare-runtime none` preserves simple EXTERNAL-RUN-2 triage with the source mounted read-only, while `--prepare-runtime explicit` creates a Linux-compatible disposable dependency workspace before execution.
 - Explicit preparation records its network use, lockfile hash, package manager, image identity, target platform, timestamps, and command log. The subsequent task execution remains network-disabled.
 - External task-runs reject output/tmp/workspace paths inside the source repository and treat any before/after source mutation as a blocking safety failure.
+- External repair mode creates a deterministic low-risk patch only in a disposable workspace, validates it offline, runs providerless review, and stops at the owner gate by default.
+- Explicit simulated owner approval may apply an accepted patch only to an artifact-contained controlled worktree, validate it offline, and generate PR-ready instructions. It never pushes, merges, deploys, or changes target `main`.
 - Deterministic evidence review as the default offline lane.
 - First governor loop that can select and run the next local providerless task-run without per-step owner approval.
 - MVP failure triage and deterministic classification.
@@ -69,6 +71,8 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 - `TASK-RUN-5`: semantic task-specific planning / owner-decision binding completed for the non-provider implementation gap.
 - `TASK-RUN-6`: roadmap/current-state synchronization from validation evidence completed.
 - `TASK-RUN-7`: Docker-isolated task execution lane completed and validated on a real local Docker runtime.
+- `EXTERNAL-RUN-2` and `EXTERNAL-RUN-3`: merged external Docker validation and explicit runtime preparation/safety gates.
+- `EXTERNAL-EXECUTION-1`: disposable repair package, providerless review, owner gate, controlled-worktree apply, and PR-ready package implemented and dogfooded.
 
 ## Current Gaps
 
@@ -78,7 +82,7 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 - Richer semantic planning beyond current deterministic heuristics.
 - Stronger owner-ready synthesis across long or multi-domain task-runs.
 - Docs-review planning still needs fresher validation evidence selection; TASK-RUN-6 showed next-milestone readiness evidence still querying TASK-RUN-4 while current evidence reaches TASK-RUN-6.
-- Apply / merge / send / continue controls remain owner-gated and are not autonomous.
+- Real owner-approved apply to an owner-selected branch and PR creation remain future owner-gated work; push, merge, and deploy are not supported by this contour.
 
 ## Frozen
 
@@ -114,4 +118,4 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 
 ## Immediate Constraint
 
-Do not continue Alpha-28. EXTERNAL-RUN-2 proved simple external-repository Docker triage, and EXTERNAL-RUN-3 is implemented and remains draft/in review in PR #47 until merged. After merge, the next large milestone is safe disposable repair execution; stop before applying anything to the original repo and continue to stop for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, full coding-agent runtime expansion, or another strategic fork.
+Do not continue Alpha-28. EXTERNAL-RUN-2/3 are merged, external Docker validation with explicit preparation is proven, and EXTERNAL-EXECUTION-1 adds disposable repair plus a controlled apply gate. The next large milestone should be a real owner-approved non-main apply/PR workflow, only after this safety proof; continue to stop for target-main mutation, automatic push/merge/deploy, secrets, providers, DB/prod, or another strategic fork.
