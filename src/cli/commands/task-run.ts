@@ -24,6 +24,7 @@ function startCommand(): Command {
     .option("--docker-image <image>", "prebuilt local image for --runtime docker", "runforge:local")
     .option("--prepare-runtime <mode>", "explicit dependency preparation; supported: 'explicit'", "none")
     .option("--repair-mode <mode>", "external repair mode; supported: 'disposable'")
+    .option("--authority <path>", "delegated owner authority envelope")
     .option("--approval-mode <mode>", "owner gate; supported: 'require-owner-decision'", "require-owner-decision")
     .option("--apply-mode <mode>", "apply during start; supported: 'none'", "none")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger, 300_000)
@@ -38,6 +39,7 @@ function startCommand(): Command {
             dockerImage: opts.dockerImage as string,
             prepareRuntime: opts.prepareRuntime as string,
             repairMode: opts.repairMode as string,
+            authority: opts.authority as string | undefined,
             approvalMode: opts.approvalMode as string,
             applyMode: opts.applyMode as string,
             commands: opts.command as string[],

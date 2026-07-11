@@ -1,0 +1,50 @@
+{
+  "authority_id": "AUTHORITY-1-DEMO",
+  "scope": "external-repair-demo",
+  "repo": "/Users/evgeny/Documents/projects/factory",
+  "allowed_actions": {
+    "prepare_runtime": true,
+    "run_baseline_validation": true,
+    "perform_disposable_repair": true,
+    "generate_patch_package": true,
+    "run_providerless_review": true,
+    "apply_to_controlled_artifact_worktree": true,
+    "run_after_apply_validation": true,
+    "generate_pr_creation_package": true
+  },
+  "forbidden_actions": {
+    "mutate_source_repo": true,
+    "target_main_or_master": true,
+    "push": true,
+    "merge": true,
+    "deploy": true,
+    "provider_calls": true,
+    "db_access": true,
+    "production_access": true,
+    "secret_access": true,
+    "runtime_network": true,
+    "create_external_pr": true
+  },
+  "allowed_patch_risk": {
+    "max_risk": "low",
+    "allowed_file_patterns": [
+      "README.md",
+      "docs/**"
+    ],
+    "forbidden_file_patterns": [
+      ".env*",
+      "**/secrets/**",
+      "**/deploy/**",
+      "**/migrations/**",
+      "**/infra/**"
+    ]
+  },
+  "controlled_apply": {
+    "allowed": true,
+    "mode": "artifact-contained-worktree",
+    "branch_name": "runforge/authority-1-demo",
+    "requires_source_clean": true
+  },
+  "expires_at": null,
+  "owner_note": "Delegated authority for documentation-only external repair demonstration."
+}

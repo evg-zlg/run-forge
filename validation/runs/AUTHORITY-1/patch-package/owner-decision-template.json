@@ -1,0 +1,11 @@
+{
+  "decision_id": "<generated UUID>",
+  "decision": "hold",
+  "run_id": "AUTHORITY-1",
+  "patch_package_hash": "a56170a119267d406d1ca695181f6e00b8494fe7977094458b072cb1544ffe1e",
+  "patch_diff_hash": "b5452f7609adf311b8fe0870635a1b5caa459a1903c76e1141ab08a1bf464198",
+  "target_mode": "controlled-worktree",
+  "target_branch_or_worktree": "runforge/<owner-selected-branch>",
+  "owner_note": "<required owner note>",
+  "created_at": "<ISO-8601 timestamp>"
+}
