@@ -1,7 +1,7 @@
-diff --git a/a/README.md b/b/README.md
+diff --git a/README.md b/README.md
 index 5cc723c..d91fbe4 100644
---- a/a/README.md
-+++ b/b/README.md
+--- a/README.md
++++ b/README.md
 @@ -360,3 +360,13 @@ Recommended night order:
  3. WP-004 Reference Scout.
  4. WP-005 Security and Policy Review.

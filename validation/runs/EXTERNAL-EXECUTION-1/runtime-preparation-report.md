@@ -17,5 +17,5 @@
 - Package lifecycle scripts: package-manager defaults (inside the disposable preparation container only)
 - Original repository mounted or mutated: no
 - Command log: `validation/runs/EXTERNAL-EXECUTION-1/runtime-preparation-command.log`
-- Started: `2026-07-11T10:54:58.320Z`
-- Completed: `2026-07-11T10:55:13.524Z`
+- Started: `2026-07-11T11:02:26.793Z`
+- Completed: `2026-07-11T11:02:46.393Z`

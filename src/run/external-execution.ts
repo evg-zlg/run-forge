@@ -51,10 +51,12 @@ export async function runExternalExecution(input: Input): Promise<ExternalExecut
   await writeFile(join(outDir, "execution-log.md"), `# Execution Log\n\n- ${new Date().toISOString()}: canonicalized source, output, tmp, and controlled-worktree paths.\n`, "utf8");
 
   const preparation = await prepareExternalRuntime({ repo, workspace: disposable, outDir, image: input.dockerImage });
+  await assertSourceUnchanged(before, repo, "runtime preparation");
   await appendLog(outDir, `runtime prepared with ${preparation.dependencyCommand}; preparation network=${preparation.networkUsed}`);
   const commands = input.commands.length ? input.commands : defaultCommands;
   const executor = new DockerShellExecutor(root, input.dockerImage, true);
   const baseline = await validateStage(executor, runId, "baseline", disposable, outDir, commands, input.timeoutMs);
+  await assertSourceUnchanged(before, repo, "baseline validation");
   await writeValidation(join(outDir, "patch-package", "validation-before.md"), "Baseline", baseline);
 
   await cp(disposable, controlled, { recursive: true, verbatimSymlinks: true });
@@ -62,9 +64,11 @@ export async function runExternalExecution(input: Input): Promise<ExternalExecut
   if (!repair) throw new Error("No safe deterministic repair was available for this repository.");
   const patchPath = join(outDir, "patch-package", "patch.diff");
   await createPatch(repo, disposable, repair.file, patchPath, tmpRoot);
+  const patchText = await readFile(patchPath, "utf8");
   const afterRepair = await validateStage(executor, runId, "after-repair", disposable, outDir, commands, input.timeoutMs);
   await writeValidation(join(outDir, "patch-package", "validation-after.md"), "After disposable repair", afterRepair);
-  const reviewAccepted = baseline.every(passed) && afterRepair.every(passed) && repair.file === "README.md";
+  await assertSourceUnchanged(before, repo, "disposable repair validation");
+  const reviewAccepted = baseline.every(passed) && afterRepair.every(passed) && reviewPatchText(patchText);
   await writePatchPackage(outDir, input, repair, reviewAccepted, baseline, afterRepair);
 
   let applied: ExecutorResult[] | null = null;
@@ -118,6 +122,7 @@ async function performRepair(workspace: string): Promise<{ file: "README.md"; su
   const packageJson = JSON.parse(await readFile(join(workspace, "package.json"), "utf8")) as { scripts?: Record<string, string> };
   if (!["typecheck", "test", "build"].every((name) => typeof packageJson.scripts?.[name] === "string")) return null as never;
   const path = join(workspace, "README.md");
+  await assertRepairTargetSafe(workspace, path);
   const current = await readFile(path, "utf8");
   if (current.includes("## Offline Validation")) return null as never;
   const addition = `\n## Offline Validation\n\nAfter dependencies are prepared, the deterministic validation suite can run without runtime network access:\n\n\`\`\`bash\nnpm run typecheck\nnpm test\nnpm run build\n\`\`\`\n`;
@@ -141,7 +146,29 @@ async function createPatch(repo: string, workspace: string, file: string, output
     exitCode = error.code ?? 2;
   }
   if (exitCode !== 1 || !diff) throw new Error("Could not generate a non-empty repair patch.");
-  await writeFile(output, diff, "utf8");
+  const normalized = diff.replaceAll("a/a/", "a/").replaceAll("b/b/", "b/");
+  if (!reviewPatchText(normalized)) throw new Error("Generated patch failed the providerless path/scope review.");
+  await writeFile(output, normalized, "utf8");
+}
+
+export async function assertRepairTargetSafe(workspace: string, target: string): Promise<void> {
+  const [canonicalWorkspace, canonicalTarget] = await Promise.all([realpath(workspace), realpath(target)]);
+  const fromWorkspace = relative(canonicalWorkspace, canonicalTarget);
+  if (fromWorkspace === "" || fromWorkspace === ".." || fromWorkspace.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`)) {
+    throw new Error(`Repair target escapes disposable workspace: ${target}`);
+  }
+}
+
+export function reviewPatchText(patch: string): boolean {
+  const files = [...patch.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)];
+  return files.length === 1 && files[0]?.[1] === "README.md" && files[0]?.[2] === "README.md"
+    && patch.includes("\n--- a/README.md\n+++ b/README.md\n")
+    && !patch.includes("GIT binary patch");
+}
+
+async function assertSourceUnchanged(before: RepoState, repo: string, stage: string): Promise<void> {
+  const current = await inspectRepoState(repo);
+  if (current.head !== before.head || current.status !== before.status) throw new Error(`Blocking safety failure: external source changed during ${stage}.`);
 }
 
 const passed = (result: ExecutorResult): boolean => result.status === "passed";
