@@ -22,7 +22,7 @@ ${plan.planningBasis.map((item) => `- ${item}`).join("\n")}
 
 - Do not start Alpha-28.
 - Do not add archive/viewer/handoff/OKF features.
-- Do not add Docker, scheduler, provider routing, daemon, marketplace, or dashboard work.
+- Do not add Docker, scheduler, provider routing, daemon, provider catalog, or dashboard work.
 - Implement only enough to improve the task-run execution contour.
 
 ## Inputs
