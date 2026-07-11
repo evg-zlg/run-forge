@@ -23,7 +23,7 @@ describe("delegated authority", () => {
 
   it("rejects authority that relaxes network or provider hard-denies", async () => {
     const repo = await tempDir();
-    for (const key of ["runtime_network", "provider_calls"]) {
+    for (const key of ["runtime_network", "provider_calls", "merge", "deploy", "force_push", "push_to_main"]) {
       const value = envelope(repo); value.forbidden_actions[key] = false;
       expect((await load(repo, value)).classification).toBe("too_broad");
     }
@@ -56,6 +56,6 @@ async function tempDir(): Promise<string> { const root = await mkdtemp(join(tmpd
 async function load(repo: string, value: AuthorityEnvelope) { const dir = await tempDir(); const path = join(dir, "authority.json"); await writeFile(path, JSON.stringify(value)); return loadAuthority(path, repo); }
 function envelope(repo: string, override: Partial<AuthorityEnvelope> = {}): AuthorityEnvelope {
   const actions = Object.fromEntries(["prepare_runtime", "run_baseline_validation", "perform_disposable_repair", "generate_patch_package", "run_providerless_review", "apply_to_controlled_artifact_worktree", "run_after_apply_validation", "generate_pr_creation_package"].map((key) => [key, true]));
-  const forbidden = Object.fromEntries(["mutate_source_repo", "target_main_or_master", "push", "merge", "deploy", "provider_calls", "db_access", "production_access", "secret_access", "runtime_network", "create_external_pr"].map((key) => [key, true]));
+  const forbidden = Object.fromEntries(["mutate_source_repo", "target_main_or_master", "push", "merge", "deploy", "provider_calls", "db_access", "production_access", "secret_access", "runtime_network", "create_external_pr", "force_push", "push_to_main"].map((key) => [key, true]));
   return { authority_id: "AUTHORITY-TEST", scope: "external-repair-demo", repo, allowed_actions: actions, forbidden_actions: forbidden, allowed_patch_risk: { max_risk: "low", allowed_file_patterns: ["README.md", "docs/**"], forbidden_file_patterns: [".env*", "**/secrets/**", "**/deploy/**", "**/migrations/**", "**/infra/**"] }, controlled_apply: { allowed: true, mode: "artifact-contained-worktree", branch_name: "runforge/test", requires_source_clean: true }, expires_at: null, owner_note: "test", ...override };
 }

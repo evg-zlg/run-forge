@@ -9,10 +9,9 @@ import { inspectRepoState, prepareExternalRuntime, type RepoState, type RuntimeP
 import { taskRunSlug } from "./task-run-workspace.js";
 import { evaluatePatchAuthority, loadAuthority, recordAuthorityDecision, writeAuthorityReport, type AuthorityClassification, type AuthorityDecision } from "./delegated-authority.js";
 import { createLocalBranchWorktree, evaluateLocalBranchAuthority, withIsolatedGitMetadata, writeLocalBranchPrPackage } from "./local-branch-apply.js";
-
-const execFileAsync = promisify(execFile);
-const defaultCommands = ["npm run typecheck", "npm test", "npm run build"];
-const validationStages = ["baseline", "after-repair", "after-apply", "after-branch-apply"] as const;
+import { runPublication } from "./publication.js";
+const execFileAsync = promisify(execFile); const defaultCommands = ["npm run typecheck", "npm test", "npm run build"];
+const validationStages = ["baseline", "after-repair", "after-apply", "after-branch-apply", "after-commit", "after-push"] as const;
 export type ExternalExecutionResult = {
   runId: string;
   outDir: string;
@@ -30,10 +29,11 @@ export type ExternalExecutionResult = {
   localBranchApply?: "applied-to-local-non-main-branch" | "skipped-needs-owner-approval" | "validation-failed-after-apply" | "unsafe/not runnable";
   prPackage?: "ready" | "not-created" | "unsafe/not runnable" | "needs owner approval";
   localBranchWorkspace?: string | null;
+  publication?: "draft-pr-created" | "committed-not-pushed" | "pushed-no-pr" | "skipped-needs-owner-approval" | "failed"; prStatus?: "draft-open" | "not-created" | "failed"; publicationCommitSha?: string | null; publicationPrUrl?: string | null;
 };
 type Input = {
   task: string; out: string; repo?: string; runtime: string; dockerImage: string; prepareRuntime: string;
-  repairMode: string; approvalMode: string; applyMode: string; targetBranch?: string; authority?: string; commands: string[]; tmpRoot?: string; timeoutMs: number;
+  repairMode: string; approvalMode: string; applyMode: string; targetBranch?: string; publicationMode?: string; authority?: string; commands: string[]; tmpRoot?: string; timeoutMs: number;
 };
 export type OwnerDecision = {
   decision_id: string; decision: "approve" | "reject" | "continue" | "hold"; run_id: string;
@@ -63,7 +63,6 @@ export async function runExternalExecution(input: Input): Promise<ExternalExecut
   const authorityDecisions: AuthorityDecision[] = [{ timestamp: new Date().toISOString(), authority_id: authority.envelope?.authority_id, run_id: runId, action: "validate_authority", decision: authority.classification === "accepted" ? "continue" : "stop", classification: authority.classification, reason: authority.reason, repo }];
   await recordAuthorityDecision(join(outDir, "authority-decision-log.jsonl"), authorityDecisions[0]!);
   await writeFile(join(outDir, "execution-log.md"), `# Execution Log\n\n- ${new Date().toISOString()}: canonicalized source, output, tmp, and controlled-worktree paths.\n`, "utf8");
-
   const preparation = await prepareExternalRuntime({ repo, workspace: disposable, outDir, image: input.dockerImage });
   await assertSourceUnchanged(before, repo, "runtime preparation");
   await appendLog(outDir, `runtime prepared with ${preparation.dependencyCommand}; preparation network=${preparation.networkUsed}`);
@@ -120,7 +119,11 @@ export async function runExternalExecution(input: Input): Promise<ExternalExecut
   await writeFile(join(outDir, "owner-decision.json"), JSON.stringify(delegatedDecision, null, 2) + "\n", "utf8");
   const continued = await continueExternalExecution({ run: outDir, timeoutMs: input.timeoutMs });
   if (input.applyMode !== "local-non-main-branch") return continued;
-  return applyToLocalNonMainBranch({ input, outDir, repo, runId, before, authority: authority.envelope, patchPath, patchPackageHash, patchDiffHash, commands, disposable, result: continued });
+  const branchResult = await applyToLocalNonMainBranch({ input, outDir, repo, runId, before, authority: authority.envelope, patchPath, patchPackageHash, patchDiffHash, commands, disposable, result: continued });
+  if (input.publicationMode !== "draft-pr" || branchResult.localBranchApply !== "applied-to-local-non-main-branch") return branchResult;
+  const publication = await runPublication({ authority: authority.envelope, repo, sourceBefore: before, worktree: branchResult.localBranchWorkspace!, branch: input.targetBranch!, out: outDir, runId, patchPath, patchPackageHash, patchDiffHash, validate: async (stage) => withIsolatedGitMetadata(branchResult.localBranchWorkspace!, async () => (await validateStage(new DockerShellExecutor(root, input.dockerImage, true), runId, stage, branchResult.localBranchWorkspace!, outDir, commands, input.timeoutMs)).every(passed)) });
+  const published: ExternalExecutionResult = { ...branchResult, publication: publication.publication, prStatus: publication.prStatus, publicationCommitSha: publication.commitSha, publicationPrUrl: publication.prUrl, runforgeCapability: publication.publication === "draft-pr-created" ? "passed" : "needs owner approval" };
+  await assertSourceUnchanged(before, repo, "publication"); await writeFinalArtifacts(outDir, input, published, commands, true, true); return published;
 }
 export function validateExternalExecutionModes(input: Input): void {
   if (!input.repo) throw new Error("--repair-mode requires --repo.");
@@ -130,6 +133,8 @@ export function validateExternalExecutionModes(input: Input): void {
   if (input.approvalMode !== "require-owner-decision") throw new Error("--approval-mode supports only 'require-owner-decision'.");
   if (!["none", "local-non-main-branch"].includes(input.applyMode)) throw new Error("--apply-mode supports only 'none' or 'local-non-main-branch'.");
   if (input.applyMode === "local-non-main-branch" && !input.targetBranch) throw new Error("--apply-mode local-non-main-branch requires --target-branch.");
+  if (!["none", "draft-pr"].includes(input.publicationMode ?? "none")) throw new Error("--publication-mode supports only 'draft-pr' or 'none'.");
+  if (input.publicationMode === "draft-pr" && input.applyMode !== "local-non-main-branch") throw new Error("--publication-mode draft-pr requires local non-main branch apply.");
 }
 async function applyToLocalNonMainBranch(args: { input: Input; outDir: string; repo: string; runId: string; before: RepoState; authority: NonNullable<Awaited<ReturnType<typeof loadAuthority>>["envelope"]>; patchPath: string; patchPackageHash: string; patchDiffHash: string; commands: string[]; disposable: string; result: ExternalExecutionResult }): Promise<ExternalExecutionResult> {
   const branch = args.input.targetBranch!;
@@ -233,7 +238,6 @@ async function writeOwnerAndApplyReports(out: string, input: Input, result: Exte
   await writeFile(join(out, "controlled-apply-report.md"), `# Controlled Apply Report\n\n- Approval: \`${input.approvalMode}\`\n- Apply mode: \`${input.applyMode}\`\n- Result: **${result}**\n- Controlled worktree: \`${workspace}\`\n- Patch: \`${patch}\`\n- Original repository target: never\n- Push/merge/deploy: none\n${applied ? `- Offline validation: ${applied.every(passed) ? "passed" : "failed"}\n` : "- Offline validation: skipped because apply did not occur.\n"}`, "utf8");
   await writeFile(join(out, "disposable-repair-report.md"), "# Disposable Repair Report\n\nA deterministic documentation-only repair was performed in the prepared disposable workspace. The original repository was not mounted or modified.\n", "utf8");
 }
-
 async function writePrReadyPackage(out: string, repair: { file: string; summary: string }, baseline: ExecutorResult[], after: ExecutorResult[], applied: ExecutorResult[] | null, apply: ExternalExecutionResult["controlledApply"], branch: string): Promise<void> {
   const dir = join(out, "pr-creation-package");
   await mkdir(dir, { recursive: true });
@@ -246,7 +250,6 @@ async function writePrReadyPackage(out: string, repair: { file: string; summary:
   await writeFile(join(dir, "manual-create-pr-instructions.md"), `# Manual PR Creation\n\n1. Create \`${branch}\` from the reviewed source HEAD.\n2. Apply \`patch-package/patch.diff\`.\n3. Run the documented offline validation.\n4. Commit, push, and open the PR manually after owner review.\n`, "utf8");
   await writeFile(join(dir, "owner-next-actions.md"), "# Owner Next Actions\n\nReview the controlled-apply evidence and PR package. Only the owner may create the real branch, push, or open a PR.\n", "utf8");
 }
-
 async function writeFinalArtifacts(out: string, input: Input, result: ExternalExecutionResult, commands: string[], reviewAccepted: boolean, continued: boolean): Promise<void> {
   const environment = { node: process.version, platform: process.platform, architecture: process.arch, cwd: process.cwd(), dockerImage: input.dockerImage, runtimeNetwork: "none", preparationNetwork: "bridge" };
   const provenance = { schemaVersion: "external-execution-1", source: result.source.before, runtimePreparation: result.preparation, task: input.task, commands, providerCalls: false, createdAt: new Date().toISOString() };
@@ -254,7 +257,7 @@ async function writeFinalArtifacts(out: string, input: Input, result: ExternalEx
   await writeFile(join(out, "provenance.json"), JSON.stringify(provenance, null, 2) + "\n", "utf8");
   await writeFile(join(out, "results.json"), JSON.stringify(result, null, 2) + "\n", "utf8");
   await writeFile(join(out, "external-execution-report.md"), `# External Execution Report\n\n- Target: \`${result.source.before.path}\`\n- Before HEAD: \`${result.source.before.head}\`\n- After HEAD: \`${result.source.after.head}\`\n- Original unchanged: **${result.source.unchanged}**\n- Runtime: Docker, network disabled during task execution\n- Providerless review: ${reviewAccepted ? "accepted" : "rejected"}\n- Controlled apply: ${result.controlledApply}\n- PR-ready package: ${result.prReadyPackage}\n`, "utf8");
-  const summary = `# ${result.runId} Summary\n\n## Classifications\n\n- RunForge capability: **${result.runforgeCapability}**\n- Authority envelope: **${result.authorityEnvelope}**\n- Factory baseline: **${result.factoryBaseline}**\n- Disposable repair: **${result.disposableRepair}**\n- Controlled apply: **${result.controlledApply}**\n- PR-ready package: **${result.prReadyPackage}**\n${result.localBranchApply ? `- Local non-main branch apply: **${result.localBranchApply}**\n- PR package: **${result.prPackage}**\n` : ""}\n## Safety\n\n- Original Factory HEAD/status unchanged: **${result.source.unchanged}**\n- Runtime network: disabled\n- Provider, DB, prod, secrets, push, merge, deploy: none\n- Patch: \`${result.patchPath}\`\n`;
+  const summary = `# ${result.runId} Summary\n\n## Classifications\n\n- RunForge capability: **${result.runforgeCapability}**\n- Authority envelope: **${result.authorityEnvelope}**\n- Factory baseline: **${result.factoryBaseline}**\n- Disposable repair: **${result.disposableRepair}**\n- Controlled apply: **${result.controlledApply}**\n- PR-ready package: **${result.prReadyPackage}**\n${result.localBranchApply ? `- Local non-main branch apply: **${result.localBranchApply}**\n- PR package: **${result.prPackage}**\n` : ""}${result.publication ? `- Publication: **${result.publication}**\n- PR status: **${result.prStatus}**\n` : ""}\n## Safety\n\n- Original Factory HEAD/status unchanged: **${result.source.unchanged}**\n- Runtime network: disabled\n- Merge and deploy: none\n- Patch: \`${result.patchPath}\`\n`;
   await writeFile(join(out, "summary.md"), summary, "utf8");
   const required = [
     "summary.md", "results.json", "external-execution-report.md", "runtime-preparation-report.md", "disposable-repair-report.md",
@@ -263,6 +266,7 @@ async function writeFinalArtifacts(out: string, input: Input, result: ExternalEx
     ...["patch.diff", "patch-summary.md", "validation-before.md", "validation-after.md", "providerless-review.md", "apply-instructions.md", "rollback-instructions.md", "safety-review.md", "owner-decision-template.json"].map((name) => `patch-package/${name}`),
     ...(continued ? ["owner-decision.json", "owner-approval-report.md", "pr-creation-package/pr-title.txt", "pr-creation-package/pr-body.md", "pr-creation-package/branch-plan.md", "pr-creation-package/manual-create-pr-instructions.md", "pr-creation-package/changed-files.md", "pr-creation-package/validation-summary.md", "pr-creation-package/risk-assessment.md", "pr-creation-package/owner-next-actions.md"] : ["continuation-state.json"]),
     ...(result.localBranchApply === "applied-to-local-non-main-branch" ? ["branch-apply-report.md", ...["pr-title.txt", "pr-body.md", "branch-summary.md", "changed-files.md", "validation-summary.md", "risk-assessment.md", "manual-push-instructions.md", "manual-create-pr-instructions.md", "rollback-instructions.md", "owner-next-actions.md"].map((name) => `pr-package/${name}`)] : [])
+    ,...(result.publication === "draft-pr-created" ? ["publication-report.md", "validation/after-commit/results.json", "validation/after-push/results.json"] : [])
   ];
   const missing: string[] = [];
   for (const path of required) await access(join(out, path)).catch(() => missing.push(path));
@@ -270,7 +274,6 @@ async function writeFinalArtifacts(out: string, input: Input, result: ExternalEx
   if (missing.length) throw new Error(`External execution packet validation failed: ${missing.join(", ")}`);
   await appendLog(out, "packet validation passed: all required external-execution files were written");
 }
-
 export async function recordOwnerDecision(input: { run: string; decision: string; targetMode: string; targetBranch: string; ownerNote: string }): Promise<{ decisionId: string; path: string }> {
   const out = await realpath(resolve(input.run));
   const state = await readJson<ContinuationState>(join(out, "continuation-state.json"));
@@ -285,7 +288,6 @@ export async function recordOwnerDecision(input: { run: string; decision: string
   await appendLog(out, `owner decision ${decision.decision_id} recorded: ${decision.decision}`);
   return { decisionId: decision.decision_id, path };
 }
-
 export async function continueExternalExecution(input: { run: string; timeoutMs: number }): Promise<ExternalExecutionResult> {
   const root = process.cwd();
   const out = await realpath(resolve(input.run));
@@ -325,7 +327,6 @@ export async function continueExternalExecution(input: { run: string; timeoutMs:
   await writeFinalArtifacts(out, { task: "continued owner-approved external repair", dockerImage: state.dockerImage } as Input, result, state.commands, true, true);
   return result;
 }
-
 function decisionTemplate(runId: string, packageHash: string, diffHash: string): Omit<OwnerDecision, "decision_id" | "created_at"> & { decision_id: string; created_at: string } {
   return { decision_id: "<generated UUID>", decision: "hold", run_id: runId, patch_package_hash: packageHash, patch_diff_hash: diffHash, target_mode: "controlled-worktree", target_branch_or_worktree: "runforge/<owner-selected-branch>", owner_note: "<required owner note>", created_at: "<ISO-8601 timestamp>" };
 }
@@ -336,7 +337,6 @@ async function hashFile(path: string): Promise<string> { return createHash("sha2
 async function hashPatchPackage(dir: string): Promise<string> { const names = ["patch.diff", "patch-summary.md", "validation-before.md", "validation-after.md", "providerless-review.md", "apply-instructions.md", "rollback-instructions.md", "safety-review.md"]; const hash = createHash("sha256"); for (const name of names) hash.update(name).update("\0").update(await readFile(join(dir, name))).update("\0"); return hash.digest("hex"); }
 async function readJson<T>(path: string): Promise<T> { return JSON.parse(await readFile(path, "utf8")) as T; }
 async function validationResultsFromArtifacts(out: string, stage: string, _count: number): Promise<ExecutorResult[]> { return readJson<ExecutorResult[]>(join(out, "validation", stage, "results.json")); }
-
 export function renderExternalExecutionCliSummary(result: ExternalExecutionResult): string {
   return [
     `External execution ${result.runforgeCapability}: ${result.runId}`,

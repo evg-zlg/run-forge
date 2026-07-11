@@ -28,6 +28,11 @@ describe("external execution gates", () => {
     expect(() => validateExternalExecutionModes({ ...valid, applyMode: "local-non-main-branch", targetBranch: "runforge/demo" })).not.toThrow();
   });
 
+  it("requires local branch apply for draft publication", () => {
+    expect(() => validateExternalExecutionModes({ ...valid, publicationMode: "draft-pr" })).toThrow("requires local non-main branch apply");
+    expect(() => validateExternalExecutionModes({ ...valid, applyMode: "local-non-main-branch", targetBranch: "runforge/demo", publicationMode: "draft-pr" })).not.toThrow();
+  });
+
   it.each([
     [{ runtime: "local" }, "--runtime docker"],
     [{ prepareRuntime: "none" }, "--prepare-runtime explicit"],

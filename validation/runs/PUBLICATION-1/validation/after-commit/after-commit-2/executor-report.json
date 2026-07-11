@@ -1,0 +1,25 @@
+{
+  "request": {
+    "id": "PUBLICATION-1:after-commit-2:docker-shell",
+    "subtaskId": "after-commit-2",
+    "command": "npm test",
+    "cwd": "/Users/evgeny/Documents/projects/RunForge/validation/runs/PUBLICATION-1/local-branch-worktree",
+    "artifactDir": "validation/runs/PUBLICATION-1/validation/after-commit/after-commit-2",
+    "timeoutMs": 300000
+  },
+  "result": {
+    "executor": "docker-shell",
+    "runtime": {
+      "isolation": "docker-container",
+      "image": "runforge:local",
+      "network": "none"
+    },
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/PUBLICATION-1/validation/after-commit/after-commit-2/stdout.log",
+    "stderrLog": "validation/runs/PUBLICATION-1/validation/after-commit/after-commit-2/stderr.log",
+    "commandLog": "validation/runs/PUBLICATION-1/validation/after-commit/after-commit-2/command.log"
+  }
+}
