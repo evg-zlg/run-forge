@@ -69,6 +69,7 @@ export async function prepareExternalRuntime(input: {
   await rm(input.workspace, { recursive: true, force: true });
   await mkdir(input.workspace, { recursive: true });
   await copyExternalWorkspace(source.path, input.workspace);
+  await execFileAsync("git", ["init", "--quiet"], { cwd: input.workspace });
 
   const containerName = `runforge-prepare-${safeName(basename(input.outDir))}-${process.pid}`;
   const args = preparationDockerArgs(input.workspace, input.image, containerName, dependency.command);
