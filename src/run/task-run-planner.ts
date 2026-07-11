@@ -36,7 +36,7 @@ export function planTaskRun(task: string): TaskRunPlan {
 function classifyTask(task: string): TaskKind {
   const normalized = task.toLowerCase();
   const docsScore = score(normalized, ["doc", "roadmap", "contradiction", "milestone", "non-goal", "current state"]);
-  const codeScore = score(normalized, ["code", "harness", "implementation", "typescript", "test", "cli", "renderer"]);
+  const codeScore = score(normalized, ["code", "harness", "implementation", "typescript", "test", "cli", "renderer", "docker", "runtime", "executor", "isolation"]);
   if (docsScore > codeScore && docsScore > 0) return "docs-review";
   if (codeScore > 0) return "code-inspection";
   return "general-review";
@@ -78,6 +78,7 @@ function docsPlan(task: string): TaskRunPlan {
 }
 
 function codePlan(task: string): TaskRunPlan {
+  if (asksForDockerRuntime(task)) return dockerRuntimeCodePlan();
   if (asksForSemanticPlanning(task)) return semanticPlanningCodePlan();
   return {
     kind: "code-inspection",
@@ -107,6 +108,49 @@ function codePlan(task: string): TaskRunPlan {
         evidenceFocus: "Coverage of planning/aggregation and previous artifact limitations.",
         evidenceCommand:
           "sed -n '1,220p' tests/unit/task-run-renderer.test.ts && rg -n \"taskKind|planningBasis|evidence|Remaining Gaps|subtasks\" validation/runs/TASK-RUN-4/results.json"
+      }
+    ]
+  };
+}
+
+function dockerRuntimeCodePlan(): TaskRunPlan {
+  const milestone = "external-repo check/triage through Docker runtime";
+  return {
+    kind: "code-inspection",
+    planningBasis: [
+      "Task asks for a concrete isolated runtime implementation.",
+      "Use CLI wiring, executor policy, container build, tests, and owner-visible artifacts as primary evidence."
+    ],
+    inputs: [
+      "src/cli/commands/task-run.ts",
+      "src/run/task-run-harness.ts",
+      "src/run/task-run-executor.ts",
+      "src/run/task-run-renderer.ts",
+      "docker/Dockerfile",
+      "tests/unit/task-run-executor.test.ts"
+    ],
+    recommendedNextMilestone: milestone,
+    subtasks: [
+      {
+        id: "01-runtime-cli-and-dispatch",
+        goal: "Verify explicit local/Docker runtime selection reaches executor dispatch.",
+        inputs: ["src/cli/commands/task-run.ts", "src/run/task-run-harness.ts"],
+        evidenceFocus: "Runtime CLI contract, safe default, and executor selection.",
+        evidenceCommand: "rg -n \"runtime|docker-image|DockerShellExecutor|LocalShellExecutor|executor.lane\" src/cli/commands/task-run.ts src/run/task-run-harness.ts"
+      },
+      {
+        id: "02-container-safety-policy",
+        goal: "Verify the Docker lane is offline, read-only, bounded, and uses a prebuilt image.",
+        inputs: ["src/run/task-run-executor.ts", "docker/Dockerfile"],
+        evidenceFocus: "Container mount, network, privilege, resource, image, and timeout controls.",
+        evidenceCommand: "rg -n \"pull|network|cap-drop|read-only|pids-limit|memory|cpus|tmpfs|readonly|removeContainer|FROM|ripgrep\" src/run/task-run-executor.ts docker/Dockerfile"
+      },
+      {
+        id: "03-runtime-evidence-contract",
+        goal: "Verify runtime metadata is tested and rendered into owner-visible artifacts.",
+        inputs: ["src/run/task-run-renderer.ts", "tests/unit/task-run-executor.test.ts", "tests/unit/task-run-renderer.test.ts"],
+        evidenceFocus: "Runtime metadata in summaries/results and regression coverage.",
+        evidenceCommand: "rg -n \"Runtime mode|containerUsed|docker-shell|dockerRunArgs|network.*none|runtime\" src/run/task-run-renderer.ts tests/unit/task-run-executor.test.ts tests/unit/task-run-renderer.test.ts"
       }
     ]
   };
@@ -201,6 +245,14 @@ function asksForSemanticPlanning(task: string): boolean {
   );
 }
 
+function asksForDockerRuntime(task: string): boolean {
+  const normalized = task.toLowerCase();
+  return normalized.includes("docker") || normalized.includes("container runtime") || normalized.includes("container isolation");
+}
+
 function score(value: string, terms: string[]): number {
-  return terms.reduce((total, term) => total + (value.includes(term) ? 1 : 0), 0);
+  return terms.reduce((total, term) => {
+    const matched = term === "doc" ? /\bdocs?\b/.test(value) : value.includes(term);
+    return total + (matched ? 1 : 0);
+  }, 0);
 }

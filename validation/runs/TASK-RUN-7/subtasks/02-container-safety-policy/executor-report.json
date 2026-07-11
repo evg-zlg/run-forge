@@ -1,0 +1,25 @@
+{
+  "request": {
+    "id": "TASK-RUN-7:02-container-safety-policy:docker-shell",
+    "subtaskId": "02-container-safety-policy",
+    "command": "rg -n \"pull|network|cap-drop|read-only|pids-limit|memory|cpus|tmpfs|readonly|removeContainer|FROM|ripgrep\" src/run/task-run-executor.ts docker/Dockerfile",
+    "cwd": "/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-task-run-7/02-container-safety-policy/workspace",
+    "artifactDir": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "docker-shell",
+    "runtime": {
+      "isolation": "docker-container",
+      "image": "runforge:local",
+      "network": "none"
+    },
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/stdout.log",
+    "stderrLog": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/stderr.log",
+    "commandLog": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/command.log"
+  }
+}

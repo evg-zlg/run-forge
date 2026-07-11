@@ -15,15 +15,20 @@ function startCommand(): Command {
     .option("--tmp-root <path>", "tmp workspace root")
     .option("--check-command <command>", "validation command to run", "corepack pnpm check:structure")
     .option("--delegated-review <mode>", "explicit delegated review lane; supported: 'mock', 'cli'")
+    .option("--runtime <mode>", "subtask runtime; supported: 'local', 'docker'", "local")
+    .option("--docker-image <image>", "prebuilt local image for --runtime docker", "runforge:local")
     .action(async (opts) => {
       try {
         const delegatedReview = parseDelegatedReview(opts.delegatedReview as string | undefined);
+        const runtime = parseRuntime(opts.runtime as string);
         const result = await runTaskRunHarness({
           task: opts.task as string,
           out: opts.out as string,
           tmpRoot: opts.tmpRoot as string | undefined,
           checkCommand: opts.checkCommand as string | undefined,
-          delegatedReview
+          delegatedReview,
+          runtime,
+          dockerImage: opts.dockerImage as string
         });
         console.log(renderTaskRunCliSummary(result));
         if (result.status !== "completed") process.exitCode = 1;
@@ -31,6 +36,11 @@ function startCommand(): Command {
         throw new InvalidArgumentError(error instanceof Error ? error.message : String(error));
       }
     });
+}
+
+function parseRuntime(value: string): "local" | "docker" {
+  if (value === "local" || value === "docker") return value;
+  throw new InvalidArgumentError("--runtime supports only 'local' or 'docker'.");
 }
 
 function parseDelegatedReview(value: string | undefined): "mock" | "cli" | undefined {

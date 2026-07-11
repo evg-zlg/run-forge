@@ -1,0 +1,166 @@
+{
+  "runId": "TASK-RUN-7",
+  "acceptedTask": "Add an opt-in Docker-isolated task execution lane with offline read-only evidence commands and owner-visible runtime metadata",
+  "taskKind": "code-inspection",
+  "plan": {
+    "kind": "code-inspection",
+    "planningBasis": [
+      "Task asks for a concrete isolated runtime implementation.",
+      "Use CLI wiring, executor policy, container build, tests, and owner-visible artifacts as primary evidence."
+    ],
+    "inputs": [
+      "src/cli/commands/task-run.ts",
+      "src/run/task-run-harness.ts",
+      "src/run/task-run-executor.ts",
+      "src/run/task-run-renderer.ts",
+      "docker/Dockerfile",
+      "tests/unit/task-run-executor.test.ts"
+    ],
+    "recommendedNextMilestone": "external-repo check/triage through Docker runtime",
+    "subtasks": [
+      {
+        "id": "01-runtime-cli-and-dispatch",
+        "goal": "Verify explicit local/Docker runtime selection reaches executor dispatch.",
+        "inputs": [
+          "src/cli/commands/task-run.ts",
+          "src/run/task-run-harness.ts"
+        ],
+        "evidenceFocus": "Runtime CLI contract, safe default, and executor selection.",
+        "evidenceCommand": "rg -n \"runtime|docker-image|DockerShellExecutor|LocalShellExecutor|executor.lane\" src/cli/commands/task-run.ts src/run/task-run-harness.ts"
+      },
+      {
+        "id": "02-container-safety-policy",
+        "goal": "Verify the Docker lane is offline, read-only, bounded, and uses a prebuilt image.",
+        "inputs": [
+          "src/run/task-run-executor.ts",
+          "docker/Dockerfile"
+        ],
+        "evidenceFocus": "Container mount, network, privilege, resource, image, and timeout controls.",
+        "evidenceCommand": "rg -n \"pull|network|cap-drop|read-only|pids-limit|memory|cpus|tmpfs|readonly|removeContainer|FROM|ripgrep\" src/run/task-run-executor.ts docker/Dockerfile"
+      },
+      {
+        "id": "03-runtime-evidence-contract",
+        "goal": "Verify runtime metadata is tested and rendered into owner-visible artifacts.",
+        "inputs": [
+          "src/run/task-run-renderer.ts",
+          "tests/unit/task-run-executor.test.ts",
+          "tests/unit/task-run-renderer.test.ts"
+        ],
+        "evidenceFocus": "Runtime metadata in summaries/results and regression coverage.",
+        "evidenceCommand": "rg -n \"Runtime mode|containerUsed|docker-shell|dockerRunArgs|network.*none|runtime\" src/run/task-run-renderer.ts tests/unit/task-run-executor.test.ts tests/unit/task-run-renderer.test.ts"
+      }
+    ]
+  },
+  "subtaskReports": [
+    {
+      "id": "01-runtime-cli-and-dispatch",
+      "goal": "Verify explicit local/Docker runtime selection reaches executor dispatch.",
+      "reportPath": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/report.md",
+      "findings": [
+        "Runtime CLI contract, safe default, and executor selection. Evidence command passed with exit code 0.",
+        "01-runtime-cli-and-dispatch inspected 2 input(s) and captured 19 stdout line(s). Sample: src/cli/commands/task-run.ts:18:    .option(\"--runtime <mode>\", \"subtask runtime; supported: 'local', 'docker'\", \"local\") | src/cli/commands/task-run.ts:19:    .option(\"--docker-image <image>\", \"prebuilt local image for --runtime docker\", \"runforge:local\") | src/cli/commands/task-run.ts:23:        const runtime = parseRuntime(opts.runtime as string);"
+      ],
+      "status": "done"
+    },
+    {
+      "id": "02-container-safety-policy",
+      "goal": "Verify the Docker lane is offline, read-only, bounded, and uses a prebuilt image.",
+      "reportPath": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/report.md",
+      "findings": [
+        "Container mount, network, privilege, resource, image, and timeout controls. Evidence command passed with exit code 0.",
+        "02-container-safety-policy inspected 2 input(s) and captured 22 stdout line(s). Sample: src/run/task-run-executor.ts:26:    network: \"host\" | \"none\"; | src/run/task-run-executor.ts:48:  readonly lane = \"local-shell\" as const; | src/run/task-run-executor.ts:50:  constructor(private readonly repoRoot: string) {}"
+      ],
+      "status": "done"
+    },
+    {
+      "id": "03-runtime-evidence-contract",
+      "goal": "Verify runtime metadata is tested and rendered into owner-visible artifacts.",
+      "reportPath": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/report.md",
+      "findings": [
+        "Runtime metadata in summaries/results and regression coverage. Evidence command passed with exit code 0.",
+        "03-runtime-evidence-contract inspected 3 input(s) and captured 28 stdout line(s). Sample: src/run/task-run-renderer.ts:11:  runtime: TaskRunRuntime = \"local\", | src/run/task-run-renderer.ts:14:  const executor = runtime === \"docker\" ? \"DockerShellExecutor\" : \"LocalShellExecutor\"; | src/run/task-run-renderer.ts:15:  const isolation = runtime === \"docker\""
+      ],
+      "status": "done"
+    }
+  ],
+  "executorResults": [
+    {
+      "subtaskId": "01-runtime-cli-and-dispatch",
+      "requestId": "TASK-RUN-7:01-runtime-cli-and-dispatch:docker-shell",
+      "executor": "docker-shell",
+      "status": "passed",
+      "exitCode": 0,
+      "timedOut": false
+    },
+    {
+      "subtaskId": "02-container-safety-policy",
+      "requestId": "TASK-RUN-7:02-container-safety-policy:docker-shell",
+      "executor": "docker-shell",
+      "status": "passed",
+      "exitCode": 0,
+      "timedOut": false
+    },
+    {
+      "subtaskId": "03-runtime-evidence-contract",
+      "requestId": "TASK-RUN-7:03-runtime-evidence-contract:docker-shell",
+      "executor": "docker-shell",
+      "status": "passed",
+      "exitCode": 0,
+      "timedOut": false
+    }
+  ],
+  "commandStatuses": [
+    {
+      "subtaskId": "01-runtime-cli-and-dispatch",
+      "command": "rg -n \"runtime|docker-image|DockerShellExecutor|LocalShellExecutor|executor.lane\" src/cli/commands/task-run.ts src/run/task-run-harness.ts",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "subtaskId": "02-container-safety-policy",
+      "command": "rg -n \"pull|network|cap-drop|read-only|pids-limit|memory|cpus|tmpfs|readonly|removeContainer|FROM|ripgrep\" src/run/task-run-executor.ts docker/Dockerfile",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "subtaskId": "03-runtime-evidence-contract",
+      "command": "rg -n \"Runtime mode|containerUsed|docker-shell|dockerRunArgs|network.*none|runtime\" src/run/task-run-renderer.ts tests/unit/task-run-executor.test.ts tests/unit/task-run-renderer.test.ts",
+      "status": "passed",
+      "exitCode": 0
+    }
+  ],
+  "logPaths": [
+    {
+      "subtaskId": "01-runtime-cli-and-dispatch",
+      "commandLog": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/command.log",
+      "stdoutLog": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/stdout.log",
+      "stderrLog": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/stderr.log",
+      "executorReport": "validation/runs/TASK-RUN-7/subtasks/01-runtime-cli-and-dispatch/executor-report.json"
+    },
+    {
+      "subtaskId": "02-container-safety-policy",
+      "commandLog": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/command.log",
+      "stdoutLog": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/stdout.log",
+      "stderrLog": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/stderr.log",
+      "executorReport": "validation/runs/TASK-RUN-7/subtasks/02-container-safety-policy/executor-report.json"
+    },
+    {
+      "subtaskId": "03-runtime-evidence-contract",
+      "commandLog": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/command.log",
+      "stdoutLog": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/stdout.log",
+      "stderrLog": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/stderr.log",
+      "executorReport": "validation/runs/TASK-RUN-7/subtasks/03-runtime-evidence-contract/executor-report.json"
+    }
+  ],
+  "checks": [
+    {
+      "command": "corepack pnpm check:structure",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "gaps": [
+    "Docker isolation is available for evidence commands; runtime selection is not yet available for full coding-agent execution.",
+    "The Docker lane executes deterministic evidence commands; full coding-agent execution remains a separate owner-gated milestone."
+  ]
+}

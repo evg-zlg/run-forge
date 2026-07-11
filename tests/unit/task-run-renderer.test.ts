@@ -235,6 +235,18 @@ describe("task-run planner", () => {
     ]);
     expect(plan.subtasks.some((item) => item.goal.includes(plan.recommendedNextMilestone))).toBe(true);
   });
+
+  it("routes Docker runtime work to code evidence instead of matching doc inside docker", () => {
+    const plan = planTaskRun("Add an opt-in Docker-isolated task execution lane with owner-visible runtime metadata");
+
+    expect(plan.kind).toBe("code-inspection");
+    expect(plan.recommendedNextMilestone).toBe("external-repo check/triage through Docker runtime");
+    expect(plan.subtasks.map((item) => item.id)).toEqual([
+      "01-runtime-cli-and-dispatch",
+      "02-container-safety-policy",
+      "03-runtime-evidence-contract"
+    ]);
+  });
 });
 
 describe("task-run owner decision binding", () => {
@@ -272,6 +284,11 @@ function taskRunResult(input: { runId: string; task: string; outDir: string }): 
     status: "completed",
     outDir: input.outDir,
     tmpRoot: `/tmp/runforge-${input.runId.toLowerCase()}`,
+    runtime: {
+      mode: "local",
+      executor: "local-shell",
+      image: null
+    },
     plan: `${input.outDir}/plan.md`,
     summary: `${input.outDir}/summary.md`,
     results: `${input.outDir}/results.json`,
@@ -368,6 +385,11 @@ function taskRunResult(input: { runId: string; task: string; outDir: string }): 
           requestId: `${input.runId}:04-check-and-owner-summary:local-shell`,
           subtaskId: "04-check-and-owner-summary",
           executor: "local-shell",
+          runtime: {
+            isolation: "host-process",
+            image: null,
+            network: "host"
+          },
           status: "passed",
           exitCode: 0,
           signal: null,

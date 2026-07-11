@@ -1,0 +1,19 @@
+src/cli/commands/task-run.ts:18:    .option("--runtime <mode>", "subtask runtime; supported: 'local', 'docker'", "local")
+src/cli/commands/task-run.ts:19:    .option("--docker-image <image>", "prebuilt local image for --runtime docker", "runforge:local")
+src/cli/commands/task-run.ts:23:        const runtime = parseRuntime(opts.runtime as string);
+src/cli/commands/task-run.ts:30:          runtime,
+src/cli/commands/task-run.ts:43:  throw new InvalidArgumentError("--runtime supports only 'local' or 'docker'.");
+src/run/task-run-harness.ts:5:import { createExecutorRequest, DockerShellExecutor, LocalShellExecutor, type ExecutorResult, type TaskRunExecutor } from "./task-run-executor.js";
+src/run/task-run-harness.ts:32:  runtime?: TaskRunRuntime;
+src/run/task-run-harness.ts:77:  runtime: { mode: TaskRunRuntime; executor: "local-shell" | "docker-shell"; image: string | null };
+src/run/task-run-harness.ts:98:  const runtime = input.runtime ?? "local";
+src/run/task-run-harness.ts:99:  const defaultTmpRoot = runtime === "docker" ? join(dirname(repoRoot), ".runforge-task-runs", `${slug(basename(repoRoot))}-${slug(runId)}`) : join("/tmp", `runforge-${slug(runId)}`);
+src/run/task-run-harness.ts:104:  const executor: TaskRunExecutor = runtime === "docker" ? new DockerShellExecutor(repoRoot, dockerImage) : new LocalShellExecutor(repoRoot);
+src/run/task-run-harness.ts:113:  await writeFile(planPath, renderPlan(runId, input.task, tmpRoot, checkCommand, plan, runtime, runtime === "docker" ? dockerImage : undefined), "utf8");
+src/run/task-run-harness.ts:128:      lane: executor.lane
+src/run/task-run-harness.ts:138:  const gaps = remainingGaps(plan.kind, input.task, runtime === "docker");
+src/run/task-run-harness.ts:226:    runtime: {
+src/run/task-run-harness.ts:227:      mode: runtime,
+src/run/task-run-harness.ts:228:      executor: executor.lane,
+src/run/task-run-harness.ts:229:      image: runtime === "docker" ? dockerImage : null
+src/run/task-run-harness.ts:262:    `Runtime: ${result.runtime.mode}${result.runtime.image ? ` (${result.runtime.image})` : ""}`,

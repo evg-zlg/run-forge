@@ -6,6 +6,9 @@ export function ownerConclusion(task: string, kind: TaskKind): string {
     return "The accepted docs task was answered from roadmap/current-state evidence: the owner decision is about documentation consistency, roadmap gaps, and the next docs-safe task-run milestone.";
   }
   if (kind === "code-inspection") {
+    if (asksForDockerRuntime(normalized)) {
+      return "The accepted runtime task was answered from implementation evidence: Docker execution is now an explicit opt-in lane with a read-only workspace mount, disabled network, dropped capabilities, bounded resources, and owner-visible runtime metadata.";
+    }
     if (asksForNonProviderPlanning(normalized)) {
       return "The accepted non-provider code task was answered from harness evidence: the next gap is semantic task-specific planning / owner-decision binding, because planner lanes and owner conclusions must follow the accepted task instead of drifting toward provider work.";
     }
@@ -18,16 +21,24 @@ export function recommendedNextStep(milestone: string): string {
   return `Recommended next milestone: ${milestone}.`;
 }
 
-export function remainingGaps(kind: TaskKind, task = ""): string[] {
+export function remainingGaps(kind: TaskKind, task = "", containerUsed = false): string[] {
   const normalized = task.toLowerCase();
-  const gaps = ["Docker/container isolation is still recorded as a gap; disposable tmp workspace snapshots are used now."];
+  const gaps = containerUsed
+    ? ["Docker isolation is available for evidence commands; runtime selection is not yet available for full coding-agent execution."]
+    : ["Docker/container isolation is available as an opt-in lane; this run used disposable tmp workspace snapshots on the host."];
   if (kind === "docs-review") gaps.push("Docs review is deterministic keyword evidence, not semantic contradiction reasoning.");
-  if (kind === "code-inspection" && asksForNonProviderPlanning(normalized)) {
+  if (kind === "code-inspection" && asksForDockerRuntime(normalized)) {
+    gaps.push("The Docker lane executes deterministic evidence commands; full coding-agent execution remains a separate owner-gated milestone.");
+  } else if (kind === "code-inspection" && asksForNonProviderPlanning(normalized)) {
     gaps.push("Planner lanes, selected milestone, and owner conclusions still need stronger binding to the accepted task.");
   } else if (kind === "code-inspection") {
     gaps.push("Subtask execution uses the local shell executor, not delegated coding/review agents.");
   }
   return gaps;
+}
+
+function asksForDockerRuntime(normalizedTask: string): boolean {
+  return normalizedTask.includes("docker") || normalizedTask.includes("container runtime") || normalizedTask.includes("container isolation");
 }
 
 function asksForNonProviderPlanning(normalizedTask: string): boolean {

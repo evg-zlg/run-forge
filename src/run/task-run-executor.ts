@@ -14,10 +14,17 @@ export type ExecutorRequest = {
   timeoutMs: number;
 };
 
+export type ExecutorLane = "local-shell" | "docker-shell";
+
 export type ExecutorResult = {
   requestId: string;
   subtaskId: string;
-  executor: "local-shell";
+  executor: ExecutorLane;
+  runtime: {
+    isolation: "host-process" | "docker-container";
+    image: string | null;
+    network: "host" | "none";
+  };
   status: "passed" | "failed" | "timed_out";
   exitCode: number | null;
   signal: string | null;
@@ -33,10 +40,13 @@ export type ExecutorResult = {
 };
 
 export type TaskRunExecutor = {
+  lane: ExecutorLane;
   execute(request: ExecutorRequest): Promise<ExecutorResult>;
 };
 
 export class LocalShellExecutor implements TaskRunExecutor {
+  readonly lane = "local-shell" as const;
+
   constructor(private readonly repoRoot: string) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
@@ -75,7 +85,12 @@ export class LocalShellExecutor implements TaskRunExecutor {
     const result: ExecutorResult = {
       requestId: request.id,
       subtaskId: request.subtaskId,
-      executor: "local-shell",
+      executor: this.lane,
+      runtime: {
+        isolation: "host-process",
+        image: null,
+        network: "host"
+      },
       status,
       exitCode,
       signal,
@@ -98,10 +113,134 @@ export class LocalShellExecutor implements TaskRunExecutor {
   }
 }
 
+export class DockerShellExecutor implements TaskRunExecutor {
+  readonly lane = "docker-shell" as const;
+
+  constructor(
+    private readonly repoRoot: string,
+    private readonly image: string
+  ) {}
+
+  async execute(request: ExecutorRequest): Promise<ExecutorResult> {
+    await mkdir(request.artifactDir, { recursive: true });
+
+    const containerName = dockerContainerName(request.id);
+    let stdout = "";
+    let stderr = "";
+    let exitCode: number | null = 0;
+    let signal: string | null = null;
+    let timedOut = false;
+
+    try {
+      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName), {
+        maxBuffer: 1024 * 1024 * 8,
+        timeout: request.timeoutMs
+      });
+      stdout = output.stdout;
+      stderr = output.stderr;
+    } catch (error) {
+      const err = error as { code?: number | string; stdout?: string; stderr?: string; signal?: string; killed?: boolean };
+      stdout = err.stdout ?? "";
+      stderr = err.stderr ?? "";
+      exitCode = typeof err.code === "number" ? err.code : null;
+      signal = err.signal ?? null;
+      timedOut = err.killed === true && signal === "SIGTERM";
+      if (timedOut) await removeContainer(containerName);
+    }
+
+    const status = timedOut ? "timed_out" : exitCode === 0 ? "passed" : "failed";
+    const paths = {
+      commandLog: join(request.artifactDir, "command.log"),
+      stdoutLog: join(request.artifactDir, "stdout.log"),
+      stderrLog: join(request.artifactDir, "stderr.log"),
+      report: join(request.artifactDir, "executor-report.json")
+    };
+    const result: ExecutorResult = {
+      requestId: request.id,
+      subtaskId: request.subtaskId,
+      executor: this.lane,
+      runtime: {
+        isolation: "docker-container",
+        image: this.image,
+        network: "none"
+      },
+      status,
+      exitCode,
+      signal,
+      timedOut,
+      stdout,
+      stderr,
+      artifactPaths: {
+        commandLog: relative(this.repoRoot, paths.commandLog),
+        stdoutLog: relative(this.repoRoot, paths.stdoutLog),
+        stderrLog: relative(this.repoRoot, paths.stderrLog),
+        report: relative(this.repoRoot, paths.report)
+      }
+    };
+
+    await writeFile(paths.stdoutLog, stdout, "utf8");
+    await writeFile(paths.stderrLog, stderr, "utf8");
+    await writeFile(paths.commandLog, renderCommandLog(request, result), "utf8");
+    await writeFile(paths.report, JSON.stringify(toExecutorReport(request, result, this.repoRoot), null, 2) + "\n", "utf8");
+    return result;
+  }
+}
+
+export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string): string[] {
+  return [
+    "run",
+    "--rm",
+    "--pull",
+    "never",
+    "--name",
+    containerName,
+    "--network",
+    "none",
+    "--security-opt",
+    "no-new-privileges",
+    "--cap-drop",
+    "ALL",
+    "--pids-limit",
+    "256",
+    "--memory",
+    "512m",
+    "--cpus",
+    "1",
+    "--read-only",
+    "--tmpfs",
+    "/tmp:rw,noexec,nosuid,size=64m",
+    "--mount",
+    `type=bind,src=${request.cwd},dst=/workspace,readonly`,
+    "--workdir",
+    "/workspace",
+    "--entrypoint",
+    "/bin/sh",
+    image,
+    "-lc",
+    request.command
+  ];
+}
+
+async function removeContainer(name: string): Promise<void> {
+  try {
+    await execFileAsync("docker", ["rm", "-f", name], { timeout: 10_000 });
+  } catch {
+    // Best effort cleanup after the docker client itself timed out.
+  }
+}
+
+function dockerContainerName(requestId: string): string {
+  const safe = requestId.toLowerCase().replace(/[^a-z0-9_.-]+/g, "-").replace(/^-|-$/g, "").slice(0, 48);
+  return `runforge-${safe}-${process.pid}`;
+}
+
 function renderCommandLog(request: ExecutorRequest, result: ExecutorResult): string {
   return [
     `$ ${request.command}`,
     `executor: ${result.executor}`,
+    `isolation: ${result.runtime.isolation}`,
+    `image: ${result.runtime.image ?? "none"}`,
+    `network: ${result.runtime.network}`,
     `requestId: ${result.requestId}`,
     `cwd: ${request.cwd}`,
     `timeoutMs: ${request.timeoutMs}`,
@@ -130,6 +269,7 @@ function toExecutorReport(request: ExecutorRequest, result: ExecutorResult, repo
     },
     result: {
       executor: result.executor,
+      runtime: result.runtime,
       status: result.status,
       exitCode: result.exitCode,
       signal: result.signal,
@@ -148,9 +288,10 @@ export function createExecutorRequest(input: {
   cwd: string;
   artifactDir: string;
   timeoutMs?: number;
+  lane?: ExecutorLane;
 }): ExecutorRequest {
   return {
-    id: `${basename(input.runId)}:${input.subtaskId}:local-shell`,
+    id: `${basename(input.runId)}:${input.subtaskId}:${input.lane ?? "local-shell"}`,
     subtaskId: input.subtaskId,
     command: input.command,
     cwd: input.cwd,
