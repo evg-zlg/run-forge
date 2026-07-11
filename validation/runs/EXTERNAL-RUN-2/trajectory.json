@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "external-task-run-1",
+  "runId": "EXTERNAL-RUN-2",
+  "steps": [
+    {
+      "type": "external_repo_recorded"
+    },
+    {
+      "type": "task_run_planned"
+    },
+    {
+      "type": "docker_executor_dispatched"
+    },
+    {
+      "type": "providerless_review_finished"
+    },
+    {
+      "type": "original_repo_verified"
+    },
+    {
+      "type": "run_finished"
+    }
+  ]
+}

@@ -1,0 +1,77 @@
+{
+  "schemaVersion": "alpha-2.1",
+  "runId": "EXTERNAL-RUN-3-PACKET",
+  "taskType": "external_command_check",
+  "status": "passed",
+  "startedAt": "2026-07-11T10:31:41.561Z",
+  "finishedAt": "2026-07-11T10:31:41.744Z",
+  "durationMs": 183,
+  "cliExitPolicy": "packet",
+  "cliExitCode": 0,
+  "commandPolicy": {
+    "onFailure": "continue",
+    "finalStatusRule": "failed_if_any_command_failed_or_timed_out"
+  },
+  "setupPolicy": {
+    "setupCommandsProvided": false,
+    "networkIntent": "none",
+    "continueAfterSetupFailure": false,
+    "mainCommandsSkippedOnSetupFailure": true
+  },
+  "repo": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "headBefore": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "headAfter": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "statusBefore": "",
+    "statusAfter": "",
+    "baselineDirty": false,
+    "mutationVerdict": "unchanged"
+  },
+  "workspace": {
+    "path": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-T6h54g/factory",
+    "changeSummary": {
+      "method": "filesystem_snapshot",
+      "status": "ok",
+      "fileChanges": {
+        "added": [],
+        "modified": [],
+        "deleted": []
+      },
+      "counts": {
+        "added": 0,
+        "modified": 0,
+        "deleted": 0
+      },
+      "error": null
+    }
+  },
+  "requested": {
+    "setupCommands": 0,
+    "commands": 1
+  },
+  "commands": [
+    {
+      "commandId": "EXTERNAL-RUN-3-PACKET:command:001",
+      "phase": "main",
+      "index": 1,
+      "command": "node -e \"const p=require('./package.json'); if (!p.scripts?.test) process.exit(1); console.log('packet probe passed')\"",
+      "status": "passed",
+      "exitCode": 0,
+      "signal": null,
+      "timedOut": false,
+      "durationMs": 25,
+      "stdoutPath": "logs/command-001.stdout.log",
+      "stderrPath": "logs/command-001.stderr.log",
+      "stdoutBytes": 20,
+      "stderrBytes": 0,
+      "stdoutTruncated": false,
+      "stderrTruncated": false
+    }
+  ],
+  "setupCommands": [],
+  "artifactDir": "/Users/evgeny/Documents/projects/RunForge/validation/runs/EXTERNAL-RUN-3/packet-check/packet",
+  "defaults": {
+    "timeoutMs": 120000,
+    "maxLogBytes": 1000000
+  }
+}

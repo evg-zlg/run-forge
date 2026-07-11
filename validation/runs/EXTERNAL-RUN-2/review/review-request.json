@@ -1,0 +1,176 @@
+{
+  "runId": "EXTERNAL-RUN-2",
+  "acceptedTask": "Run safe external repository triage",
+  "taskKind": "external-validation",
+  "plan": {
+    "kind": "external-validation",
+    "planningBasis": [
+      "An explicit external repository target was supplied.",
+      "Validation runs in disposable writable workspaces through the opt-in Docker executor.",
+      "The original repository is mounted read-only and checked before and after execution."
+    ],
+    "inputs": [
+      "package.json",
+      "package-lock.json",
+      "src",
+      "tests"
+    ],
+    "recommendedNextMilestone": "broaden external task-run package-manager fixtures",
+    "subtasks": [
+      {
+        "id": "01-external-validation",
+        "goal": "Run external validation command: npm run typecheck",
+        "inputs": [
+          "package.json",
+          "src",
+          "tests"
+        ],
+        "evidenceFocus": "External target validation in a disposable Docker workspace.",
+        "evidenceCommand": "npm run typecheck"
+      },
+      {
+        "id": "02-external-validation",
+        "goal": "Run external validation command: npm test",
+        "inputs": [
+          "package.json",
+          "src",
+          "tests"
+        ],
+        "evidenceFocus": "External target validation in a disposable Docker workspace.",
+        "evidenceCommand": "npm test"
+      },
+      {
+        "id": "03-external-validation",
+        "goal": "Run external validation command: npm run build",
+        "inputs": [
+          "package.json",
+          "src",
+          "tests"
+        ],
+        "evidenceFocus": "External target validation in a disposable Docker workspace.",
+        "evidenceCommand": "npm run build"
+      }
+    ]
+  },
+  "subtaskReports": [
+    {
+      "id": "01-external-validation",
+      "goal": "Run external validation command: npm run typecheck",
+      "reportPath": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/report.md",
+      "findings": [
+        "External target validation in a disposable Docker workspace. Evidence command passed with exit code 0.",
+        "01-external-validation inspected 3 input(s) and captured 8 stdout line(s). Sample: RUNFORGE_SOURCE_BEFORE_HEAD | d65ab9a9c8130f5d2c9214e8fdde2a278578afed | RUNFORGE_SOURCE_BEFORE_STATUS"
+      ],
+      "status": "done"
+    },
+    {
+      "id": "02-external-validation",
+      "goal": "Run external validation command: npm test",
+      "reportPath": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/report.md",
+      "findings": [
+        "External target validation in a disposable Docker workspace. Evidence command failed with exit code 1.",
+        "02-external-validation inspected 3 input(s) and captured 8 stdout line(s). Sample: RUNFORGE_SOURCE_BEFORE_HEAD | d65ab9a9c8130f5d2c9214e8fdde2a278578afed | RUNFORGE_SOURCE_BEFORE_STATUS"
+      ],
+      "status": "done"
+    },
+    {
+      "id": "03-external-validation",
+      "goal": "Run external validation command: npm run build",
+      "reportPath": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/report.md",
+      "findings": [
+        "External target validation in a disposable Docker workspace. Evidence command passed with exit code 0.",
+        "03-external-validation inspected 3 input(s) and captured 8 stdout line(s). Sample: RUNFORGE_SOURCE_BEFORE_HEAD | d65ab9a9c8130f5d2c9214e8fdde2a278578afed | RUNFORGE_SOURCE_BEFORE_STATUS"
+      ],
+      "status": "done"
+    }
+  ],
+  "executorResults": [
+    {
+      "subtaskId": "01-external-validation",
+      "requestId": "EXTERNAL-RUN-2:01-external-validation:docker-shell",
+      "executor": "docker-shell",
+      "status": "passed",
+      "exitCode": 0,
+      "timedOut": false
+    },
+    {
+      "subtaskId": "02-external-validation",
+      "requestId": "EXTERNAL-RUN-2:02-external-validation:docker-shell",
+      "executor": "docker-shell",
+      "status": "failed",
+      "exitCode": 1,
+      "timedOut": false
+    },
+    {
+      "subtaskId": "03-external-validation",
+      "requestId": "EXTERNAL-RUN-2:03-external-validation:docker-shell",
+      "executor": "docker-shell",
+      "status": "passed",
+      "exitCode": 0,
+      "timedOut": false
+    }
+  ],
+  "commandStatuses": [
+    {
+      "subtaskId": "01-external-validation",
+      "command": "npm run typecheck",
+      "status": "passed",
+      "exitCode": 0
+    },
+    {
+      "subtaskId": "02-external-validation",
+      "command": "npm test",
+      "status": "failed",
+      "exitCode": 1
+    },
+    {
+      "subtaskId": "03-external-validation",
+      "command": "npm run build",
+      "status": "passed",
+      "exitCode": 0
+    }
+  ],
+  "logPaths": [
+    {
+      "subtaskId": "01-external-validation",
+      "commandLog": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/command.log",
+      "stdoutLog": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stdout.log",
+      "stderrLog": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stderr.log",
+      "executorReport": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/executor-report.json"
+    },
+    {
+      "subtaskId": "02-external-validation",
+      "commandLog": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/command.log",
+      "stdoutLog": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stdout.log",
+      "stderrLog": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stderr.log",
+      "executorReport": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/executor-report.json"
+    },
+    {
+      "subtaskId": "03-external-validation",
+      "commandLog": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/command.log",
+      "stdoutLog": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/stdout.log",
+      "stderrLog": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/stderr.log",
+      "executorReport": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/executor-report.json"
+    }
+  ],
+  "checks": [
+    {
+      "command": "npm run typecheck",
+      "result": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "npm test",
+      "result": "failed",
+      "exitCode": 1
+    },
+    {
+      "command": "npm run build",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "gaps": [
+    "Offline validation reuses an existing target node_modules snapshot when present; platform-specific optional packages may require a separately prepared Linux dependency cache."
+  ]
+}

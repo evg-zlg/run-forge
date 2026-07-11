@@ -1,6 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { validateOperatorDecisionRecord } from "./operator-decision-summary.js";
+import { validatePacketManifest } from "./packet-manifest-validator.js";
 
 export interface PacketValidationResult {
   checked: boolean;
@@ -64,6 +65,19 @@ const requiredByTaskType: Record<string, string[]> = {
     "verification-results.json",
     "before-command-results.json",
     "after-command-results.json"
+  ],
+  task_run_external: [
+    "summary.md",
+    "results.json",
+    "external-triage-report.md",
+    "execution-log.md",
+    "environment.json",
+    "run.json",
+    "events.jsonl",
+    "metrics.json",
+    "safety-report.json",
+    "trajectory.json",
+    "packet-manifest.json"
   ]
 };
 
@@ -93,7 +107,8 @@ const statusEnums: Record<string, Set<string>> = {
     "blocked_by_safety",
     "provider_rejected",
     "provider_failed"
-  ])
+  ]),
+  task_run_external: new Set(["passed", "deterministic failure", "environment/setup issue", "unsafe/not runnable", "needs owner approval"])
 };
 
 export async function validatePacket(packet: string): Promise<PacketValidationResult> {
@@ -131,7 +146,7 @@ export async function validatePacket(packet: string): Promise<PacketValidationRe
 
   const manifest = await readRequiredJson(join(packetDir, "packet-manifest.json"), "packet-manifest.json", errors);
   if (!Array.isArray(manifest?.artifacts)) errors.push("packet-manifest.json missing artifacts");
-  await validateManifest(packetDir, manifest, errors);
+  await validatePacketManifest(packetDir, manifest, errors);
 
   const events = await readEvents(join(packetDir, "events.jsonl"), errors);
   if (events.length === 0) errors.push("events.jsonl has no events");
@@ -297,24 +312,6 @@ function validateSetupPolicy(value: unknown, label: string, errors: string[]): v
 
 function isSetupNetworkIntent(value: unknown): boolean {
   return value === "none" || value === "expected" || value === "unknown";
-}
-
-async function validateManifest(packetDir: string, manifest: JsonObject | null, errors: string[]): Promise<void> {
-  if (!Array.isArray(manifest?.artifacts)) return;
-  for (const [index, artifact] of manifest.artifacts.entries()) {
-    if (!artifact || typeof artifact !== "object" || Array.isArray(artifact)) {
-      errors.push(`packet-manifest.json artifacts[${index}] must be an object`);
-      continue;
-    }
-    const record = artifact as JsonObject;
-    if (typeof record.path !== "string" || record.path.length === 0) {
-      errors.push(`packet-manifest.json artifacts[${index}] missing path`);
-      continue;
-    }
-    if (record.type !== undefined && typeof record.type !== "string") errors.push(`packet-manifest.json artifacts[${index}] type must be a string`);
-    if (typeof record.sizeBytes !== "number" || !Number.isFinite(record.sizeBytes)) errors.push(`packet-manifest.json artifacts[${index}] sizeBytes must be a finite number`);
-    await requireArtifact(packetDir, record.path, errors);
-  }
 }
 
 function validateEvents(events: JsonObject[], errors: string[]): void {

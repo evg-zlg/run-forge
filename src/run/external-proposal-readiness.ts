@@ -6,7 +6,7 @@ import { createRunId } from "../core/trajectory.js";
 import { runExternalFailureTriage } from "./external-failure-triage.js";
 import type { FailureTriageCategory, FailureTriageConfidence } from "./external-failure-triage-types.js";
 import type { SetupNetworkIntent, SetupPolicy } from "./external-command-check-types.js";
-import { artifactTypeFor, writePacketManifest, type ArtifactRecord } from "./external-command-check-packet.js";
+import { artifactTypeFor, finalizePacketManifest, type ArtifactRecord } from "./external-command-check-packet.js";
 import {
   decideReadiness,
   type ProposalReadinessOutcome,
@@ -192,10 +192,7 @@ export async function runExternalProposalReadiness(options: ExternalProposalRead
   await markArtifact("trajectory.json");
   emit("run_finished", { status: decision.readinessOutcome, canAttemptCodeProposal: decision.canAttemptCodeProposal });
   await writeFile(join(packetDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
-  await markArtifact("events.jsonl");
-  await writePacketManifest(packetDir, artifacts);
-  await markArtifact("packet-manifest.json");
-  await writeFile(join(packetDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+  await finalizePacketManifest(packetDir, externalProposalReadinessSchemaVersion);
 
   return {
     runId,

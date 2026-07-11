@@ -52,6 +52,13 @@ describe("Alpha-6 packet validation", () => {
     wrongTypeRun.durationMs = "soon";
     await writeFile(join(wrongType, "run.json"), JSON.stringify(wrongTypeRun, null, 2), "utf8");
     await expect(validatePacket(wrongType)).resolves.toMatchObject({ passed: false, errors: expect.arrayContaining(["run.json durationMs must be a finite number"]) });
+
+    const staleEvents = await copyPacket(packetDir);
+    await writeFile(join(staleEvents, "events.jsonl"), `${await readFile(join(staleEvents, "events.jsonl"), "utf8")}{"type":"late-write"}\n`, "utf8");
+    await expect(validatePacket(staleEvents)).resolves.toMatchObject({
+      passed: false,
+      errors: expect.arrayContaining(["events.jsonl hash mismatch"])
+    });
   });
 });
 

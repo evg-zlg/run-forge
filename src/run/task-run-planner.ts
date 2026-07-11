@@ -33,6 +33,27 @@ export function planTaskRun(task: string): TaskRunPlan {
   return generalPlan(task);
 }
 
+export function planExternalValidationTaskRun(task: string, lockfile: string, commands: string[] = []): TaskRunPlan {
+  const runner = lockfile === "pnpm-lock.yaml" ? "corepack pnpm" : lockfile === "yarn.lock" ? "corepack yarn" : "npm";
+  const selectedCommands = commands.length > 0 ? commands : [`${runner} run typecheck`, `${runner} test`, `${runner} run build`];
+  return {
+    kind: "code-inspection",
+    planningBasis: [
+      "Task targets an explicitly declared external JavaScript/TypeScript repository.",
+      "Validation commands run sequentially in a prepared disposable Linux workspace with runtime network disabled."
+    ],
+    inputs: ["package.json", lockfile, "tsconfig.json", "src", "tests"],
+    recommendedNextMilestone: "safe disposable repair execution",
+    subtasks: selectedCommands.map((command, index) => ({
+      id: `${String(index + 1).padStart(2, "0")}-external-validation`,
+      goal: `Run external validation command ${index + 1}.`,
+      inputs: ["package.json", lockfile, "src", "tests"],
+      evidenceFocus: "External repository validation result.",
+      evidenceCommand: command
+    }))
+  };
+}
+
 function classifyTask(task: string): TaskKind {
   const normalized = task.toLowerCase();
   const docsScore = score(normalized, ["doc", "roadmap", "contradiction", "milestone", "non-goal", "current state"]);

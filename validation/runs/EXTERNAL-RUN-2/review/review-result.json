@@ -1,0 +1,59 @@
+{
+  "reviewer": "deterministic-evidence-reviewer",
+  "provider": "providerless",
+  "status": "blocked",
+  "confidence": "low",
+  "findings": [
+    {
+      "severity": "info",
+      "message": "Reviewed 3 subtask report(s), 3 command status record(s), and 3 owner check(s).",
+      "evidenceReferences": [
+        "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/report.md",
+        "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/report.md",
+        "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/report.md",
+        "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/command.log",
+        "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stdout.log",
+        "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stderr.log"
+      ]
+    },
+    {
+      "severity": "error",
+      "message": "1 subtask evidence command(s) did not pass.",
+      "evidenceReferences": [
+        "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/command.log",
+        "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stdout.log",
+        "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stderr.log",
+        "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/executor-report.json"
+      ]
+    },
+    {
+      "severity": "warning",
+      "message": "1 owner check(s) failed.",
+      "evidenceReferences": [
+        "npm test"
+      ]
+    }
+  ],
+  "risks": [
+    "Offline validation reuses an existing target node_modules snapshot when present; platform-specific optional packages may require a separately prepared Linux dependency cache."
+  ],
+  "recommendedNextAction": "Owner should inspect failed command/check evidence before treating this run as complete.",
+  "evidenceReferences": [
+    "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/report.md",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/report.md",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/report.md",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/command.log",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stdout.log",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stderr.log",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/executor-report.json",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/command.log",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stdout.log",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stderr.log",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/executor-report.json",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/command.log",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/stdout.log",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/stderr.log",
+    "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/executor-report.json"
+  ],
+  "humanDecisionRequired": true
+}

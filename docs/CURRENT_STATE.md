@@ -30,6 +30,9 @@ task
 - Planner/subtask artifacts, disposable workspace snapshots, executor logs, review artifacts, summary, and results.
 - Local shell executor dispatch plus an opt-in Docker lane for deterministic evidence commands, with per-subtask command logs and executor reports.
 - Docker task-run isolation uses a prebuilt local image, `--pull never`, disabled network, read-only workspace mounts, dropped capabilities, bounded resources, and owner-visible runtime metadata.
+- External Docker task-runs support two explicit dependency modes: `--prepare-runtime none` preserves simple EXTERNAL-RUN-2 triage with the source mounted read-only, while `--prepare-runtime explicit` creates a Linux-compatible disposable dependency workspace before execution.
+- Explicit preparation records its network use, lockfile hash, package manager, image identity, target platform, timestamps, and command log. The subsequent task execution remains network-disabled.
+- External task-runs reject output/tmp/workspace paths inside the source repository and treat any before/after source mutation as a blocking safety failure.
 - Deterministic evidence review as the default offline lane.
 - First governor loop that can select and run the next local providerless task-run without per-step owner approval.
 - MVP failure triage and deterministic classification.
@@ -111,4 +114,4 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 
 ## Immediate Constraint
 
-Do not continue Alpha-28. TASK-RUN-7 completed the Docker-isolated evidence-command lane. The next useful contour is one real external-repository check/triage task run through that runtime; stop for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, full coding-agent runtime expansion, or another strategic fork.
+Do not continue Alpha-28. EXTERNAL-RUN-2 proved simple external-repository Docker triage, and EXTERNAL-RUN-3 is implemented and remains draft/in review in PR #47 until merged. After merge, the next large milestone is safe disposable repair execution; stop before applying anything to the original repo and continue to stop for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, full coding-agent runtime expansion, or another strategic fork.

@@ -1,0 +1,60 @@
+{
+  "schemaVersion": "alpha-2.1",
+  "runId": "EXTERNAL-RUN-3-PACKET",
+  "durationMs": 183,
+  "setupCommandsRequested": 0,
+  "setupCommandsRun": 0,
+  "setupCommandsPassed": 0,
+  "setupCommandsFailed": 0,
+  "setupCommandsTimedOut": 0,
+  "setupDurationMs": 0,
+  "setupPolicy": {
+    "setupCommandsProvided": false,
+    "networkIntent": "none",
+    "continueAfterSetupFailure": false,
+    "mainCommandsSkippedOnSetupFailure": true
+  },
+  "setupNetworkIntent": "none",
+  "continueAfterSetupFailure": false,
+  "mainCommandsSkippedOnSetupFailure": true,
+  "commandsRequested": 1,
+  "commandsRun": 1,
+  "commandsPassed": 1,
+  "commandsFailed": 0,
+  "commandsTimedOut": 0,
+  "stdoutBytes": 20,
+  "stderrBytes": 0,
+  "stdoutTruncations": 0,
+  "stderrTruncations": 0,
+  "workspaceChanges": {
+    "added": 0,
+    "modified": 0,
+    "deleted": 0
+  },
+  "originalRepoBaselineDirty": false,
+  "originalRepoMutationVerdict": "unchanged",
+  "originalRepoMutationVerdictConfidence": "high",
+  "originalRepoMutationVerdictEvidence": "git head and status were compared before and after the disposable workspace run",
+  "commandDurationMs": {
+    "min": 25,
+    "max": 25,
+    "total": 25
+  },
+  "commands": [
+    {
+      "commandId": "EXTERNAL-RUN-3-PACKET:command:001",
+      "phase": "main",
+      "index": 1,
+      "status": "passed",
+      "exitCode": 0,
+      "timedOut": false,
+      "durationMs": 25,
+      "stdoutBytes": 20,
+      "stderrBytes": 0,
+      "stdoutTruncated": false,
+      "stderrTruncated": false
+    }
+  ],
+  "finalStatus": "passed",
+  "humanGateRequired": true
+}

@@ -1,0 +1,43 @@
+{
+  "schemaVersion": "alpha-2.1",
+  "runId": "EXTERNAL-RUN-3-PACKET",
+  "taskType": "external_command_check",
+  "setupPolicy": {
+    "setupCommandsProvided": false,
+    "networkIntent": "none",
+    "continueAfterSetupFailure": false,
+    "mainCommandsSkippedOnSetupFailure": true
+  },
+  "commandPolicy": {
+    "onFailure": "continue",
+    "finalStatusRule": "failed_if_any_command_failed_or_timed_out"
+  },
+  "steps": [
+    {
+      "type": "route_selected",
+      "route": "external_command_check"
+    },
+    {
+      "type": "workspace_prepared",
+      "status": "finished"
+    },
+    {
+      "type": "setup",
+      "status": "skipped",
+      "commands": 0
+    },
+    {
+      "type": "worker",
+      "worker": "command_runner",
+      "status": "finished"
+    },
+    {
+      "type": "safety_check",
+      "status": "finished"
+    },
+    {
+      "type": "summary",
+      "status": "written"
+    }
+  ]
+}

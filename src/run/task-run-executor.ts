@@ -118,7 +118,9 @@ export class DockerShellExecutor implements TaskRunExecutor {
 
   constructor(
     private readonly repoRoot: string,
-    private readonly image: string
+    private readonly image: string,
+    private readonly writableWorkspace = false,
+    private readonly readonlySource?: string
   ) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
@@ -132,7 +134,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
     let timedOut = false;
 
     try {
-      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName), {
+      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace, this.readonlySource), {
         maxBuffer: 1024 * 1024 * 8,
         timeout: request.timeoutMs
       });
@@ -186,7 +188,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
   }
 }
 
-export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string): string[] {
+export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false, readonlySource?: string): string[] {
   return [
     "run",
     "--rm",
@@ -201,16 +203,24 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "--cap-drop",
     "ALL",
     "--pids-limit",
-    "256",
+    "512",
     "--memory",
-    "512m",
+    "2g",
     "--cpus",
-    "1",
+    "2",
     "--read-only",
     "--tmpfs",
-    "/tmp:rw,noexec,nosuid,size=64m",
+    "/tmp:rw,nosuid,size=256m",
+    "--env",
+    "HOME=/tmp",
+    "--env",
+    "npm_config_cache=/tmp/npm-cache",
+    "--env",
+    "TMPDIR=/runforge-tmp",
     "--mount",
-    `type=bind,src=${request.cwd},dst=/workspace,readonly`,
+    `type=bind,src=${request.cwd},dst=/workspace${writableWorkspace ? "" : ",readonly"}`,
+    ...(writableWorkspace ? ["--mount", `type=bind,src=${request.cwd}/.runforge-tmp,dst=/runforge-tmp`] : []),
+    ...(readonlySource ? ["--mount", `type=bind,src=${readonlySource},dst=/source,readonly`] : []),
     "--workdir",
     "/workspace",
     "--entrypoint",

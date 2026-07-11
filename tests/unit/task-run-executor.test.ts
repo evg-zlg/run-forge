@@ -36,6 +36,42 @@ describe("DockerShellExecutor policy", () => {
     ]));
     expect(args.find((item) => item.startsWith("type=bind"))).toContain("readonly");
   });
+
+  it("allows writes only when the caller declares a disposable prepared workspace", async () => {
+    const root = await tempRoot();
+    const request = createExecutorRequest({
+      runId: "EXTERNAL-RUN-3",
+      subtaskId: "03-build",
+      command: "npm run build",
+      cwd: root,
+      artifactDir: join(root, "subtasks", "03-build"),
+      lane: "docker-shell"
+    });
+
+    const args = dockerRunArgs(request, "runforge:local", "runforge-test", true);
+
+    expect(args).toEqual(expect.arrayContaining(["--network", "none", "--read-only", "--memory", "2g", "HOME=/tmp", "TMPDIR=/runforge-tmp"]));
+    expect(args).toContain(`type=bind,src=${root}/.runforge-tmp,dst=/runforge-tmp`);
+    expect(args.join(" ")).not.toContain("noexec");
+    expect(args.find((item) => item.startsWith("type=bind"))).not.toContain("readonly");
+  });
+
+  it("preserves no-preparation triage with a read-only source mount", async () => {
+    const root = await tempRoot();
+    const request = createExecutorRequest({
+      runId: "EXTERNAL-RUN-2",
+      subtaskId: "01-external-validation",
+      command: "node --version",
+      cwd: root,
+      artifactDir: join(root, "subtasks", "01-external-validation"),
+      lane: "docker-shell"
+    });
+
+    const args = dockerRunArgs(request, "runforge:local", "runforge-test", true, "/external/source");
+
+    expect(args).toContain("type=bind,src=/external/source,dst=/source,readonly");
+    expect(args).toEqual(expect.arrayContaining(["--network", "none"]));
+  });
 });
 
 describe("LocalShellExecutor", () => {

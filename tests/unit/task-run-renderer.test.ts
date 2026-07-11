@@ -13,7 +13,7 @@ import {
   MockDelegatedEvidenceReviewer,
   writeProviderInputPackage
 } from "../../src/run/task-run-reviewer.js";
-import { renderSummary, validateSummaryFreshness } from "../../src/run/task-run-renderer.js";
+import { renderSummary, toJsonResult, validateSummaryFreshness } from "../../src/run/task-run-renderer.js";
 
 describe("task-run summary renderer", () => {
   it("renders and validates the current task-run command instead of copied stale wording", () => {
@@ -51,6 +51,24 @@ describe("task-run summary renderer", () => {
     expect(() => validateSummaryFreshness(result, "# TASK-RUN-100 Summary\n\nCurrent task text\n")).toThrow(
       "current task-run command"
     );
+  });
+
+  it("exposes source mutation as a blocking safety failure in summary and results", () => {
+    const result = taskRunResult({ runId: "EXTERNAL-SAFETY", task: "Validate external source", outDir: "validation/runs/EXTERNAL-SAFETY" });
+    result.status = "failed";
+    result.sourceRepository = {
+      external: true,
+      before: { path: "/repo", head: "before", status: "" },
+      after: { path: "/repo", head: "after", status: " M source.ts" },
+      unchanged: false
+    };
+    result.safety = { sourceMutationDetected: true, blockingFailures: ["Blocking safety failure: external source mutation detected."] };
+
+    expect(renderSummary(result)).toContain("Source mutation detected: yes");
+    expect(toJsonResult(result)).toMatchObject({
+      status: "failed",
+      safety: { sourceMutationDetected: true, blockingFailures: ["Blocking safety failure: external source mutation detected."] }
+    });
   });
 });
 
@@ -288,6 +306,18 @@ function taskRunResult(input: { runId: string; task: string; outDir: string }): 
       mode: "local",
       executor: "local-shell",
       image: null
+    },
+    sourceRepository: {
+      external: false,
+      before: null,
+      after: null,
+      unchanged: null
+    },
+    preparationMode: "none",
+    preparation: null,
+    safety: {
+      sourceMutationDetected: false,
+      blockingFailures: []
     },
     plan: `${input.outDir}/plan.md`,
     summary: `${input.outDir}/summary.md`,

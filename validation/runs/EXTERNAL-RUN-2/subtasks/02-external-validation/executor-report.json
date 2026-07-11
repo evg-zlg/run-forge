@@ -1,0 +1,25 @@
+{
+  "request": {
+    "id": "EXTERNAL-RUN-2:02-external-validation:docker-shell",
+    "subtaskId": "02-external-validation",
+    "command": "npm test",
+    "cwd": "/Users/evgeny/Documents/projects/RunForge-worktrees/.runforge-task-runs/factory-external-run-2/02-external-validation/workspace",
+    "artifactDir": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation",
+    "timeoutMs": 300000
+  },
+  "result": {
+    "executor": "docker-shell",
+    "runtime": {
+      "isolation": "docker-container",
+      "image": "runforge:local",
+      "network": "none"
+    },
+    "status": "failed",
+    "exitCode": 1,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stdout.log",
+    "stderrLog": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stderr.log",
+    "commandLog": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/command.log"
+  }
+}

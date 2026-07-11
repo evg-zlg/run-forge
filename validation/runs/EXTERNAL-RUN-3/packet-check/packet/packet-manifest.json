@@ -1,0 +1,75 @@
+{
+  "schemaVersion": "alpha-2.1",
+  "artifacts": [
+    {
+      "path": "command-results.json",
+      "type": "json",
+      "sizeBytes": 990,
+      "hash": "fee95be82cbe389054b50305a40ea13c7998161b4e67adb619ac42abc2376465",
+      "createdAt": "2026-07-11T10:31:41.746Z"
+    },
+    {
+      "path": "events.jsonl",
+      "type": "jsonl",
+      "sizeBytes": 7513,
+      "hash": "cb08e5db9b4ed33f2c80f4bcad594515ba3a055af1fc8c66fccaaf8a2ebc97e7",
+      "createdAt": "2026-07-11T10:31:41.748Z"
+    },
+    {
+      "path": "logs/command-001.stderr.log",
+      "type": "log",
+      "sizeBytes": 0,
+      "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "createdAt": "2026-07-11T10:31:41.674Z"
+    },
+    {
+      "path": "logs/command-001.stdout.log",
+      "type": "log",
+      "sizeBytes": 20,
+      "hash": "206718e9d99f87e75a48c830c2da2157df11e07e7cc7155295189ddd9809c662",
+      "createdAt": "2026-07-11T10:31:41.697Z"
+    },
+    {
+      "path": "metrics.json",
+      "type": "json",
+      "sizeBytes": 1568,
+      "hash": "1ebbdb822a72836c9d9b9b9ae4e4b65120fd16f1b288de29453b0d3958d55b87",
+      "createdAt": "2026-07-11T10:31:41.747Z"
+    },
+    {
+      "path": "run.json",
+      "type": "json",
+      "sizeBytes": 2189,
+      "hash": "a59b0d454f7aca96b70231ea9d259ab0e13ddc2579877b06b981bbbf427fe971",
+      "createdAt": "2026-07-11T10:31:41.747Z"
+    },
+    {
+      "path": "safety-report.json",
+      "type": "json",
+      "sizeBytes": 1781,
+      "hash": "d5c485f682e2d61c4451c3119774f1b16487d7bd797004290a77e82b300074d3",
+      "createdAt": "2026-07-11T10:31:41.746Z"
+    },
+    {
+      "path": "setup-results.json",
+      "type": "json",
+      "sizeBytes": 89,
+      "hash": "58447465a10112f73f0fe49c02413355576952718d931a6fd3d907d3d74c4551",
+      "createdAt": "2026-07-11T10:31:41.746Z"
+    },
+    {
+      "path": "summary.md",
+      "type": "summary",
+      "sizeBytes": 1705,
+      "hash": "16470b79784096b07b2ee748879a04200a324edbd15ef350015ffd6378302e01",
+      "createdAt": "2026-07-11T10:31:41.748Z"
+    },
+    {
+      "path": "trajectory.json",
+      "type": "json",
+      "sizeBytes": 901,
+      "hash": "b2ac127df739d2866a363268121617b21eb9ac04c7872748af53a7d17d608ece",
+      "createdAt": "2026-07-11T10:31:41.747Z"
+    }
+  ]
+}

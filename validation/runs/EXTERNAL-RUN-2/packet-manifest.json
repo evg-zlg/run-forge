@@ -1,0 +1,229 @@
+{
+  "schemaVersion": "external-task-run-1",
+  "artifacts": [
+    {
+      "path": "environment.json",
+      "type": "json",
+      "sizeBytes": 476,
+      "hash": "905de765cc2929e9b5075e214e3b42aa14ce733c074df03e805c02d447da291c",
+      "createdAt": "2026-07-11T06:11:31.089Z"
+    },
+    {
+      "path": "events.jsonl",
+      "type": "jsonl",
+      "sizeBytes": 1142,
+      "hash": "4fbd9cd4c243d56634dbbb18b7180fa2ab806d200bb4546234e79ddfffa16b2f",
+      "createdAt": "2026-07-11T06:11:31.090Z"
+    },
+    {
+      "path": "execution-log.md",
+      "type": "summary",
+      "sizeBytes": 537,
+      "hash": "455ffc44059ea86687c4fdfd0a8c5f38ceeeafaf7b040f822c2eda6da687e94e",
+      "createdAt": "2026-07-11T06:11:31.089Z"
+    },
+    {
+      "path": "external-triage-report.md",
+      "type": "summary",
+      "sizeBytes": 799,
+      "hash": "7959d53eb7286cd50f6e625eedbc3313aa124d2c3a832bf83d8bc89b25d1d604",
+      "createdAt": "2026-07-11T06:11:31.089Z"
+    },
+    {
+      "path": "metrics.json",
+      "type": "json",
+      "sizeBytes": 110,
+      "hash": "92b52ea5821b673750937c1ad7674435b9bd513dcf9485dadb0ddf5363934c05",
+      "createdAt": "2026-07-11T06:11:31.090Z"
+    },
+    {
+      "path": "plan.md",
+      "type": "summary",
+      "sizeBytes": 1657,
+      "hash": "d6d1284e5ebb6a2304f99b0b89d3989397ece854991bf4ce4a2fac82882826da",
+      "createdAt": "2026-07-11T06:11:21.842Z"
+    },
+    {
+      "path": "results.json",
+      "type": "json",
+      "sizeBytes": 12440,
+      "hash": "0d0049c4301080592ccbb28245fe6a91e0c67fb9f83084c82c41ef29cb5650f4",
+      "createdAt": "2026-07-11T06:11:31.088Z"
+    },
+    {
+      "path": "review/review-request.json",
+      "type": "json",
+      "sizeBytes": 6512,
+      "hash": "5eacb51b63bcefb768d05be84b1273ae24cecacdd3ececf2c8d5047b6da85586",
+      "createdAt": "2026-07-11T06:11:31.062Z"
+    },
+    {
+      "path": "review/review-result.json",
+      "type": "json",
+      "sizeBytes": 3094,
+      "hash": "1de323609303040cb3d9ed051e3776fcda250985e061d5ea8ace136aaa29b9b9",
+      "createdAt": "2026-07-11T06:11:31.063Z"
+    },
+    {
+      "path": "review/review.md",
+      "type": "summary",
+      "sizeBytes": 3027,
+      "hash": "3bdf1917996fb0aae3e6f2e3aff343ee68ead374e51b13ad3c4776e4e28b51b3",
+      "createdAt": "2026-07-11T06:11:31.063Z"
+    },
+    {
+      "path": "run.json",
+      "type": "json",
+      "sizeBytes": 457,
+      "hash": "4f019bc2f00b7bd99d8d9f2b44fdd4a5ac2152db941f9d04d059be62772c43af",
+      "createdAt": "2026-07-11T06:11:31.089Z"
+    },
+    {
+      "path": "safety-report.json",
+      "type": "json",
+      "sizeBytes": 332,
+      "hash": "9eaacf100988bb09c7f9704592a047fb4f8970eed0e2468852df3527379f6fb6",
+      "createdAt": "2026-07-11T06:11:31.090Z"
+    },
+    {
+      "path": "subtasks/01-external-validation/brief.md",
+      "type": "summary",
+      "sizeBytes": 426,
+      "hash": "46b13365a3dd04227f14558014065b175d8185ba6228e72ab29c1a136f05a6b6",
+      "createdAt": "2026-07-11T06:11:21.917Z"
+    },
+    {
+      "path": "subtasks/01-external-validation/command.log",
+      "type": "log",
+      "sizeBytes": 651,
+      "hash": "dfac21dbab5e7434b135a83aa4933cf55f0d4f23659cc5e48788e335f6bc8b43",
+      "createdAt": "2026-07-11T06:11:26.242Z"
+    },
+    {
+      "path": "subtasks/01-external-validation/executor-report.json",
+      "type": "json",
+      "sizeBytes": 957,
+      "hash": "ac67ba60da1156111e1c933dc87872e090b76161c77178a39cbfdf969c62189c",
+      "createdAt": "2026-07-11T06:11:26.242Z"
+    },
+    {
+      "path": "subtasks/01-external-validation/report.md",
+      "type": "summary",
+      "sizeBytes": 1298,
+      "hash": "8787d325113ef8d82acd0d3e4b10a07aa09d8b03483254ad7eeb6c05abf1bd3d",
+      "createdAt": "2026-07-11T06:11:26.242Z"
+    },
+    {
+      "path": "subtasks/01-external-validation/stderr.log",
+      "type": "log",
+      "sizeBytes": 0,
+      "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "createdAt": "2026-07-11T06:11:26.241Z"
+    },
+    {
+      "path": "subtasks/01-external-validation/stdout.log",
+      "type": "log",
+      "sizeBytes": 261,
+      "hash": "907af6e673aeeccde52241811bebd4c8cbd7549234f53c0eeb27184f390e321f",
+      "createdAt": "2026-07-11T06:11:26.241Z"
+    },
+    {
+      "path": "subtasks/02-external-validation/brief.md",
+      "type": "summary",
+      "sizeBytes": 408,
+      "hash": "43a038d466a643057470a9076b670b3540ffd052410bfba7684b2292df6d0198",
+      "createdAt": "2026-07-11T06:11:26.329Z"
+    },
+    {
+      "path": "subtasks/02-external-validation/command.log",
+      "type": "log",
+      "sizeBytes": 2567,
+      "hash": "80fbcc4d552fe43b63ce5e418e4f58a63a8795b05b9e4025bcf811661f97cec3",
+      "createdAt": "2026-07-11T06:11:26.959Z"
+    },
+    {
+      "path": "subtasks/02-external-validation/executor-report.json",
+      "type": "json",
+      "sizeBytes": 948,
+      "hash": "a313cfc490f92ef895514ad7539403b6b4157f4368afa0faa119a26900b39d11",
+      "createdAt": "2026-07-11T06:11:26.959Z"
+    },
+    {
+      "path": "subtasks/02-external-validation/report.md",
+      "type": "summary",
+      "sizeBytes": 1280,
+      "hash": "fd159e979aea71017693164372e6987131c9cd943b39d145637a53f04ad508f5",
+      "createdAt": "2026-07-11T06:11:26.959Z"
+    },
+    {
+      "path": "subtasks/02-external-validation/stderr.log",
+      "type": "log",
+      "sizeBytes": 1958,
+      "hash": "892059139656e62483682cb1dfd87f2616515a17d109bcdd0071915ddabc0f6d",
+      "createdAt": "2026-07-11T06:11:26.959Z"
+    },
+    {
+      "path": "subtasks/02-external-validation/stdout.log",
+      "type": "log",
+      "sizeBytes": 237,
+      "hash": "9c6407ee6b14d8b0beed4519e747c2b1ecbb6e8f59bfc20d30bbef65e90edb83",
+      "createdAt": "2026-07-11T06:11:26.958Z"
+    },
+    {
+      "path": "subtasks/03-external-validation/brief.md",
+      "type": "summary",
+      "sizeBytes": 418,
+      "hash": "56151385cd2c41137af799ba9dcef13d4f5cce65b140a54c8065331cb02fc5dd",
+      "createdAt": "2026-07-11T06:11:27.048Z"
+    },
+    {
+      "path": "subtasks/03-external-validation/command.log",
+      "type": "log",
+      "sizeBytes": 733,
+      "hash": "55b66676f717b9f879a84d196ef5a53d412ee0b954b3f64a6b492782fe9baccf",
+      "createdAt": "2026-07-11T06:11:31.061Z"
+    },
+    {
+      "path": "subtasks/03-external-validation/executor-report.json",
+      "type": "json",
+      "sizeBytes": 953,
+      "hash": "0d03a207b8b3e70639ebdbe9f4e74c660f1f5cf41b88a49adf19b863199f3fb3",
+      "createdAt": "2026-07-11T06:11:31.061Z"
+    },
+    {
+      "path": "subtasks/03-external-validation/report.md",
+      "type": "summary",
+      "sizeBytes": 1290,
+      "hash": "0c55f23618e897e13124c86d1fb26b6f091b4622d67ce21c26005ad3114280f2",
+      "createdAt": "2026-07-11T06:11:31.061Z"
+    },
+    {
+      "path": "subtasks/03-external-validation/stderr.log",
+      "type": "log",
+      "sizeBytes": 0,
+      "hash": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "createdAt": "2026-07-11T06:11:31.060Z"
+    },
+    {
+      "path": "subtasks/03-external-validation/stdout.log",
+      "type": "log",
+      "sizeBytes": 347,
+      "hash": "b07a32adad3942f237efaa39dec0f6adfe57f3b51127805fafc4f3a31f890692",
+      "createdAt": "2026-07-11T06:11:31.060Z"
+    },
+    {
+      "path": "summary.md",
+      "type": "summary",
+      "sizeBytes": 6558,
+      "hash": "5a4986a61f6ec41b1776419a72177c49161234249165109ea54d551ed45fb7d2",
+      "createdAt": "2026-07-11T06:11:31.088Z"
+    },
+    {
+      "path": "trajectory.json",
+      "type": "json",
+      "sizeBytes": 397,
+      "hash": "34682dad90c486f93381396dc48b9a8a4bebc8ffbf7201e3f0a70c3cebe4632f",
+      "createdAt": "2026-07-11T06:11:31.090Z"
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": "external-task-run-1",
+  "recordedAt": "2026-07-11T06:11:31.088Z",
+  "docker": {
+    "image": "runforge:local",
+    "network": "none",
+    "sourceMount": "read-only",
+    "workspaceMount": "writable",
+    "tmpExec": true,
+    "memory": "2g",
+    "cpus": 2,
+    "pidsLimit": 512
+  },
+  "tooling": {
+    "gitRequiredInImage": true
+  },
+  "dependencyPolicy": "reuse existing node_modules read-only; no install and no network",
+  "provider": "providerless"
+}

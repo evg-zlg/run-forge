@@ -1,0 +1,7 @@
+{"schemaVersion":"external-task-run-1","eventId":"EXTERNAL-RUN-2:event:1","runId":"EXTERNAL-RUN-2","type":"task_received","time":"2026-07-11T06:11:31.088Z"}
+{"schemaVersion":"external-task-run-1","eventId":"EXTERNAL-RUN-2:event:2","runId":"EXTERNAL-RUN-2","type":"external_repo_recorded","time":"2026-07-11T06:11:31.088Z"}
+{"schemaVersion":"external-task-run-1","eventId":"EXTERNAL-RUN-2:event:3","runId":"EXTERNAL-RUN-2","type":"workspace_prepared","time":"2026-07-11T06:11:31.088Z"}
+{"schemaVersion":"external-task-run-1","eventId":"EXTERNAL-RUN-2:event:4","runId":"EXTERNAL-RUN-2","type":"executor_dispatched","time":"2026-07-11T06:11:31.088Z"}
+{"schemaVersion":"external-task-run-1","eventId":"EXTERNAL-RUN-2:event:5","runId":"EXTERNAL-RUN-2","type":"providerless_review_finished","time":"2026-07-11T06:11:31.088Z"}
+{"schemaVersion":"external-task-run-1","eventId":"EXTERNAL-RUN-2:event:6","runId":"EXTERNAL-RUN-2","type":"original_repo_verified","time":"2026-07-11T06:11:31.088Z"}
+{"schemaVersion":"external-task-run-1","eventId":"EXTERNAL-RUN-2:event:7","runId":"EXTERNAL-RUN-2","type":"run_finished","time":"2026-07-11T06:11:31.088Z"}

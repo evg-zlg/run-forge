@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "alpha-2.1",
+  "runId": "EXTERNAL-RUN-3-PACKET",
+  "cliExitPolicy": "packet",
+  "cliExitCode": 0,
+  "originalRepoMutationAllowed": false,
+  "originalRepoBefore": {
+    "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "status": ""
+  },
+  "originalRepoAfter": {
+    "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "status": ""
+  },
+  "originalRepoMutationVerdict": "unchanged",
+  "workspacePath": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-T6h54g/factory",
+  "noPushAttempted": true,
+  "noMergeAttempted": true,
+  "noApplyToOriginalRepoAttempted": true,
+  "noDeployAttempted": true,
+  "commandsUserProvidedViaCli": true,
+  "setupCommandsUserProvided": false,
+  "setupMayUseNetwork": "no",
+  "setupPolicy": {
+    "setupCommandsProvided": false,
+    "networkIntent": "none",
+    "continueAfterSetupFailure": false,
+    "mainCommandsSkippedOnSetupFailure": true
+  },
+  "setupNetworkIntentEnforced": false,
+  "setupPolicyNotes": [
+    "Setup commands are user-provided and run only in the disposable workspace.",
+    "Setup network intent was declared as none; RunForge records this intent but does not enforce network blocking.",
+    "RunForge never applies setup or command side effects to the original repository."
+  ],
+  "secretsHandling": {
+    "deliberateSecretPrinting": false,
+    "note": "RunForge captures user-provided command stdout/stderr as evidence and does not deliberately print or expand secrets."
+  },
+  "dependencyContext": {
+    "workspacePolicy": "disposable_copy",
+    "note": "Dependency directories such as node_modules are not copied by default; commands that require installed dependencies should include setup steps or run in a workspace policy that supplies them."
+  },
+  "blockedCommands": []
+}

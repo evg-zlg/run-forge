@@ -5,7 +5,7 @@ import type { RunSpec } from "../core/types.js";
 import { buildFixtureCodeProposal, type DeterministicCodeProposal } from "./code-proposal-fixtures.js";
 import { validateCommandSafety } from "./command-safety.js";
 import { gitSnapshot, mutationVerdictFor, prepareWorkspace } from "./external-command-check-git.js";
-import { writePacketManifest } from "./external-command-check-packet.js";
+import { finalizePacketManifest } from "./external-command-check-packet.js";
 import type { CommandResult, SetupNetworkIntent } from "./external-command-check-types.js";
 import { createCodeProposalArtifactTracker } from "./external-code-proposal-artifacts.js";
 import {
@@ -329,10 +329,7 @@ export async function runExternalCodeProposal(options: ExternalCodeProposalOptio
   });
   emit("run_finished", { status: outcome, verificationPassed });
   await writeEvents(packetDir, events);
-  await markArtifact("events.jsonl");
-  await writePacketManifest(packetDir, artifacts);
-  await markArtifact("packet-manifest.json");
-  await writeEvents(packetDir, events);
+  await finalizePacketManifest(packetDir, externalCodeProposalSchemaVersion);
   return {
     runId,
     outcome,
