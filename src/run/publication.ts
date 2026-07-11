@@ -57,9 +57,14 @@ export async function currentPatchHash(path: string): Promise<string> {
   const { createHash } = await import("node:crypto"); return createHash("sha256").update(await readFile(path)).digest("hex");
 }
 
+export function sourceMatchesBaseline(current: RepoState, baseline: RepoState): boolean {
+  return current.status === "" && current.head === baseline.head;
+}
+
 export async function runPublication(input: { authority: AuthorityEnvelope; repo: string; sourceBefore: RepoState; worktree: string; branch: string; out: string; runId: string; patchPath: string; patchPackageHash: string; patchDiffHash: string; validate: (stage: "after-commit" | "after-push") => Promise<boolean> }): Promise<{ publication: "draft-pr-created" | "committed-not-pushed" | "pushed-no-pr" | "skipped-needs-owner-approval" | "failed"; prStatus: "draft-open" | "not-created" | "failed"; commitSha: string | null; prUrl: string | null }> {
   const repository = await githubRepository(input.repo); const remoteBefore = await remoteBranchHead(input.repo, input.branch); const patchHash = await currentPatchHash(input.patchPath); const sourceBranch = (await execFileAsync("git", ["branch", "--show-current"], { cwd: input.repo })).stdout.trim();
-  const common = { branch: input.branch, sourceBranch, defaultBranch: repository.defaultBranch, sourceClean: (await inspectRepoState(input.repo)).status === "", expectedPatchHash: input.patchDiffHash, currentPatchHash: patchHash, draft: true };
+  const sourceCurrent = await inspectRepoState(input.repo);
+  const common = { branch: input.branch, sourceBranch, defaultBranch: repository.defaultBranch, sourceClean: sourceMatchesBaseline(sourceCurrent, input.sourceBefore), expectedPatchHash: input.patchDiffHash, currentPatchHash: patchHash, draft: true };
   const decide = async (action: PublicationAction) => { const check = evaluatePublicationAction(input.authority, { ...common, action }); const item: AuthorityDecision = { timestamp: new Date().toISOString(), authority_id: input.authority.authority_id, run_id: input.runId, action, decision: check.classification === "accepted" ? "continue" : "stop", classification: check.classification, reason: check.reason, repo: input.repo, target_mode: action === "create_draft_pr" ? "draft-pr" : "local-non-main-branch", risk: "low", patch_package_hash: input.patchPackageHash, patch_diff_hash: input.patchDiffHash }; await recordAuthorityDecision(join(input.out, "authority-decision-log.jsonl"), item); await appendFile(join(input.out, "authority-report.md"), `- ${item.timestamp} — \`${item.action}\`: **${item.decision}** (${item.classification}) — ${item.reason}\n`); return check.classification === "accepted"; };
   assertExpectedRemoteBranch(remoteBefore, input.sourceBefore.head);
   if (!await decide("commit_to_non_main_branch")) return { publication: "skipped-needs-owner-approval", prStatus: "not-created", commitSha: null, prUrl: null };
