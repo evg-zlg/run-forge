@@ -26,7 +26,8 @@ function startCommand(): Command {
     .option("--repair-mode <mode>", "external repair mode; supported: 'disposable'")
     .option("--authority <path>", "delegated owner authority envelope")
     .option("--approval-mode <mode>", "owner gate; supported: 'require-owner-decision'", "require-owner-decision")
-    .option("--apply-mode <mode>", "apply during start; supported: 'none'", "none")
+    .option("--apply-mode <mode>", "apply during start; supported: 'none', 'local-non-main-branch'", "none")
+    .option("--target-branch <branch>", "explicit local non-main branch for local branch apply")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger, 300_000)
     .action(async (opts) => {
       try {
@@ -42,6 +43,7 @@ function startCommand(): Command {
             authority: opts.authority as string | undefined,
             approvalMode: opts.approvalMode as string,
             applyMode: opts.applyMode as string,
+            targetBranch: opts.targetBranch as string | undefined,
             commands: opts.command as string[],
             tmpRoot: opts.tmpRoot as string | undefined,
             timeoutMs: opts.timeoutMs as number

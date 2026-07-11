@@ -23,6 +23,11 @@ describe("external execution gates", () => {
     expect(() => validateExternalExecutionModes(valid)).not.toThrow();
   });
 
+  it("requires an explicit target for local non-main branch apply", () => {
+    expect(() => validateExternalExecutionModes({ ...valid, applyMode: "local-non-main-branch" })).toThrow("requires --target-branch");
+    expect(() => validateExternalExecutionModes({ ...valid, applyMode: "local-non-main-branch", targetBranch: "runforge/demo" })).not.toThrow();
+  });
+
   it.each([
     [{ runtime: "local" }, "--runtime docker"],
     [{ prepareRuntime: "none" }, "--prepare-runtime explicit"],
