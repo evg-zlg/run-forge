@@ -1,0 +1,45 @@
+{
+  "schemaVersion": "external-execution-1",
+  "source": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "status": ""
+  },
+  "runtimePreparation": {
+    "strategy": "disposable-workspace-snapshot",
+    "requested": true,
+    "status": "prepared",
+    "source": {
+      "path": "/Users/evgeny/Documents/projects/factory",
+      "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "status": ""
+    },
+    "workspace": "/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-branch-pr-1/prepared-workspace",
+    "packageManager": "npm",
+    "lockfilePath": "package-lock.json",
+    "lockfileHash": "848a8ca54f03c062c557d29edd0b00985368da29518405d861c5b6a798c2c1ce",
+    "target": {
+      "platform": "linux",
+      "architecture": "arm64"
+    },
+    "dependencyCommand": "npm ci --no-audit --no-fund",
+    "hostNodeModulesReused": false,
+    "linuxCompatibleDependenciesCreated": true,
+    "networkUsed": true,
+    "image": {
+      "name": "runforge:local",
+      "id": "sha256:44dc2dd1e3af867ff1c8346761bcc7451a4852fe2bf6f20e39dc4cd87765fa14"
+    },
+    "startedAt": "2026-07-11T12:17:23.175Z",
+    "completedAt": "2026-07-11T12:17:40.074Z",
+    "commandLog": "validation/runs/BRANCH-PR-1/runtime-preparation-command.log"
+  },
+  "task": "Run owner-authorized local branch PR package contour",
+  "commands": [
+    "npm run typecheck",
+    "npm test",
+    "npm run build"
+  ],
+  "providerCalls": false,
+  "createdAt": "2026-07-11T12:20:36.378Z"
+}

@@ -1,0 +1,21 @@
+{
+  "repo": "/Users/evgeny/Documents/projects/factory",
+  "sourceBranch": "main",
+  "disposable": "/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-branch-pr-1/prepared-workspace",
+  "controlled": "/Users/evgeny/Documents/projects/RunForge/validation/runs/BRANCH-PR-1/controlled-worktree",
+  "dockerImage": "runforge:local",
+  "commands": [
+    "npm run typecheck",
+    "npm test",
+    "npm run build"
+  ],
+  "timeoutMs": 300000,
+  "patchPackageHash": "344ceb6b02bcdbe1da36eb084741cc79b64f95ccf0b4750b7726c59b39fbd996",
+  "patchDiffHash": "b5452f7609adf311b8fe0870635a1b5caa459a1903c76e1141ab08a1bf464198",
+  "sourceBefore": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+    "status": ""
+  },
+  "authorityClassification": "accepted"
+}

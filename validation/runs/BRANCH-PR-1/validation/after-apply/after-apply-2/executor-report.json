@@ -1,0 +1,25 @@
+{
+  "request": {
+    "id": "BRANCH-PR-1:after-apply-2:docker-shell",
+    "subtaskId": "after-apply-2",
+    "command": "npm test",
+    "cwd": "/Users/evgeny/Documents/projects/RunForge/validation/runs/BRANCH-PR-1/controlled-worktree",
+    "artifactDir": "validation/runs/BRANCH-PR-1/validation/after-apply/after-apply-2",
+    "timeoutMs": 300000
+  },
+  "result": {
+    "executor": "docker-shell",
+    "runtime": {
+      "isolation": "docker-container",
+      "image": "runforge:local",
+      "network": "none"
+    },
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/BRANCH-PR-1/validation/after-apply/after-apply-2/stdout.log",
+    "stderrLog": "validation/runs/BRANCH-PR-1/validation/after-apply/after-apply-2/stderr.log",
+    "commandLog": "validation/runs/BRANCH-PR-1/validation/after-apply/after-apply-2/command.log"
+  }
+}

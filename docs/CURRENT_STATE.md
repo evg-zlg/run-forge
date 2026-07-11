@@ -2,7 +2,7 @@
 
 Status date: 2026-07-11.
 
-RunForge is currently a local, deterministic, artifact-first task-run harness. PRs #47, #48, and #49 are merged. External validation, explicit runtime preparation, disposable repair, artifact-contained apply, and a real hash-bound owner decision gate are proven. AUTHORITY-1 adds an explicit delegated owner authority envelope so already-authorized low-risk actions can cross that gate without another interruption while retaining the manual decision path.
+RunForge is currently a local, deterministic, artifact-first task-run harness. PRs #47, #48, #49, and #50 are merged. External validation, explicit runtime preparation, disposable repair, artifact-contained apply, a real hash-bound owner decision gate, and delegated owner authority are proven. BRANCH-PR-1 adds a separately authorized local non-main branch/worktree and instructions-only PR package while retaining owner control over publication.
 
 ## Current North Star
 
@@ -76,6 +76,7 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 - `EXTERNAL-EXECUTION-1`: disposable repair package, providerless review, owner gate, controlled-worktree apply, and PR-ready package implemented and dogfooded.
 - `OWNER-APPROVAL-1`: real owner decision artifact/CLI gate and controlled continuation implemented; dogfood preparation stops for an actual owner decision before apply.
 - `AUTHORITY-1`: delegated authority is validated against the canonical repo, hard safety denies, patch scope/risk, hashes, and artifact-contained target; covered actions continue automatically with a JSONL decision audit trail.
+- `BRANCH-PR-1`: owner-authorized local non-main branch/worktree apply and offline validation, with a manual PR package and no push or external PR creation.
 
 ## Current Gaps
 
