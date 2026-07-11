@@ -1,0 +1,18 @@
+$ npm run build
+executor: docker-shell
+isolation: docker-container
+image: runforge:local
+network: none
+requestId: AUTHORITY-1:after-apply-3:docker-shell
+cwd: /Users/evgeny/Documents/projects/RunForge/validation/runs/AUTHORITY-1/controlled-worktree
+timeoutMs: 300000
+status: passed
+exitCode: 0
+signal: null
+
+## stdout
+> factory-loop@0.1.0 build
+> tsc -p tsconfig.json && cp -r src/ui/*.html src/ui/*.css src/ui/*.js dist/ui/ && cp -r src/ui/lib src/ui/views dist/ui/
+
+## stderr
+(empty)

@@ -1,0 +1,9 @@
+{
+  "node": "v24.15.0",
+  "platform": "darwin",
+  "architecture": "arm64",
+  "cwd": "/Users/evgeny/Documents/projects/RunForge",
+  "dockerImage": "runforge:local",
+  "runtimeNetwork": "none",
+  "preparationNetwork": "bridge"
+}
