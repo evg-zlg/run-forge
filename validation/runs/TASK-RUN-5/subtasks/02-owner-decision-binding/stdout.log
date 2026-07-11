@@ -1,0 +1,42 @@
+tests/unit/task-run-renderer.test.ts:33:    expect(summary).toContain("Provider review metadata: n/a (providerless default)");
+tests/unit/task-run-renderer.test.ts:58:  it("builds providerless review requests from evidence and returns read-only review results", async () => {
+tests/unit/task-run-renderer.test.ts:78:    expect(review.provider).toBe("providerless");
+tests/unit/task-run-renderer.test.ts:84:  it("requires explicit mock mode to produce delegated provider metadata", async () => {
+tests/unit/task-run-renderer.test.ts:87:      task: "Inspect task-run harness code and report delegated review readiness.",
+tests/unit/task-run-renderer.test.ts:102:      mode: "delegated-mock",
+tests/unit/task-run-renderer.test.ts:103:      provider: review.provider,
+tests/unit/task-run-renderer.test.ts:112:    expect(review.provider).toBe("mock");
+tests/unit/task-run-renderer.test.ts:113:    expect(review.reviewer).toBe("mock-delegated-evidence-reviewer");
+tests/unit/task-run-renderer.test.ts:124:  it("builds bounded provider input packages for delegated reviewer modes", async () => {
+tests/unit/task-run-renderer.test.ts:125:    const repoRoot = await mkdtemp(join(tmpdir(), "runforge-provider-input-"));
+tests/unit/task-run-renderer.test.ts:128:      task: "Inspect task-run harness code and report delegated review input bounds.",
+tests/unit/task-run-renderer.test.ts:149:      jsonPath: join(repoRoot, "provider-input.json"),
+tests/unit/task-run-renderer.test.ts:150:      markdownPath: join(repoRoot, "provider-input.md")
+tests/unit/task-run-renderer.test.ts:160:  it("requires explicit cli mode and fails cleanly when provider CLI is unavailable", async () => {
+tests/unit/task-run-renderer.test.ts:163:      task: "Inspect task-run harness code and report real provider readiness.",
+tests/unit/task-run-renderer.test.ts:177:      providerInputJsonPath: "review/provider-input.json",
+tests/unit/task-run-renderer.test.ts:178:      providerInputMarkdownPath: "review/provider-input.md",
+tests/unit/task-run-renderer.test.ts:180:      providerCommand: undefined
+tests/unit/task-run-renderer.test.ts:183:      mode: "delegated-cli",
+tests/unit/task-run-renderer.test.ts:184:      provider: review.provider,
+tests/unit/task-run-renderer.test.ts:195:      providerInputJsonPath: `${result.outDir}/review/provider-input.json`,
+tests/unit/task-run-renderer.test.ts:196:      providerInputMarkdownPath: `${result.outDir}/review/provider-input.md`,
+tests/unit/task-run-renderer.test.ts:200:    expect(review.provider).toBe("cli");
+tests/unit/task-run-renderer.test.ts:201:    expect(review.status).toBe("provider_unavailable");
+tests/unit/task-run-renderer.test.ts:202:    expect(review.recommendedNextAction).toContain("provider-unavailable");
+tests/unit/task-run-renderer.test.ts:203:    expect(metadata.providerMode).toBe("delegated-cli");
+tests/unit/task-run-renderer.test.ts:226:  it("binds non-provider planning tasks to semantic owner-decision milestone", () => {
+tests/unit/task-run-renderer.test.ts:227:    const plan = planTaskRun("Inspect task-run harness and identify the next non-provider implementation gap after executor dispatch");
+tests/unit/task-run-renderer.test.ts:230:    expect(plan.recommendedNextMilestone).toBe("semantic task-specific planning / owner-decision binding");
+tests/unit/task-run-renderer.test.ts:241:  it("does not drift to provider recommendations for non-provider code tasks", () => {
+tests/unit/task-run-renderer.test.ts:242:    const task = "Inspect task-run harness and identify the next non-provider implementation gap after executor dispatch";
+tests/unit/task-run-renderer.test.ts:246:    expect(conclusion).toContain("semantic task-specific planning / owner-decision binding");
+tests/unit/task-run-renderer.test.ts:247:    expect(conclusion).toContain("non-provider code task");
+tests/unit/task-run-renderer.test.ts:248:    expect(conclusion).not.toMatch(/delegated coding\/review agents/);
+tests/unit/task-run-renderer.test.ts:250:    expect(gaps.join(" ")).not.toMatch(/delegated coding\/review agents/);
+tests/unit/task-run-renderer.test.ts:258:    expect(conclusion).not.toMatch(/provider|delegated/i);
+tests/unit/task-run-renderer.test.ts:328:        provider: "providerless",
+src/run/task-run-owner-decision.ts:10:      return "The accepted non-provider code task was answered from harness evidence: the next gap is semantic task-specific planning / owner-decision binding, because planner lanes and owner conclusions must follow the accepted task instead of drifting toward provider work.";
+src/run/task-run-owner-decision.ts:12:    return "The accepted code task was answered from harness evidence: the next smallest gap is delegated coding/review agents, because planning, local executor dispatch, and artifact rendering are now explicit but still single-host.";
+src/run/task-run-owner-decision.ts:28:    gaps.push("Subtask execution uses the local shell executor, not delegated coding/review agents.");
+src/run/task-run-owner-decision.ts:35:    normalizedTask.includes("non-provider") ||

@@ -1,0 +1,116 @@
+$ sed -n '1,220p' tests/unit/task-run-renderer.test.ts && rg -n "taskKind|planningBasis|evidence|Remaining Gaps|subtasks" validation/runs/TASK-RUN-4/results.json
+exitCode: 0
+
+## stdout
+import { describe, expect, it } from "vitest";
+import type { TaskRunResult } from "../../src/run/task-run-harness.js";
+import { planTaskRun } from "../../src/run/task-run-planner.js";
+import { renderSummary, validateSummaryFreshness } from "../../src/run/task-run-renderer.js";
+
+describe("task-run summary renderer", () => {
+  it("renders and validates the current task-run command instead of copied stale wording", () => {
+    const result = taskRunResult({
+      runId: "TASK-RUN-99",
+      task: "Inspect the task-run harness and add one narrow guard that prevents stale copied task wording in generated TASK-RUN summaries",
+      outDir: "validation/runs/TASK-RUN-99"
+    });
+
+    const summary = renderSummary(result);
+
+    expect(summary).toContain("TASK-RUN-99");
+    expect(summary).toContain(result.task);
+    expect(summary).toContain("Task kind: `code-inspection`");
+    expect(summary).toContain("Evidence Captured");
+    expect(summary).toContain(
+      `corepack pnpm dev task-run start --task "${result.task}" --out validation/runs/TASK-RUN-99`
+    );
+    expect(summary).not.toContain('--task "Check roadmap docs consistency" --out validation/runs/TASK-RUN-2');
+    expect(() => validateSummaryFreshness(result, summary)).not.toThrow();
+  });
+
+  it("rejects summaries that omit the current task-run command", () => {
+    const result = taskRunResult({
+      runId: "TASK-RUN-100",
+      task: "Current task text",
+      outDir: "validation/runs/TASK-RUN-100"
+    });
+
+    expect(() => validateSummaryFreshness(result, "# TASK-RUN-100 Summary\n\nCurrent task text\n")).toThrow(
+      "current task-run command"
+    );
+  });
+});
+
+describe("task-run planner", () => {
+  it("creates meaningfully different plans for docs and code tasks", () => {
+    const docs = planTaskRun("Review Agent OS roadmap docs and report contradictions, gaps, and next milestone.");
+    const code = planTaskRun("Inspect task-run harness code and report the next smallest implementation gap.");
+
+    expect(docs.kind).toBe("docs-review");
+    expect(code.kind).toBe("code-inspection");
+    expect(docs.subtasks.map((item) => item.id)).not.toEqual(code.subtasks.map((item) => item.id));
+    expect(docs.inputs).toContain("docs/ROADMAP.md");
+    expect(code.inputs).toContain("src/run/task-run-harness.ts");
+    expect(docs.subtasks.some((item) => item.evidenceCommand.includes("docs/ROADMAP.md"))).toBe(true);
+    expect(code.subtasks.some((item) => item.evidenceCommand.includes("src/run/task-run-harness.ts"))).toBe(true);
+  });
+});
+
+function taskRunResult(input: { runId: string; task: string; outDir: string }): TaskRunResult {
+  return {
+    runId: input.runId,
+    task: input.task,
+    taskKind: "code-inspection",
+    planningBasis: ["Task asks for harness code inspection."],
+    ownerConclusion: "The accepted code task was answered from harness evidence.",
+    recommendedNextStep: "Recommended next milestone: real executor dispatch.",
+    gaps: ["Docker/container isolation is still recorded as a gap."],
+    status: "completed",
+    outDir: input.outDir,
+    tmpRoot: `/tmp/runforge-${input.runId.toLowerCase()}`,
+    plan: `${input.outDir}/plan.md`,
+    summary: `${input.outDir}/summary.md`,
+    results: `${input.outDir}/results.json`,
+    subtasks: [
+      {
+        id: "04-check-and-owner-summary",
+        goal: "Run the configured check command and aggregate owner-ready summary/results artifacts.",
+        inputs: ["src/run/task-run-renderer.ts"],
+        findings: ["The summary renderer was inspected for stale copied task wording."],
+        status: "done",
+        artifacts: ["brief.md", "report.md", "command.log"],
+        evidence: {
+          command: "rg -n task-run src/run/task-run-renderer.ts",
+          status: "passed",
+          exitCode: 0,
+          logPath: `${input.outDir}/subtasks/04-check-and-owner-summary/command.log`,
+          inspected: ["src/run/task-run-renderer.ts"],
+          summary: "04-check-and-owner-summary captured command evidence."
+        },
+        workspace: `/tmp/runforge-${input.runId.toLowerCase()}/04-check-and-owner-summary/workspace`,
+        report: `${input.outDir}/subtasks/04-check-and-owner-summary/report.md`
+      }
+    ],
+    checks: [
+      {
+        command: "corepack pnpm check:structure",
+        result: "passed",
+        exitCode: 0,
+        stdout: "",
+        stderr: ""
+      }
+    ]
+  };
+}
+11:    "subtasks": "validation/runs/TASK-RUN-4/subtasks/"
+19:  "subtasks": [
+37:      "report": "validation/runs/TASK-RUN-4/subtasks/01-intake-and-plan/report.md"
+57:      "report": "validation/runs/TASK-RUN-4/subtasks/02-subtask-isolation/report.md"
+83:      "report": "validation/runs/TASK-RUN-4/subtasks/03-roadmap-consistency-demo/report.md"
+96:        "The summary renderer was inspected for stale copied task wording and current-run command evidence.",
+104:      "report": "validation/runs/TASK-RUN-4/subtasks/04-check-and-owner-summary/report.md"
+123:    "Semantic planning, executor dispatch, aggregation, per-lane command evidence, and owner-brief correctness remain mostly manual/simulated."
+125:  "recommendedNextMilestone": "Make the plan/decomposition and subtask evidence derive from the accepted task instead of the remaining static TASK-RUN template."
+
+## stderr
+(empty)

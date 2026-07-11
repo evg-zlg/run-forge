@@ -1,0 +1,199 @@
+$ rg -n "Agent OS|portable task execution factory|task|clarification|plan|decomposition|isolated|logs and artifacts|checks and review|human decision|TASK-RUN-1|System Layers|Architecture Layers" docs validation/runs/AGENT-OS-ROADMAP-01
+docs/DECISIONS.md:7:Decision: RunForge / Factory is now framed as Agent OS / Task Factory, a portable task execution factory for routing meaningful tasks through intake, planning, decomposition, isolated execution, verification, aggregation, and human decision.
+docs/DECISIONS.md:9:This replaces the previous "choose one of owner brief / CI triage / task loop" milestone framing. Owner briefs, CI triage, PR readiness, handoffs, packets, and archives remain useful only as parts of end-to-end task execution.
+docs/DECISIONS.md:16:task
+docs/DECISIONS.md:17:-> clarification or execute-as-is
+docs/DECISIONS.md:18:-> plan
+docs/DECISIONS.md:19:-> decomposition
+docs/DECISIONS.md:21:-> isolated sandbox/runtime execution
+docs/DECISIONS.md:22:-> logs and artifacts
+docs/DECISIONS.md:23:-> checks and review
+docs/DECISIONS.md:24:-> human decision
+docs/DECISIONS.md:28:Internal machinery is valuable only when it moves a real task through this loop.
+docs/DECISIONS.md:30:## Architecture Layers
+docs/DECISIONS.md:32:- Task Intake: accept tasks and choose clarify / execute-as-is / plan-first.
+docs/DECISIONS.md:33:- Planner / Decomposer: split large tasks into bounded subtasks.
+docs/DECISIONS.md:44:- task intake record;
+docs/DECISIONS.md:45:- plan;
+docs/DECISIONS.md:46:- subtask briefs;
+docs/DECISIONS.md:60:- `TASK-RUN-1: First End-to-End Agent OS Task`.
+docs/DECISIONS.md:62:Do not start Alpha-28, new archive/viewer work, new handoff/audit features, new OKF/skills lifecycle work, or new safety layers before `TASK-RUN-1`.
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:5:  "northStar": "RunForge / Factory is an Agent OS: a portable task execution factory.",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:7:    "task",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:8:    "clarification or execute-as-is",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:9:    "plan",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:10:    "decomposition",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:12:    "isolated sandbox/runtime execution",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:13:    "logs and artifacts",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:14:    "checks and review",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:15:    "human decision",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:40:    "new safety layers without direct connection to task execution"
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:42:  "nextMilestone": "TASK-RUN-1: First End-to-End Agent OS Task",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:43:  "taskRun1Goal": [
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:44:    "take one real task",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:46:    "build a plan",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:47:    "split it into 2-5 subtasks",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:48:    "execute subtasks in isolated environments",
+validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json:58:    "What will we not do in this task?"
+docs/validation-plan.md:1:# Validation plan
+docs/NON_GOALS.md:3:RunForge must not become an internal DevOps artifact machine that keeps expanding viewers, archives, handoffs, and safety layers without proving end-to-end task execution.
+docs/NON_GOALS.md:5:## Frozen Until TASK-RUN-1
+docs/NON_GOALS.md:11:- New safety layers without direct connection to task execution.
+docs/NON_GOALS.md:12:- Internal artifact work that does not help a real task move from intake to verified result.
+docs/NON_GOALS.md:24:These are safety/evidence substrate for Agent OS. They are useful only when they help a task run, produce evidence, pass review, and return a decision point.
+docs/NON_GOALS.md:28:- SaaS hosting before the local/VPS task loop works.
+docs/NON_GOALS.md:30:- Generic queue system detached from task execution.
+docs/NON_GOALS.md:36:- Dashboards that require the owner to inspect raw internals before seeing the task outcome.
+docs/NON_GOALS.md:40:If a feature cannot answer "how does this improve the first end-to-end Agent OS task run?", it is outside the current roadmap.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:3:Final verdict: Agent OS / Task Factory roadmap fixed.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:7:RunForge / Factory is an Agent OS: a portable task execution factory. It accepts a meaningful task from a person or another agent, clarifies or executes as-is, plans, decomposes, selects models/tools/providers, runs subtasks in isolated runtimes, gathers logs and artifacts, verifies the result, aggregates findings, and returns a human decision point.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:15:- New safety layers without direct connection to task execution.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:16:- Internal artifact work before the first end-to-end task run.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:18:## System Layers
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:41:These are safety/evidence substrate for Agent OS, not the product highway.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:43:## What TASK-RUN-1 Needs
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:45:- One real task.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:46:- Task intake mode: clarify / execute-as-is / plan-first.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:47:- Plan and 2-5 isolated subtasks.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:48:- Runtime choice for each subtask.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:56:- A real task moves from intake to verified result or honest blocker.
+validation/runs/AGENT-OS-ROADMAP-01/summary.md:57:- Subtasks run in isolated environments.
+docs/alpha-trial-guide.md:9:- Build a deterministic local artifact packet for a task.
+docs/alpha-trial-guide.md:34:- A docs-only task with a known file and exact anchor text.
+docs/alpha-trial-guide.md:227:- The task matches what you intended.
+docs/alpha-trial-guide.md:246:  RunForge alpha flow and make a manual human decision.
+docs/packet-schema.md:39:- `taskType`: one of `external_command_check`, `external_failure_triage`, `external_proposal_readiness`, `external_code_proposal`.
+docs/packet-schema.md:47:- Packet producers SHOULD emit `task_received`, `route_selected`, source packet events when applicable, artifact write events, and `run_finished`.
+docs/packet-schema.md:89:- `run.json.taskType`: `external_command_check`
+docs/packet-schema.md:117:- `run.json.taskType`: `external_failure_triage`
+docs/packet-schema.md:146:- `run.json.taskType`: `external_proposal_readiness`
+docs/packet-schema.md:179:- `run.json.taskType`: `external_code_proposal`
+docs/packet-schema.md:213:- Expected deterministic code proposal worker roles are `readiness_loader`, `context_scout`, `failure_analyst`, `proposal_planner`, `patch_writer`, `verifier`, `proposal_reviewer`, and `packet_writer`.
+docs/product-scope.md:5:RunForge is currently a local, deterministic agentic engineering harness. It can run bounded task rails that produce reviewable artifacts instead of directly changing a repository.
+docs/product-scope.md:11:- Rails task types for `failure-triage`, `command-check`, `repo-research`, `context-pack`, and `code-proposal`.
+docs/product-scope.md:37:- Autonomous delivery without a human decision.
+docs/product-scope.md:49:- Broader task rails for more engineering workflows.
+docs/dogfooding.md:5:Use `pnpm dogfood:rails` when changing the unified run rails or before release-like handoff. It first builds the local package bin, then runs a deterministic subset of RunForge's own checks through `runforge run --task command-check`:
+docs/dogfooding.md:34:`code-proposal` remains gated even in dogfood. It emits `proposal.patch` and `patch-summary.md` as local artifacts, requires a human decision, and does not mutate the target repository by default.
+docs/alpha-snapshot-2026-07-02.md:48:- RunForge requires a human decision before any proposed change is applied.
+docs/alpha-snapshot-2026-07-02.md:54:- It does not perform semantic rewriting or broad multi-file planning.
+docs/report-contract.md:7:- Verdict with category, root cause, confidence, and human decision flag.
+docs/report-contract.md:11:- A safe next command or an explicit explanation that none was found.
+docs/USE_CASES.md:3:## TASK-RUN-1: First End-to-End Agent OS Task
+docs/USE_CASES.md:5:Goal: prove the full task factory loop on one real task.
+docs/USE_CASES.md:9:- accept one meaningful task;
+docs/USE_CASES.md:10:- clarify or execute as-is according to task intake mode;
+docs/USE_CASES.md:11:- build a plan;
+docs/USE_CASES.md:12:- decompose the work into 2-5 isolated subtasks;
+docs/USE_CASES.md:14:- execute subtasks in isolated environments;
+docs/USE_CASES.md:15:- collect logs and artifacts;
+docs/USE_CASES.md:16:- run checks and review;
+docs/USE_CASES.md:20:Minimum artifact: `owner-ready-report.md` or equivalent report that includes task, plan, subtask outcomes, execution locations, logs/artifacts, checks, unresolved gaps, and recommended decision.
+docs/USE_CASES.md:22:Milestone: one real task can move from intake to verified result or honest blocker without requiring the owner to inspect raw packet internals first.
+docs/USE_CASES.md:26:These use cases remain valid only as components of `TASK-RUN-1` and later end-to-end runs.
+docs/USE_CASES.md:30:Goal: receive a task from a person or agent and choose clarify, execute-as-is, or plan-first.
+docs/USE_CASES.md:32:Minimum artifact: task intake record with mode, assumptions, constraints, and acceptance criteria.
+docs/USE_CASES.md:36:Goal: turn a large task into bounded executor-ready subtasks.
+docs/USE_CASES.md:38:Minimum artifact: plan plus 2-5 subtask briefs with inputs, outputs, environment needs, verification, and stop conditions.
+docs/USE_CASES.md:42:Goal: run subtasks locally or on VPS without contaminating the source workspace.
+docs/USE_CASES.md:48:Goal: determine whether the task result is usable, blocked, unsafe, or incomplete.
+docs/USE_CASES.md:54:Goal: compress subtask results into a human decision.
+docs/git-worktree-rules.md:3:RunForge must follow the same operational discipline it recommends. Agent work should happen in isolated git state, with explicit provenance before and after every task.
+docs/git-worktree-rules.md:7:1. One task = one branch/worktree.
+docs/git-worktree-rules.md:8:   - Create a dedicated branch for each agent task.
+docs/git-worktree-rules.md:9:   - Prefer a separate worktree for non-trivial work, especially when another task is already in progress.
+docs/git-worktree-rules.md:13:   - Tiny read-only inspections are fine. Edits, generated artifacts, test updates, and commits need a task branch.
+docs/git-worktree-rules.md:20:   - Treat pre-existing dirty files as user-owned unless the task explicitly includes them.
+docs/git-worktree-rules.md:41:   - Do not remove a task worktree while its branch, PR, review, or handoff is still active.
+docs/git-worktree-rules.md:42:   - After merge or explicit confirmation, remove the worktree and delete the task branch if appropriate.
+docs/git-worktree-rules.md:44:## Starting a new agent task
+docs/git-worktree-rules.md:52:git worktree add -b codex/RUNFORGE-TASK-ID ../RunForge-worktrees/runforge-task-id HEAD
+docs/git-worktree-rules.md:53:cd ../RunForge-worktrees/runforge-task-id
+docs/git-worktree-rules.md:57:Replace `RUNFORGE-TASK-ID` with the task name. If the main worktree is dirty, still create the task worktree from the recorded base commit or from `HEAD`, then leave the dirty main worktree untouched.
+docs/git-worktree-rules.md:59:## Handing off a task
+docs/git-worktree-rules.md:69:Also run the task-appropriate checks, usually `pnpm dogfood` for RunForge changes. If a commit exists, include:
+docs/ROADMAP.md:1:# Agent OS / Task Factory Roadmap
+docs/ROADMAP.md:5:RunForge / Factory is an Agent OS: a portable task execution factory.
+docs/ROADMAP.md:7:It lets a person or another agent submit a meaningful task, then routes it through a controlled execution loop:
+docs/ROADMAP.md:10:task
+docs/ROADMAP.md:11:-> clarification or execute-as-is
+docs/ROADMAP.md:12:-> plan
+docs/ROADMAP.md:13:-> decomposition
+docs/ROADMAP.md:15:-> isolated sandbox/runtime execution
+docs/ROADMAP.md:16:-> logs and artifacts
+docs/ROADMAP.md:17:-> checks and review
+docs/ROADMAP.md:18:-> human decision
+docs/ROADMAP.md:22:The product is not the internal artifact machinery. The product is reliable end-to-end task execution with enough isolation, evidence, verification, and owner control that a human can safely decide what happens next.
+docs/ROADMAP.md:28:Secondary users are other agents that need to submit tasks into the factory and receive structured outcomes instead of vague chat summaries.
+docs/ROADMAP.md:30:## System Layers
+docs/ROADMAP.md:33:   Accept a task and select the mode: clarify, execute-as-is, or plan-first.
+docs/ROADMAP.md:36:   Break large tasks into small isolated subtasks with clear inputs, outputs, constraints, and verification.
+docs/ROADMAP.md:42:   Run CLI agents, models, shell tools, integrations, and external providers against scoped subtasks.
+docs/ROADMAP.md:45:   Run build, typecheck, tests, lint, CI, safety checks, and task-specific review.
+docs/ROADMAP.md:48:   Collect results, compress context, detect conflicts, expose missing evidence, and identify gaps between subtasks.
+docs/ROADMAP.md:55:The first practical value is one real end-to-end task run: the system accepts a meaningful task, plans it, decomposes it into 2-5 isolated subtasks, runs them in controlled environments, gathers artifacts, verifies the result, and returns an owner-ready report.
+docs/ROADMAP.md:59:The only next milestone is `TASK-RUN-1: First End-to-End Agent OS Task`.
+docs/ROADMAP.md:61:`TASK-RUN-1` must:
+docs/ROADMAP.md:63:- take one real task;
+docs/ROADMAP.md:64:- accept it through task intake;
+docs/ROADMAP.md:65:- build a plan;
+docs/ROADMAP.md:66:- split it into 2-5 subtasks;
+docs/ROADMAP.md:67:- execute subtasks in isolated environments;
+docs/ROADMAP.md:68:- collect logs and artifacts;
+docs/ROADMAP.md:72:No other milestone should be started before `TASK-RUN-1` proves the loop.
+docs/ROADMAP.md:85:These are not the product highway. They are the safety/evidence substrate for Agent OS and should be used only when they help complete end-to-end task execution.
+docs/ROADMAP.md:87:## Frozen Until TASK-RUN-1
+docs/ROADMAP.md:93:- New safety layers without direct connection to task execution.
+docs/ROADMAP.md:94:- Internal artifact work that does not make `TASK-RUN-1` more executable, verifiable, or decision-ready.
+docs/ROADMAP.md:98:Before every new task, answer:
+docs/ROADMAP.md:104:5. What will we not do in this task?
+docs/ROADMAP.md:106:If these answers are missing or weak, do not start the task.
+docs/ROADMAP.md:110:The project is drifting when the main output is a new internal viewer, archive, schema, handoff shape, safety layer, or lifecycle report that does not help a task move from intake to verified result to human decision.
+docs/ROADMAP.md:112:The project is on course when a real task can enter the factory, be decomposed, run in isolated execution contexts, produce evidence, pass or fail checks honestly, and return a short owner-ready decision report.
+docs/CURRENT_STATE.md:5:RunForge is currently a local, deterministic, artifact-first engineering harness. It can collect evidence, run bounded checks, classify failures, produce proposal/readiness packets, render packet views, record operator decisions, and preserve handoff/archive evidence. It is not yet a complete Agent OS / Task Factory because it has not proven one end-to-end task run.
+docs/CURRENT_STATE.md:9:RunForge / Factory is an Agent OS: a portable task execution factory.
+docs/CURRENT_STATE.md:14:task
+docs/CURRENT_STATE.md:15:-> clarification or execute-as-is
+docs/CURRENT_STATE.md:16:-> plan
+docs/CURRENT_STATE.md:17:-> decomposition
+docs/CURRENT_STATE.md:19:-> isolated sandbox/runtime execution
+docs/CURRENT_STATE.md:20:-> logs and artifacts
+docs/CURRENT_STATE.md:21:-> checks and review
+docs/CURRENT_STATE.md:22:-> human decision
+docs/CURRENT_STATE.md:50:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision.
+docs/CURRENT_STATE.md:52:## Missing For TASK-RUN-1
+docs/CURRENT_STATE.md:54:- Task intake mode: clarify / execute-as-is / plan-first.
+docs/CURRENT_STATE.md:55:- Planner/decomposer that creates 2-5 bounded subtasks.
+docs/CURRENT_STATE.md:58:- Aggregation/compression across subtask logs and artifacts.
+docs/CURRENT_STATE.md:59:- Owner-ready report for the full task, not only packet-level evidence.
+docs/CURRENT_STATE.md:60:- A single command or guided procedure that proves the full loop on one real task.
+docs/CURRENT_STATE.md:68:- New safety layers without direct connection to task execution.
+docs/CURRENT_STATE.md:69:- Internal artifact work before the first end-to-end task run.
+docs/CURRENT_STATE.md:88:Do not continue Alpha-28. The next milestone is only `TASK-RUN-1: First End-to-End Agent OS Task`.
+docs/demo-walkthrough.md:20:Start with `human-review.md`. It is the reviewer entry point and explains what task was attempted, which context was collected, which checks were used, which patch is proposed, why the packet is safe, whether the repo changed, and what a human should do next.
+docs/demo-walkthrough.md:22:Then inspect `task.md`, `proposal/proposal.patch`, `proposal/patch-summary.md`, `safety-report.json`, and `trajectory.json`.
+docs/demo-walkthrough.md:26:### `task.md`
+docs/demo-walkthrough.md:28:The task statement for the demo. It explains the intended tiny fixture fix: `add(1, 1)` returns `2`, while the fixture test expects `3`, so the proposed change is to update the expectation to `2`.
+docs/demo-walkthrough.md:32:The human-facing review packet. It summarizes the task, context, evidence, patch proposal, safety guarantees, fixture cleanliness result, root worktree status captured by the demo, and the next human decision.
+docs/demo-walkthrough.md:60:The readable patch summary. It explains what the proposal changes and repeats that a human decision is required before any apply step.
+docs/demo-walkthrough.md:64:The packet-level safety report. It records that the demo is local-only, makes no provider calls, does not allow repo mutation, does not create PRs, does not merge, uses proposal-only patch mode, requires a human decision, and confirms the fixture repository stayed unchanged.
+docs/engineering-rules.md:29:6. Keep agent git work isolated and inspectable.
+docs/engineering-rules.md:30:   - One task gets one branch/worktree; non-trivial agent work does not happen directly on `main`.
+docs/run-rails.md:3:RunForge local rails route every task through:
+docs/run-rails.md:29:Task implementations may add task-specific artifacts beside those files.
+docs/run-rails.md:39:- human decision required before applying any patch.
+docs/run-rails.md:41:The local rails implementation is currently deterministic and fixture-based, not an LLM coder. For the controlled `fixtures/repos/sample-js` calculator assertion task, it can emit a real unified diff in `proposal.patch`; for repositories without a matching deterministic rule, `proposal.patch` may still be empty.
+docs/run-rails.md:43:Inspect `patch-summary.md` first for the task summary, proposed files, rationale, safety status, and manual next step. Then inspect `proposal.patch` as a reviewable artifact. RunForge does not apply the patch, does not mutate the target repository, does not push, and does not merge.
+docs/run-rails.md:55:`pnpm dogfood:rails` exercises RunForge's own checks through `runforge run --task command-check`. Artifacts are written under:
+docs/runspec.md:15:  "taskType": "command-check",
+docs/runspec.md:30:Supported `taskType` values:
+docs/runspec.md:59:command can run after validation. Other task types normalize to `safe-local`.
+docs/runspec.md:96:- `taskType`
+docs/runspec.md:121:  "taskType": "context-pack",
+docs/runspec.md:159:  "taskType": "context-pack",
+docs/runspec.md:210:  "taskType": "code-proposal",
+docs/runspec.md:243:To review a code proposal, open `patch-summary.md` for the task summary, files proposed to change, rationale, safety status, and manual next step. Then inspect `proposal.patch`. A human may apply the patch manually outside RunForge with `git apply path/to/proposal.patch` after review.
+docs/runspec.md:284:the portable contract for one run: task type, inputs, artifact placement, and
+docs/safety-model.md:29:RunForge records safety policy decisions in run artifacts and uses explicit safety profiles for task execution.
+docs/safety-model.md:46:- `task.md`
+docs/templates/external-dogfood-report.md:11:- Docs-only task:

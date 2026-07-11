@@ -1,0 +1,132 @@
+{
+  "runId": "AGENT-OS-2-CODE",
+  "date": "2026-07-10",
+  "taskAccepted": "Inspect task-run harness code and report the next smallest implementation gap.",
+  "taskKind": "code-inspection",
+  "planningBasis": [
+    "Task asks for harness code inspection.",
+    "Use CLI, harness, renderer, tests, and prior run artifacts as primary evidence."
+  ],
+  "mode": "task-specific repeatable harness",
+  "status": "completed",
+  "artifacts": {
+    "plan": "validation/runs/AGENT-OS-2-CODE/plan.md",
+    "summary": "validation/runs/AGENT-OS-2-CODE/summary.md",
+    "results": "validation/runs/AGENT-OS-2-CODE/results.json",
+    "subtasks": "validation/runs/AGENT-OS-2-CODE/subtasks/"
+  },
+  "isolation": {
+    "method": "disposable tmp workspace snapshots",
+    "root": "/tmp/runforge-agent-os-2-code",
+    "containerUsed": false,
+    "containerGap": "Docker/container isolation is recorded as a future gap, not current task-run scope."
+  },
+  "subtasks": [
+    {
+      "id": "01-cli-and-entrypoint-map",
+      "goal": "Map how the task-run command accepts a task and writes run artifacts.",
+      "workspace": "/tmp/runforge-agent-os-2-code/01-cli-and-entrypoint-map/workspace",
+      "inputsInspected": [
+        "src/cli/commands/task-run.ts",
+        "package.json"
+      ],
+      "findings": [
+        "CLI options, default check command, and demo command wiring. Evidence command passed with exit code 0.",
+        "01-cli-and-entrypoint-map inspected 2 input(s) and captured 30 stdout line(s). Sample: import { Command, InvalidArgumentError } from \"commander\"; | import { renderTaskRunCliSummary, runTaskRunHarness } from \"../../run/task-run-harness.js\"; | export function taskRunCommand(): Command {"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log"
+      ],
+      "evidence": {
+        "command": "sed -n '1,220p' src/cli/commands/task-run.ts && rg -n \"task-run\" package.json",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/AGENT-OS-2-CODE/subtasks/01-cli-and-entrypoint-map/command.log",
+        "inspected": [
+          "src/cli/commands/task-run.ts",
+          "package.json"
+        ],
+        "summary": "01-cli-and-entrypoint-map inspected 2 input(s) and captured 30 stdout line(s). Sample: import { Command, InvalidArgumentError } from \"commander\"; | import { renderTaskRunCliSummary, runTaskRunHarness } from \"../../run/task-run-harness.js\"; | export function taskRunCommand(): Command {"
+      },
+      "report": "validation/runs/AGENT-OS-2-CODE/subtasks/01-cli-and-entrypoint-map/report.md"
+    },
+    {
+      "id": "02-planner-executor-gap",
+      "goal": "Inspect planner, isolation, evidence, and aggregation behavior in harness code.",
+      "workspace": "/tmp/runforge-agent-os-2-code/02-planner-executor-gap/workspace",
+      "inputsInspected": [
+        "src/run/task-run-harness.ts",
+        "src/run/task-run-renderer.ts"
+      ],
+      "findings": [
+        "Static versus task-derived planning and whether commands/logs are captured per subtask. Evidence command passed with exit code 0.",
+        "02-planner-executor-gap inspected 2 input(s) and captured 49 stdout line(s). Sample: src/run/task-run-renderer.ts:4:export function renderPlan(runId: string, task: string, tmpRoot: string, checkCommand: string, plan: TaskRunPlan): string { | src/run/task-run-renderer.ts:33:${plan.subtasks.map((item, index) => `${index + 1}. \\`${item.id}\\`: ${item.goal}`).join(\"\\n\")} | src/run/task-run-renderer.ts:37:${plan.subtasks.map((item) => `- \\`${item.id}\\`: \\`${item.evidenceCommand}\\``).join(\"\\n\")}"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log"
+      ],
+      "evidence": {
+        "command": "rg -n \"subtasks|renderPlan|renderReport|runCheck|copyWorkspace|evidence|aggregation|recommended\" src/run/task-run-harness.ts src/run/task-run-renderer.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/AGENT-OS-2-CODE/subtasks/02-planner-executor-gap/command.log",
+        "inspected": [
+          "src/run/task-run-harness.ts",
+          "src/run/task-run-renderer.ts"
+        ],
+        "summary": "02-planner-executor-gap inspected 2 input(s) and captured 49 stdout line(s). Sample: src/run/task-run-renderer.ts:4:export function renderPlan(runId: string, task: string, tmpRoot: string, checkCommand: string, plan: TaskRunPlan): string { | src/run/task-run-renderer.ts:33:${plan.subtasks.map((item, index) => `${index + 1}. \\`${item.id}\\`: ${item.goal}`).join(\"\\n\")} | src/run/task-run-renderer.ts:37:${plan.subtasks.map((item) => `- \\`${item.id}\\`: \\`${item.evidenceCommand}\\``).join(\"\\n\")}"
+      },
+      "report": "validation/runs/AGENT-OS-2-CODE/subtasks/02-planner-executor-gap/report.md"
+    },
+    {
+      "id": "03-test-and-artifact-gap",
+      "goal": "Check whether tests and prior artifacts prove task-specific plans and evidence.",
+      "workspace": "/tmp/runforge-agent-os-2-code/03-test-and-artifact-gap/workspace",
+      "inputsInspected": [
+        "tests/unit/task-run-renderer.test.ts",
+        "validation/runs/TASK-RUN-4/results.json"
+      ],
+      "findings": [
+        "Coverage of planning/aggregation and previous artifact limitations. Evidence command passed with exit code 0.",
+        "03-test-and-artifact-gap inspected 2 input(s) and captured 101 stdout line(s). Sample: import { describe, expect, it } from \"vitest\"; | import type { TaskRunResult } from \"../../src/run/task-run-harness.js\"; | import { planTaskRun } from \"../../src/run/task-run-planner.js\";"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log"
+      ],
+      "evidence": {
+        "command": "sed -n '1,220p' tests/unit/task-run-renderer.test.ts && rg -n \"taskKind|planningBasis|evidence|Remaining Gaps|subtasks\" validation/runs/TASK-RUN-4/results.json",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/AGENT-OS-2-CODE/subtasks/03-test-and-artifact-gap/command.log",
+        "inspected": [
+          "tests/unit/task-run-renderer.test.ts",
+          "validation/runs/TASK-RUN-4/results.json"
+        ],
+        "summary": "03-test-and-artifact-gap inspected 2 input(s) and captured 101 stdout line(s). Sample: import { describe, expect, it } from \"vitest\"; | import type { TaskRunResult } from \"../../src/run/task-run-harness.js\"; | import { planTaskRun } from \"../../src/run/task-run-planner.js\";"
+      },
+      "report": "validation/runs/AGENT-OS-2-CODE/subtasks/03-test-and-artifact-gap/report.md"
+    }
+  ],
+  "checks": [
+    {
+      "command": "corepack pnpm check:structure",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "ownerConclusion": "The accepted code task was answered from harness evidence: the next smallest gap is real executor dispatch for subtasks, because planning and artifact rendering can now be task-specific but execution is still shell-inspection based.",
+  "remainingGaps": [
+    "Docker/container isolation is still recorded as a gap; disposable tmp workspace snapshots are used now.",
+    "Subtask execution runs evidence commands, not delegated coding/review agents."
+  ],
+  "recommendedNextStep": "Recommended next milestone: real executor dispatch."
+}

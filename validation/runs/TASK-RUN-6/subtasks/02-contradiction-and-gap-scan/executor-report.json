@@ -1,0 +1,20 @@
+{
+  "request": {
+    "id": "TASK-RUN-6:02-contradiction-and-gap-scan:local-shell",
+    "subtaskId": "02-contradiction-and-gap-scan",
+    "command": "rg -n \"missing|gap|not yet|future|frozen|out of scope|not the product|drift|container|VPS|executor|aggregation|owner\" docs/ROADMAP.md docs/CURRENT_STATE.md docs/DECISIONS.md docs/NON_GOALS.md docs/USE_CASES.md",
+    "cwd": "/tmp/runforge-task-run-6/02-contradiction-and-gap-scan/workspace",
+    "artifactDir": "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "local-shell",
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan/stdout.log",
+    "stderrLog": "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan/stderr.log",
+    "commandLog": "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan/command.log"
+  }
+}

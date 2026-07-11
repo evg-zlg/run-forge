@@ -1,0 +1,53 @@
+{
+  "reviewer": "deterministic-evidence-reviewer",
+  "provider": "providerless",
+  "status": "accepted",
+  "confidence": "medium",
+  "findings": [
+    {
+      "severity": "info",
+      "message": "Reviewed 3 subtask report(s), 3 command status record(s), and 1 owner check(s).",
+      "evidenceReferences": [
+        "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/report.md",
+        "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan/report.md",
+        "validation/runs/TASK-RUN-6/subtasks/03-next-milestone-readiness/report.md",
+        "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/command.log",
+        "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/stdout.log",
+        "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/stderr.log"
+      ]
+    },
+    {
+      "severity": "info",
+      "message": "All subtask evidence commands completed successfully.",
+      "evidenceReferences": []
+    },
+    {
+      "severity": "info",
+      "message": "The owner check passed.",
+      "evidenceReferences": []
+    }
+  ],
+  "risks": [
+    "Docker/container isolation is still recorded as a gap; disposable tmp workspace snapshots are used now.",
+    "Docs review is deterministic keyword evidence, not semantic contradiction reasoning."
+  ],
+  "recommendedNextAction": "Owner can use the summary and review artifacts as evidence for the next milestone decision.",
+  "evidenceReferences": [
+    "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/report.md",
+    "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan/report.md",
+    "validation/runs/TASK-RUN-6/subtasks/03-next-milestone-readiness/report.md",
+    "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/command.log",
+    "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/stdout.log",
+    "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/stderr.log",
+    "validation/runs/TASK-RUN-6/subtasks/01-roadmap-source-map/executor-report.json",
+    "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan/command.log",
+    "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan/stdout.log",
+    "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan/stderr.log",
+    "validation/runs/TASK-RUN-6/subtasks/02-contradiction-and-gap-scan/executor-report.json",
+    "validation/runs/TASK-RUN-6/subtasks/03-next-milestone-readiness/command.log",
+    "validation/runs/TASK-RUN-6/subtasks/03-next-milestone-readiness/stdout.log",
+    "validation/runs/TASK-RUN-6/subtasks/03-next-milestone-readiness/stderr.log",
+    "validation/runs/TASK-RUN-6/subtasks/03-next-milestone-readiness/executor-report.json"
+  ],
+  "humanDecisionRequired": true
+}

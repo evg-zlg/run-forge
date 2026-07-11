@@ -1,0 +1,91 @@
+$ rg -n "RunForge|Agent OS|task|harness|roadmap|current" README.md docs/ROADMAP.md docs/CURRENT_STATE.md
+executor: local-shell
+requestId: task-run-readiness:01-task-context-map:local-shell
+cwd: /tmp/runforge-task-run-readiness/01-task-context-map/workspace
+timeoutMs: 30000
+status: passed
+exitCode: 0
+signal: null
+
+## stdout
+README.md:1:# RunForge
+README.md:3:RunForge is a local agentic engineering harness for turning an engineering task into a reviewable artifact packet. The current MVP demonstrates one safe loop: collect task context, capture deterministic check evidence, generate a proposal-only patch, record safety decisions, and hand the result to a human reviewer.
+README.md:5:It solves the "what did the agent see, do, and propose?" problem for local code work. Instead of hiding work inside an autonomous run, RunForge writes the task, context, command evidence, trajectory, safety report, patch proposal, and human review packet to disk so a person can inspect the decision trail before anything is applied.
+README.md:7:RunForge is not a SaaS product, dashboard, remote compute system, queue, provider platform, LLM coding agent, auto-PR tool, auto-merge tool, or automatic patch applier. The MVP is local, deterministic, proposal-only, and human-gated.
+README.md:15:RunForge alpha has passed external docs proposal validation on SmartSQL, PartKom B2C, and Factory with proposal-only packets, `git apply --check` success, and no target-repo mutation. See [docs/alpha-snapshot-2026-07-02.md](docs/alpha-snapshot-2026-07-02.md).
+README.md:24:Before external trials, make sure the RunForge checkout is current:
+README.md:57:The copied workspace is intentionally not treated as a Git repository. RunForge
+README.md:64:Multi-command checks currently continue after a failed command. The final
+README.md:70:when RunForge successfully produces a complete packet, even if the command
+README.md:71:status is `failed` or `timed_out`; RunForge internal errors still exit non-zero.
+README.md:161:- `task.md`
+README.md:167:RunForge routes engineering tasks through explicit rails:
+README.md:175:RunForge supports five local task types:
+README.md:195:Task-specific artifacts are written beside those common files. The original failure triage task still writes:
+README.md:229:runforge run --task repo-research --repo . --goal "Map package scripts" --out ./runforge-artifacts
+README.md:230:runforge run --task code-proposal --repo . --goal "Propose a fix" --out ./runforge-artifacts
+README.md:231:runforge run --task command-check --repo . --command "pnpm test" --safety-profile trusted-local --out ./runforge-artifacts
+README.md:274:or mutate the external repository. The final CLI summary prints the RunForge
+README.md:284:Inspect `patch-summary.md` and `proposal.patch` in the emitted run directory. If a human accepts the proposal, they can apply it manually outside RunForge with `git apply path/to/proposal.patch`.
+README.md:298:- `artifacts/mvp-demo/sample-js-fix/task.md` - the task RunForge attempted.
+README.md:306:The demo proves the current local harness can compose task context, deterministic failure evidence, gated code proposal artifacts, `git apply --check` validation, and a human review packet without mutating the fixture repo.
+README.md:315:pnpm dev run --task context-pack --repo ./fixtures/repos/sample-js --goal "Prepare local context" --out ./artifacts/rails-context
+README.md:329:MVP triage is read-only against the target repository. RunForge writes only to the requested artifact directory and does not execute repository commands.
+docs/CURRENT_STATE.md:1:# RunForge Current State
+docs/CURRENT_STATE.md:5:RunForge is currently a local, deterministic, artifact-first task-run harness. It has proven a providerless local Agent OS loop for bounded roadmap/code tasks: intake by CLI, deterministic planning/decomposition, disposable workspace snapshots, local shell executor dispatch, logs/artifacts, checks, deterministic review, and owner-ready summaries. It is not yet a complete portable Agent OS because runtime isolation, remote/VPS execution, provider-backed review, richer semantic planning, and apply/merge/deploy control remain gated or missing.
+docs/CURRENT_STATE.md:9:RunForge / Factory is an Agent OS: a portable task execution factory.
+docs/CURRENT_STATE.md:14:task
+docs/CURRENT_STATE.md:28:- Repeatable `task-run start` harness for local providerless task-runs.
+docs/CURRENT_STATE.md:29:- Deterministic task classification for docs review, code inspection, and general review.
+docs/CURRENT_STATE.md:30:- Planner/subtask artifacts, disposable workspace snapshots, executor logs, review artifacts, summary, and results.
+docs/CURRENT_STATE.md:31:- Local shell executor dispatch with per-subtask command logs and executor reports.
+docs/CURRENT_STATE.md:33:- First governor loop that can select and run the next local providerless task-run without per-step owner approval.
+docs/CURRENT_STATE.md:56:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision.
+docs/CURRENT_STATE.md:60:- `TASK-RUN-1`: first manual end-to-end roadmap task run completed.
+docs/CURRENT_STATE.md:61:- `TASK-RUN-2`: repeatable task-run harness completed.
+docs/CURRENT_STATE.md:63:- `TASK-RUN-4`: stale-summary/current-command guard completed.
+docs/CURRENT_STATE.md:64:- `GOVERNOR-1`: first self-driving roadmap loop completed.
+docs/CURRENT_STATE.md:65:- `TASK-RUN-5`: semantic task-specific planning / owner-decision binding completed for the non-provider implementation gap.
+docs/CURRENT_STATE.md:66:- `TASK-RUN-6`: roadmap/current-state synchronization from validation evidence completed.
+docs/CURRENT_STATE.md:72:- Aggregation/compression across subtask logs and artifacts.
+docs/CURRENT_STATE.md:73:- Richer semantic planning beyond current deterministic heuristics.
+docs/CURRENT_STATE.md:74:- Stronger owner-ready synthesis across long or multi-domain task-runs.
+docs/CURRENT_STATE.md:75:- Docs-review planning still needs fresher validation evidence selection; TASK-RUN-6 showed next-milestone readiness evidence still querying TASK-RUN-4 while current evidence reaches TASK-RUN-6.
+docs/CURRENT_STATE.md:84:- New safety layers without direct connection to task execution.
+docs/CURRENT_STATE.md:85:- Internal artifact work that does not improve local providerless task execution, evidence, verification, or owner decisions.
+docs/CURRENT_STATE.md:94:- `docs/focused-roadmap.md`
+docs/CURRENT_STATE.md:112:Do not continue Alpha-28. The current milestone is `TASK-RUN-7: Evidence-aware docs/task-run planner refresh`. The governor may continue local providerless milestones from validation evidence, while stopping for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, or a strategic fork.
+docs/ROADMAP.md:1:# Agent OS / Task Factory Roadmap
+docs/ROADMAP.md:5:RunForge / Factory is an Agent OS: a portable task execution factory.
+docs/ROADMAP.md:7:It lets a person or another agent submit a meaningful task, then routes it through a controlled execution loop:
+docs/ROADMAP.md:10:task
+docs/ROADMAP.md:22:The product is not the internal artifact machinery. The product is reliable end-to-end task execution with enough isolation, evidence, verification, and owner control that a human can safely decide what happens next.
+docs/ROADMAP.md:28:Secondary users are other agents that need to submit tasks into the factory and receive structured outcomes instead of vague chat summaries.
+docs/ROADMAP.md:33:   Accept a task and select the mode: clarify, execute-as-is, or plan-first.
+docs/ROADMAP.md:36:   Break large tasks into small isolated subtasks with clear inputs, outputs, constraints, and verification.
+docs/ROADMAP.md:42:   Run CLI agents, models, shell tools, integrations, and external providers against scoped subtasks.
+docs/ROADMAP.md:45:   Run build, typecheck, tests, lint, CI, safety checks, and task-specific review.
+docs/ROADMAP.md:48:   Collect results, compress context, detect conflicts, expose missing evidence, and identify gaps between subtasks.
+docs/ROADMAP.md:55:The first practical value is one real end-to-end task run: the system accepts a meaningful task, plans it, decomposes it into 2-5 isolated subtasks, runs them in controlled environments, gathers artifacts, verifies the result, and returns an owner-ready report.
+docs/ROADMAP.md:61:- `TASK-RUN-1`: completed the first manual end-to-end roadmap task run.
+docs/ROADMAP.md:62:- `TASK-RUN-2`: completed the repeatable task-run harness.
+docs/ROADMAP.md:64:- `TASK-RUN-4`: completed stale-summary/current-command guard work.
+docs/ROADMAP.md:65:- `GOVERNOR-1`: completed the first self-driving roadmap loop and selected the next task-run without per-step owner approval.
+docs/ROADMAP.md:66:- `TASK-RUN-5`: completed semantic task-specific planning / owner-decision binding for the non-provider implementation gap.
+docs/ROADMAP.md:67:- `TASK-RUN-6`: completed roadmap/current-state synchronization from validation evidence.
+docs/ROADMAP.md:73:The current milestone is `TASK-RUN-7: Evidence-aware docs/task-run planner refresh`.
+docs/ROADMAP.md:75:TASK-RUN-6 synchronized docs with validation evidence and removed stale TASK-RUN-1-only framing. TASK-RUN-7 should close the next evidence-backed gap found during TASK-RUN-6: docs-review planning still used an older TASK-RUN-4 evidence query even though current evidence reaches TASK-RUN-6.
+docs/ROADMAP.md:79:- make docs/task-run planning choose recent validation evidence dynamically enough to avoid stale TASK-RUN-4-only readiness checks;
+docs/ROADMAP.md:84:The next milestone after TASK-RUN-7 should again be selected from validation evidence, not from a static roadmap line.
+docs/ROADMAP.md:97:These are not the product highway. They are the safety/evidence substrate for Agent OS and should be used only when they help complete end-to-end task execution.
+docs/ROADMAP.md:105:- New safety layers without direct connection to task execution.
+docs/ROADMAP.md:106:- Provider/reviewer expansion unless explicitly configured and directly required by a selected task-run.
+docs/ROADMAP.md:111:Before every new task, answer:
+docs/ROADMAP.md:117:5. What will we not do in this task?
+docs/ROADMAP.md:119:If these answers are missing or weak, do not start the task.
+docs/ROADMAP.md:123:The project is drifting when the main output is a new internal viewer, archive, schema, handoff shape, safety layer, or lifecycle report that does not help a task move from intake to verified result to human decision.
+docs/ROADMAP.md:125:The project is on course when a real task can enter the factory, be decomposed, run in isolated execution contexts, produce evidence, pass or fail checks honestly, and return a short owner-ready decision report.
+docs/ROADMAP.md:129:The governor may continue autonomously for local providerless task-runs, evidence checks, documentation synchronization, and owner-ready reports. It must stop for owner approval before secrets, provider configuration, push/merge/deploy, DB/prod access, Alpha-28, or a strategic product fork.
+
+## stderr
+(empty)

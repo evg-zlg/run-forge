@@ -1,0 +1,20 @@
+{
+  "request": {
+    "id": "task-run-readiness:01-task-context-map:local-shell",
+    "subtaskId": "01-task-context-map",
+    "command": "rg -n \"RunForge|Agent OS|task|harness|roadmap|current\" README.md docs/ROADMAP.md docs/CURRENT_STATE.md",
+    "cwd": "/tmp/runforge-task-run-readiness/01-task-context-map/workspace",
+    "artifactDir": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "local-shell",
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/stdout.log",
+    "stderrLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/stderr.log",
+    "commandLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/command.log"
+  }
+}

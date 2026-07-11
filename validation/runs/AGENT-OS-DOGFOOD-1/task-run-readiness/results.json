@@ -1,0 +1,180 @@
+{
+  "runId": "task-run-readiness",
+  "date": "2026-07-10",
+  "taskAccepted": "Assess current Agent OS branch merge readiness and identify blockers",
+  "taskKind": "general-review",
+  "planningBasis": [
+    "Task did not match docs or code heuristics exactly: Assess current Agent OS branch merge readiness and identify blockers",
+    "Use repository overview plus current roadmap docs."
+  ],
+  "mode": "task-specific repeatable harness",
+  "status": "completed",
+  "artifacts": {
+    "plan": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/plan.md",
+    "summary": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/summary.md",
+    "results": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/results.json",
+    "reviewRequest": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/review/review-request.json",
+    "reviewResult": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/review/review-result.json",
+    "reviewMarkdown": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/review/review.md",
+    "providerReviewMetadata": null,
+    "subtasks": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/"
+  },
+  "isolation": {
+    "method": "disposable tmp workspace snapshots",
+    "root": "/tmp/runforge-task-run-readiness",
+    "containerUsed": false,
+    "containerGap": "Docker/container isolation is recorded as a future gap, not current task-run scope."
+  },
+  "selectedMilestone": "semantic planner",
+  "executor": {
+    "lane": "local-shell",
+    "dispatch": "planner subtasks are converted into executor requests before command execution"
+  },
+  "subtasks": [
+    {
+      "id": "01-task-context-map",
+      "goal": "Map the requested task against available repository context.",
+      "workspace": "/tmp/runforge-task-run-readiness/01-task-context-map/workspace",
+      "inputsInspected": [
+        "README.md",
+        "docs/ROADMAP.md",
+        "docs/CURRENT_STATE.md"
+      ],
+      "findings": [
+        "Relevant repository context for the accepted task. Evidence command passed with exit code 0.",
+        "01-task-context-map inspected 3 input(s) and captured 78 stdout line(s). Sample: README.md:1:# RunForge | README.md:3:RunForge is a local agentic engineering harness for turning an engineering task into a reviewable artifact packet. The current MVP demonstrates one safe loop: collect task context, capture deterministic check evidence, generate a proposal-only patch, record safety decisions, and hand the result to a human reviewer. | README.md:5:It solves the \"what did the agent see, do, and propose?\" problem for local code work. Instead of hiding work inside an autonomous run, RunForge writes the task, context, command evidence, trajectory, safety report, patch proposal, and human review packet to disk so a person can inspect the decision trail before anything is applied."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "rg -n \"RunForge|Agent OS|task|harness|roadmap|current\" README.md docs/ROADMAP.md docs/CURRENT_STATE.md",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/command.log",
+        "inspected": [
+          "README.md",
+          "docs/ROADMAP.md",
+          "docs/CURRENT_STATE.md"
+        ],
+        "summary": "01-task-context-map inspected 3 input(s) and captured 78 stdout line(s). Sample: README.md:1:# RunForge | README.md:3:RunForge is a local agentic engineering harness for turning an engineering task into a reviewable artifact packet. The current MVP demonstrates one safe loop: collect task context, capture deterministic check evidence, generate a proposal-only patch, record safety decisions, and hand the result to a human reviewer. | README.md:5:It solves the \"what did the agent see, do, and propose?\" problem for local code work. Instead of hiding work inside an autonomous run, RunForge writes the task, context, command evidence, trajectory, safety report, patch proposal, and human review packet to disk so a person can inspect the decision trail before anything is applied.",
+        "executorReport": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/executor-report.json"
+      },
+      "executor": {
+        "requestId": "task-run-readiness:01-task-context-map:local-shell",
+        "lane": "local-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/command.log",
+          "stdoutLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/stdout.log",
+          "stderrLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/stderr.log",
+          "report": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/executor-report.json"
+        }
+      },
+      "report": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/report.md"
+    },
+    {
+      "id": "02-gap-and-next-action",
+      "goal": "Identify the smallest useful next action for the accepted task.",
+      "workspace": "/tmp/runforge-task-run-readiness/02-gap-and-next-action/workspace",
+      "inputsInspected": [
+        "docs/ROADMAP.md",
+        "docs/NON_GOALS.md"
+      ],
+      "findings": [
+        "Gaps, constraints, and next action candidates. Evidence command passed with exit code 0.",
+        "02-gap-and-next-action inspected 2 input(s) and captured 11 stdout line(s). Sample: docs/ROADMAP.md:18:-> human decision | docs/ROADMAP.md:48:   Collect results, compress context, detect conflicts, expose missing evidence, and identify gaps between subtasks. | docs/ROADMAP.md:51:   Return a short report, evidence, and a decision point: approve, reject, apply, merge, send, or continue."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "rg -n \"Next Milestone|Missing|Frozen|Out Of Scope|gap|decision\" docs/ROADMAP.md docs/NON_GOALS.md",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/command.log",
+        "inspected": [
+          "docs/ROADMAP.md",
+          "docs/NON_GOALS.md"
+        ],
+        "summary": "02-gap-and-next-action inspected 2 input(s) and captured 11 stdout line(s). Sample: docs/ROADMAP.md:18:-> human decision | docs/ROADMAP.md:48:   Collect results, compress context, detect conflicts, expose missing evidence, and identify gaps between subtasks. | docs/ROADMAP.md:51:   Return a short report, evidence, and a decision point: approve, reject, apply, merge, send, or continue.",
+        "executorReport": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/executor-report.json"
+      },
+      "executor": {
+        "requestId": "task-run-readiness:02-gap-and-next-action:local-shell",
+        "lane": "local-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/command.log",
+          "stdoutLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/stdout.log",
+          "stderrLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/stderr.log",
+          "report": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/executor-report.json"
+        }
+      },
+      "report": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/report.md"
+    }
+  ],
+  "checks": [
+    {
+      "command": "corepack pnpm check:structure",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "review": {
+    "request": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/review/review-request.json",
+    "result": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/review/review-result.json",
+    "markdown": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/review/review.md",
+    "reviewer": "deterministic-evidence-reviewer",
+    "provider": "providerless",
+    "providerMetadata": null,
+    "safety": {
+      "mode": "providerless",
+      "readOnly": true,
+      "mutationForbidden": true,
+      "networkAccess": "not_requested",
+      "secretsAccess": "not_requested",
+      "repoAccess": "evidence_packet_only"
+    },
+    "status": "accepted",
+    "confidence": "high",
+    "humanDecisionRequired": true,
+    "recommendedNextAction": "Owner can use the summary and review artifacts as evidence for the next milestone decision.",
+    "evidenceReferences": [
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/report.md",
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/report.md",
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/command.log",
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/stdout.log",
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/stderr.log",
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/01-task-context-map/executor-report.json",
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/command.log",
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/stdout.log",
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/stderr.log",
+      "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/executor-report.json"
+    ]
+  },
+  "ownerConclusion": "The accepted task was routed through a generic repository review path; the result is useful but would benefit from a semantic planner for sharper decomposition. Task: Assess current Agent OS branch merge readiness and identify blockers",
+  "remainingGaps": [
+    "Docker/container isolation is still recorded as a gap; disposable tmp workspace snapshots are used now."
+  ],
+  "recommendedNextMilestone": "semantic planner",
+  "recommendedNextStep": "Recommended next milestone: semantic planner."
+}

@@ -1,0 +1,154 @@
+{
+  "runId": "TASK-RUN-3",
+  "date": "2026-07-10",
+  "taskAccepted": "Review TASK-RUN-1 and TASK-RUN-2 artifacts for Agent OS loop gaps",
+  "mode": "guided repeatable harness",
+  "status": "completed",
+  "artifacts": {
+    "plan": "validation/runs/TASK-RUN-3/plan.md",
+    "summary": "validation/runs/TASK-RUN-3/summary.md",
+    "results": "validation/runs/TASK-RUN-3/results.json",
+    "subtasks": "validation/runs/TASK-RUN-3/subtasks/"
+  },
+  "isolation": {
+    "method": "disposable tmp workspace snapshots",
+    "root": "/tmp/runforge-task-run-3",
+    "containerUsed": false,
+    "containerGap": "Docker/container isolation is recorded as a future gap, not current TASK-RUN-2 scope."
+  },
+  "subtasks": [
+    {
+      "id": "01-intake-and-plan",
+      "goal": "Compare TASK-RUN-1 manual loop and TASK-RUN-2 harness intake/plan artifacts.",
+      "workspace": "/tmp/runforge-task-run-3/01-intake-and-plan/workspace",
+      "inputsInspected": [
+        "validation/runs/TASK-RUN-1/plan.md",
+        "validation/runs/TASK-RUN-1/summary.md",
+        "validation/runs/TASK-RUN-2/plan.md",
+        "validation/runs/TASK-RUN-2/summary.md"
+      ],
+      "findings": [
+        "TASK-RUN-1 used a stable task -> plan -> decomposition -> isolated snapshot -> report pattern.",
+        "TASK-RUN-2 preserves the same shape with a single guided command instead of a broad platform.",
+        "TASK-RUN-3 accepted the new task string, but the generated plan still reused TASK-RUN-2-oriented lanes rather than deriving a fresh semantic decomposition for the gap review."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md"
+      ],
+      "report": "validation/runs/TASK-RUN-3/subtasks/01-intake-and-plan/report.md"
+    },
+    {
+      "id": "02-subtask-isolation",
+      "goal": "Create one disposable tmp workspace snapshot per subtask, including untracked roadmap docs.",
+      "workspace": "/tmp/runforge-task-run-3/02-subtask-isolation/workspace",
+      "inputsInspected": [
+        ".gitignore",
+        "docs/ROADMAP.md",
+        "docs/CURRENT_STATE.md"
+      ],
+      "findings": [
+        "Each subtask receives its own copied workspace under /tmp rather than a shared mutable directory.",
+        "The snapshot copies the current working tree, so untracked roadmap docs are present for review.",
+        "This is real isolation at the disposable-directory level, but not Docker/container, VPS, provider, or agent isolation."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md"
+      ],
+      "report": "validation/runs/TASK-RUN-3/subtasks/02-subtask-isolation/report.md"
+    },
+    {
+      "id": "03-roadmap-consistency-demo",
+      "goal": "Repeat the roadmap consistency style from TASK-RUN-1 without proposing a source-doc patch.",
+      "workspace": "/tmp/runforge-task-run-3/03-roadmap-consistency-demo/workspace",
+      "inputsInspected": [
+        "docs/ROADMAP.md",
+        "docs/DECISIONS.md",
+        "docs/NON_GOALS.md",
+        "docs/USE_CASES.md",
+        "docs/CURRENT_STATE.md",
+        "validation/runs/AGENT-OS-ROADMAP-01/summary.md",
+        "validation/runs/AGENT-OS-ROADMAP-01/roadmap-review.json",
+        "validation/runs/TASK-RUN-1/summary.md",
+        "validation/runs/TASK-RUN-1/results.json"
+      ],
+      "findings": [
+        "The run remains scoped to repeatability of the Agent OS loop, not Alpha-28 or platform expansion.",
+        "Docker/container execution is recorded as a future gap, not implemented in this milestone.",
+        "Task intake, artifact creation, tmp snapshot isolation, and structure checks are real.",
+        "Semantic planning, executor dispatch, command-log-rich subtask execution, aggregation, and owner-brief correctness are still simulated, templated, or manual."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md"
+      ],
+      "report": "validation/runs/TASK-RUN-3/subtasks/03-roadmap-consistency-demo/report.md"
+    },
+    {
+      "id": "04-check-and-owner-summary",
+      "goal": "Run the configured check command and aggregate owner-ready summary/results artifacts.",
+      "workspace": "/tmp/runforge-task-run-3/04-check-and-owner-summary/workspace",
+      "inputsInspected": [
+        "package.json",
+        "scripts/check-structure.mjs",
+        "validation/runs/TASK-RUN-2"
+      ],
+      "findings": [
+        "The harness records the check command and result in results.json.",
+        "The initial owner summary stated command, artifacts, isolation, improved gaps, remaining gaps, and next milestone, but it did not answer the TASK-RUN-3 required questions.",
+        "Owner brief correctness is the smallest next gap because stale template output is cheaper to fix than Docker isolation, executor dispatch, or a full semantic planner."
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md"
+      ],
+      "report": "validation/runs/TASK-RUN-3/subtasks/04-check-and-owner-summary/report.md"
+    }
+  ],
+  "checks": [
+    {
+      "command": "corepack pnpm check:structure",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "gapReport": {
+    "fullLoopImplemented": "partial",
+    "real": [
+      "CLI task intake recorded the task string.",
+      "Plan, summary, results, and subtask artifacts were created.",
+      "Each subtask had a disposable tmp workspace snapshot.",
+      "corepack pnpm check:structure ran and passed."
+    ],
+    "simulatedOrTemplated": [
+      "Planner and decomposition reused fixed TASK-RUN-2 lanes instead of semantic task-specific planning.",
+      "Executor dispatch was deterministic report generation, not separate agents or providers.",
+      "Aggregation was template rendering plus manual review.",
+      "The initial owner summary carried stale TASK-RUN-2 wording and missed the requested questions."
+    ],
+    "manual": [
+      "Semantic review of report completeness.",
+      "Correction of stale template output.",
+      "Gap prioritization and next milestone recommendation."
+    ],
+    "smallestNextGap": "owner brief",
+    "recommendation": "Run one tiny code task first, then build Docker after the harness proves task-specific planning, evidence, and owner-brief correctness."
+  },
+  "improvedTaskRun1Gaps": [
+    "Generated instructions use corepack pnpm.",
+    "TASK-RUN validation artifacts are no longer hidden by default gitignore policy.",
+    "Snapshots copy the working tree so untracked roadmap docs are included.",
+    "Semantic notes call out where regex checks are insufficient."
+  ],
+  "remainingGaps": [
+    "No Docker/container lane.",
+    "No broad scheduler/provider/dashboard platform.",
+    "Harness is deterministic and scoped to the TASK-RUN-1 pattern."
+  ],
+  "recommendedNextMilestone": "Run one more small real task through this harness, then consider Docker isolation as the next narrow gap."
+}

@@ -1,0 +1,234 @@
+{
+  "runId": "TASK-RUN-5",
+  "date": "2026-07-10",
+  "taskAccepted": "Inspect task-run harness and identify the next non-provider implementation gap after executor dispatch",
+  "taskKind": "code-inspection",
+  "planningBasis": [
+    "Task asks for a non-provider harness implementation gap after executor dispatch.",
+    "Recent governor evidence identified owner-conclusion drift toward provider work for non-provider tasks.",
+    "Use planner, owner-decision, renderer, tests, and GOVERNOR-1 artifacts as primary evidence."
+  ],
+  "mode": "task-specific repeatable harness",
+  "status": "completed",
+  "artifacts": {
+    "plan": "validation/runs/TASK-RUN-5/plan.md",
+    "summary": "validation/runs/TASK-RUN-5/summary.md",
+    "results": "validation/runs/TASK-RUN-5/results.json",
+    "reviewRequest": "validation/runs/TASK-RUN-5/review/review-request.json",
+    "reviewResult": "validation/runs/TASK-RUN-5/review/review-result.json",
+    "reviewMarkdown": "validation/runs/TASK-RUN-5/review/review.md",
+    "providerReviewMetadata": null,
+    "subtasks": "validation/runs/TASK-RUN-5/subtasks/"
+  },
+  "isolation": {
+    "method": "disposable tmp workspace snapshots",
+    "root": "/tmp/runforge-task-run-5",
+    "containerUsed": false,
+    "containerGap": "Docker/container isolation is recorded as a future gap, not current task-run scope."
+  },
+  "selectedMilestone": "semantic task-specific planning / owner-decision binding",
+  "executor": {
+    "lane": "local-shell",
+    "dispatch": "planner subtasks are converted into executor requests before command execution"
+  },
+  "subtasks": [
+    {
+      "id": "01-planner-task-binding",
+      "goal": "Verify planner classification and recommended milestone bind to semantic task-specific planning / owner-decision binding.",
+      "workspace": "/tmp/runforge-task-run-5/01-planner-task-binding/workspace",
+      "inputsInspected": [
+        "src/run/task-run-planner.ts",
+        "validation/runs/GOVERNOR-1/results.json"
+      ],
+      "findings": [
+        "Planner task binding, selected milestone propagation, and non-provider intent. Evidence command passed with exit code 0.",
+        "01-planner-task-binding inspected 2 input(s) and captured 27 stdout line(s). Sample: validation/runs/GOVERNOR-1/results.json:29:    \"currentUsefulGap\": \"Semantic task-specific planning and owner-decision binding.\", | validation/runs/GOVERNOR-1/results.json:40:    \"rationale\": \"TASK-RUN-4 recommended deriving plan/decomposition/evidence from accepted task text, and GOVERNOR-1 selected-task-run still showed stale provider-oriented owner synthesis for a non-provider task.\" | validation/runs/GOVERNOR-1/results.json:43:    \"command\": \"corepack pnpm dev task-run start --task \\\"Inspect task-run harness and identify the next non-provider implementation gap after executor dispatch\\\" --out validation/runs/GOVERNOR-1/selected-task-run\","
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "rg -n \"semantic task-specific planning|owner-decision|non-provider|recommendedNextMilestone|codePlan|planTaskRun\" src/run/task-run-planner.ts validation/runs/GOVERNOR-1/results.json",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/command.log",
+        "inspected": [
+          "src/run/task-run-planner.ts",
+          "validation/runs/GOVERNOR-1/results.json"
+        ],
+        "summary": "01-planner-task-binding inspected 2 input(s) and captured 27 stdout line(s). Sample: validation/runs/GOVERNOR-1/results.json:29:    \"currentUsefulGap\": \"Semantic task-specific planning and owner-decision binding.\", | validation/runs/GOVERNOR-1/results.json:40:    \"rationale\": \"TASK-RUN-4 recommended deriving plan/decomposition/evidence from accepted task text, and GOVERNOR-1 selected-task-run still showed stale provider-oriented owner synthesis for a non-provider task.\" | validation/runs/GOVERNOR-1/results.json:43:    \"command\": \"corepack pnpm dev task-run start --task \\\"Inspect task-run harness and identify the next non-provider implementation gap after executor dispatch\\\" --out validation/runs/GOVERNOR-1/selected-task-run\",",
+        "executorReport": "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/executor-report.json"
+      },
+      "executor": {
+        "requestId": "TASK-RUN-5:01-planner-task-binding:local-shell",
+        "lane": "local-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/command.log",
+          "stdoutLog": "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/stdout.log",
+          "stderrLog": "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/stderr.log",
+          "report": "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/executor-report.json"
+        }
+      },
+      "report": "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/report.md"
+    },
+    {
+      "id": "02-owner-decision-binding",
+      "goal": "Verify owner decision text recommends semantic task-specific planning / owner-decision binding without provider drift.",
+      "workspace": "/tmp/runforge-task-run-5/02-owner-decision-binding/workspace",
+      "inputsInspected": [
+        "src/run/task-run-owner-decision.ts",
+        "tests/unit/task-run-renderer.test.ts"
+      ],
+      "findings": [
+        "Owner conclusion and remaining-gap logic for non-provider code tasks. Evidence command passed with exit code 0.",
+        "02-owner-decision-binding inspected 2 input(s) and captured 42 stdout line(s). Sample: tests/unit/task-run-renderer.test.ts:33:    expect(summary).toContain(\"Provider review metadata: n/a (providerless default)\"); | tests/unit/task-run-renderer.test.ts:58:  it(\"builds providerless review requests from evidence and returns read-only review results\", async () => { | tests/unit/task-run-renderer.test.ts:78:    expect(review.provider).toBe(\"providerless\");"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "rg -n \"semantic task-specific planning|owner-decision binding|non-provider|provider|delegated\" src/run/task-run-owner-decision.ts tests/unit/task-run-renderer.test.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/command.log",
+        "inspected": [
+          "src/run/task-run-owner-decision.ts",
+          "tests/unit/task-run-renderer.test.ts"
+        ],
+        "summary": "02-owner-decision-binding inspected 2 input(s) and captured 42 stdout line(s). Sample: tests/unit/task-run-renderer.test.ts:33:    expect(summary).toContain(\"Provider review metadata: n/a (providerless default)\"); | tests/unit/task-run-renderer.test.ts:58:  it(\"builds providerless review requests from evidence and returns read-only review results\", async () => { | tests/unit/task-run-renderer.test.ts:78:    expect(review.provider).toBe(\"providerless\");",
+        "executorReport": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/executor-report.json"
+      },
+      "executor": {
+        "requestId": "TASK-RUN-5:02-owner-decision-binding:local-shell",
+        "lane": "local-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/command.log",
+          "stdoutLog": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/stdout.log",
+          "stderrLog": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/stderr.log",
+          "report": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/executor-report.json"
+        }
+      },
+      "report": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/report.md"
+    },
+    {
+      "id": "03-artifact-consistency-check",
+      "goal": "Confirm plan, summary, review, and results artifacts expose semantic task-specific planning / owner-decision binding.",
+      "workspace": "/tmp/runforge-task-run-5/03-artifact-consistency-check/workspace",
+      "inputsInspected": [
+        "src/run/task-run-renderer.ts",
+        "src/run/task-run-reviewer.ts"
+      ],
+      "findings": [
+        "Selected milestone rendering across owner-visible artifacts. Evidence command passed with exit code 0.",
+        "03-artifact-consistency-check inspected 2 input(s) and captured 65 stdout line(s). Sample: src/run/task-run-reviewer.ts:4:export { CliDelegatedEvidenceReviewer } from \"./task-run-cli-reviewer.js\"; | src/run/task-run-reviewer.ts:56:  reviewer: \"deterministic-evidence-reviewer\" | \"mock-delegated-evidence-reviewer\" | \"cli-delegated-evidence-reviewer\"; | src/run/task-run-reviewer.ts:73:  reviewer: ReviewResult[\"reviewer\"];"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "rg -n \"selectedMilestone|recommendedNextMilestone|Recommended Next Milestone|Selected Milestone|review\" src/run/task-run-renderer.ts src/run/task-run-reviewer.ts",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/command.log",
+        "inspected": [
+          "src/run/task-run-renderer.ts",
+          "src/run/task-run-reviewer.ts"
+        ],
+        "summary": "03-artifact-consistency-check inspected 2 input(s) and captured 65 stdout line(s). Sample: src/run/task-run-reviewer.ts:4:export { CliDelegatedEvidenceReviewer } from \"./task-run-cli-reviewer.js\"; | src/run/task-run-reviewer.ts:56:  reviewer: \"deterministic-evidence-reviewer\" | \"mock-delegated-evidence-reviewer\" | \"cli-delegated-evidence-reviewer\"; | src/run/task-run-reviewer.ts:73:  reviewer: ReviewResult[\"reviewer\"];",
+        "executorReport": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/executor-report.json"
+      },
+      "executor": {
+        "requestId": "TASK-RUN-5:03-artifact-consistency-check:local-shell",
+        "lane": "local-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/command.log",
+          "stdoutLog": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/stdout.log",
+          "stderrLog": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/stderr.log",
+          "report": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/executor-report.json"
+        }
+      },
+      "report": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/report.md"
+    }
+  ],
+  "checks": [
+    {
+      "command": "corepack pnpm check:structure",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "review": {
+    "request": "validation/runs/TASK-RUN-5/review/review-request.json",
+    "result": "validation/runs/TASK-RUN-5/review/review-result.json",
+    "markdown": "validation/runs/TASK-RUN-5/review/review.md",
+    "reviewer": "deterministic-evidence-reviewer",
+    "provider": "providerless",
+    "providerMetadata": null,
+    "safety": {
+      "mode": "providerless",
+      "readOnly": true,
+      "mutationForbidden": true,
+      "networkAccess": "not_requested",
+      "secretsAccess": "not_requested",
+      "repoAccess": "evidence_packet_only"
+    },
+    "status": "accepted",
+    "confidence": "medium",
+    "humanDecisionRequired": true,
+    "recommendedNextAction": "Owner can use the summary and review artifacts as evidence for the next milestone decision.",
+    "evidenceReferences": [
+      "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/report.md",
+      "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/report.md",
+      "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/report.md",
+      "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/command.log",
+      "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/stdout.log",
+      "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/stderr.log",
+      "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/executor-report.json",
+      "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/command.log",
+      "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/stdout.log",
+      "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/stderr.log",
+      "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/executor-report.json",
+      "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/command.log",
+      "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/stdout.log",
+      "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/stderr.log",
+      "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/executor-report.json"
+    ]
+  },
+  "ownerConclusion": "The accepted non-provider code task was answered from harness evidence: the next gap is semantic task-specific planning / owner-decision binding, because planner lanes and owner conclusions must follow the accepted task instead of drifting toward provider work.",
+  "remainingGaps": [
+    "Docker/container isolation is still recorded as a gap; disposable tmp workspace snapshots are used now.",
+    "Planner lanes, selected milestone, and owner conclusions still need stronger binding to the accepted task."
+  ],
+  "recommendedNextMilestone": "semantic task-specific planning / owner-decision binding",
+  "recommendedNextStep": "Recommended next milestone: semantic task-specific planning / owner-decision binding."
+}

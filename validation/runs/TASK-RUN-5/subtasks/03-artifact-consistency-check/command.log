@@ -1,0 +1,78 @@
+$ rg -n "selectedMilestone|recommendedNextMilestone|Recommended Next Milestone|Selected Milestone|review" src/run/task-run-renderer.ts src/run/task-run-reviewer.ts
+executor: local-shell
+requestId: TASK-RUN-5:03-artifact-consistency-check:local-shell
+cwd: /tmp/runforge-task-run-5/03-artifact-consistency-check/workspace
+timeoutMs: 30000
+status: passed
+exitCode: 0
+signal: null
+
+## stdout
+src/run/task-run-reviewer.ts:4:export { CliDelegatedEvidenceReviewer } from "./task-run-cli-reviewer.js";
+src/run/task-run-reviewer.ts:56:  reviewer: "deterministic-evidence-reviewer" | "mock-delegated-evidence-reviewer" | "cli-delegated-evidence-reviewer";
+src/run/task-run-reviewer.ts:73:  reviewer: ReviewResult["reviewer"];
+src/run/task-run-reviewer.ts:76:  reviewOnly: true;
+src/run/task-run-reviewer.ts:93:  review(request: ReviewRequest): Promise<ReviewResult>;
+src/run/task-run-reviewer.ts:97:  async review(request: ReviewRequest): Promise<ReviewResult> {
+src/run/task-run-reviewer.ts:139:      reviewer: "deterministic-evidence-reviewer",
+src/run/task-run-reviewer.ts:147:          ? "Owner can use the summary and review artifacts as evidence for the next milestone decision."
+src/run/task-run-reviewer.ts:156:  async review(request: ReviewRequest): Promise<ReviewResult> {
+src/run/task-run-reviewer.ts:157:    const deterministic = await new DeterministicEvidenceReviewer().review(request);
+src/run/task-run-reviewer.ts:160:      reviewer: "mock-delegated-evidence-reviewer",
+src/run/task-run-reviewer.ts:168:            "Mock delegated review consumed the evidence packet only and proved the provider review contract without network, secrets, repo mutation, or patch output.",
+src/run/task-run-reviewer.ts:169:          evidenceReferences: ["review/review-request.json", ...request.logPaths.map((item) => item.executorReport)]
+src/run/task-run-reviewer.ts:174:          ? "Owner can use the delegated mock review as contract proof, then decide whether to wire a real read-only provider behind the same gate."
+src/run/task-run-reviewer.ts:183:  reviewer: ReviewResult["reviewer"];
+src/run/task-run-reviewer.ts:190:  reviewRequestPath: string;
+src/run/task-run-reviewer.ts:191:  reviewResultPath: string;
+src/run/task-run-reviewer.ts:192:  reviewMarkdownPath: string;
+src/run/task-run-reviewer.ts:203:    adapterName: input.adapterName ?? (input.provider === "mock" ? "mock-delegated-evidence-reviewer" : "deterministic-evidence-reviewer"),
+src/run/task-run-reviewer.ts:205:    reviewer: input.reviewer,
+src/run/task-run-reviewer.ts:208:    reviewOnly: true,
+src/run/task-run-reviewer.ts:221:      input.reviewRequestPath,
+src/run/task-run-reviewer.ts:226:    outputArtifacts: [input.reviewResultPath, input.reviewMarkdownPath]
+src/run/task-run-reviewer.ts:280:      ? "This review is read-only and providerless. It reviews task-run evidence artifacts only; it does not execute commands, mutate files, apply patches, push, merge, deploy, or access secrets."
+src/run/task-run-reviewer.ts:281:      : "This delegated review is read-only and evidence-packet-only. The provider receives a bounded input package and must not execute commands, mutate files, apply patches, push, merge, deploy, or access secrets.";
+src/run/task-run-reviewer.ts:285:Reviewer: \`${result.reviewer}\`
+src/run/task-run-reviewer.ts:299:## Selected Milestone
+src/run/task-run-reviewer.ts:301:${request.plan.recommendedNextMilestone}
+src/run/task-run-renderer.ts:3:import { reviewSafety } from "./task-run-review-safety.js";
+src/run/task-run-renderer.ts:128:- Review lane: \`${result.review.resultPayload.reviewer}\` using \`${result.review.resultPayload.provider}\`
+src/run/task-run-renderer.ts:129:- Selected milestone: \`${result.selectedMilestone}\`
+src/run/task-run-renderer.ts:133:- Review status: \`${result.review.resultPayload.status}\`
+src/run/task-run-renderer.ts:134:- Confidence: \`${result.review.resultPayload.confidence}\`
+src/run/task-run-renderer.ts:135:- Human decision required: ${result.review.resultPayload.humanDecisionRequired ? "yes" : "no"}
+src/run/task-run-renderer.ts:136:- Review request: \`${result.review.request}\`
+src/run/task-run-renderer.ts:137:- Review result: \`${result.review.result}\`
+src/run/task-run-renderer.ts:138:- Review markdown: \`${result.review.markdown}\`
+src/run/task-run-renderer.ts:139:${result.review.providerMetadata ? `- Provider review metadata: \`${result.review.providerMetadata}\`` : "- Provider review metadata: n/a (providerless default)"}
+src/run/task-run-renderer.ts:141:${result.review.resultPayload.findings.map((item) => `- ${item.severity}: ${item.message}`).join("\n")}
+src/run/task-run-renderer.ts:162:- \`${result.review.request}\`
+src/run/task-run-renderer.ts:163:- \`${result.review.result}\`
+src/run/task-run-renderer.ts:164:- \`${result.review.markdown}\`
+src/run/task-run-renderer.ts:165:${result.review.providerMetadata ? `- \`${result.review.providerMetadata}\`` : ""}
+src/run/task-run-renderer.ts:198:## Recommended Next Milestone
+src/run/task-run-renderer.ts:218:  const mode = result.review.providerMetadataPayload?.mode;
+src/run/task-run-renderer.ts:219:  const delegated = mode === "delegated-cli" ? " --delegated-review cli" : mode === "delegated-mock" ? " --delegated-review mock" : "";
+src/run/task-run-renderer.ts:236:      reviewRequest: result.review.request,
+src/run/task-run-renderer.ts:237:      reviewResult: result.review.result,
+src/run/task-run-renderer.ts:238:      reviewMarkdown: result.review.markdown,
+src/run/task-run-renderer.ts:239:      providerReviewMetadata: result.review.providerMetadata ?? null,
+src/run/task-run-renderer.ts:248:    selectedMilestone: result.selectedMilestone,
+src/run/task-run-renderer.ts:278:    review: {
+src/run/task-run-renderer.ts:279:      request: result.review.request,
+src/run/task-run-renderer.ts:280:      result: result.review.result,
+src/run/task-run-renderer.ts:281:      markdown: result.review.markdown,
+src/run/task-run-renderer.ts:282:      reviewer: result.review.resultPayload.reviewer,
+src/run/task-run-renderer.ts:283:      provider: result.review.resultPayload.provider,
+src/run/task-run-renderer.ts:284:      providerMetadata: result.review.providerMetadata ?? null,
+src/run/task-run-renderer.ts:285:      safety: reviewSafety(result),
+src/run/task-run-renderer.ts:286:      status: result.review.resultPayload.status,
+src/run/task-run-renderer.ts:287:      confidence: result.review.resultPayload.confidence,
+src/run/task-run-renderer.ts:288:      humanDecisionRequired: result.review.resultPayload.humanDecisionRequired,
+src/run/task-run-renderer.ts:289:      recommendedNextAction: result.review.resultPayload.recommendedNextAction,
+src/run/task-run-renderer.ts:290:      evidenceReferences: result.review.resultPayload.evidenceReferences
+src/run/task-run-renderer.ts:294:    recommendedNextMilestone: result.selectedMilestone,
+
+## stderr
+(empty)

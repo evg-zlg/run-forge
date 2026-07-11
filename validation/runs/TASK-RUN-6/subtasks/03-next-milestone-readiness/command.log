@@ -1,0 +1,58 @@
+$ rg -n "Next Milestone|TASK-RUN|Remaining Gaps|Recommended Next Milestone|semantic planning|executor dispatch|aggregation|Docker" docs/ROADMAP.md docs/CURRENT_STATE.md validation/runs/TASK-RUN-4/summary.md
+executor: local-shell
+requestId: TASK-RUN-6:03-next-milestone-readiness:local-shell
+cwd: /tmp/runforge-task-run-6/03-next-milestone-readiness/workspace
+timeoutMs: 30000
+status: passed
+exitCode: 0
+signal: null
+
+## stdout
+validation/runs/TASK-RUN-4/summary.md:1:# TASK-RUN-4 Summary
+validation/runs/TASK-RUN-4/summary.md:7:Inspect the task-run harness and add one narrow guard that prevents stale copied task wording in generated TASK-RUN summaries
+validation/runs/TASK-RUN-4/summary.md:18:- `corepack pnpm dev task-run start --task "Inspect the task-run harness and add one narrow guard that prevents stale copied task wording in generated TASK-RUN summaries" --out validation/runs/TASK-RUN-4`
+validation/runs/TASK-RUN-4/summary.md:23:- `validation/runs/TASK-RUN-4/plan.md`
+validation/runs/TASK-RUN-4/summary.md:24:- `validation/runs/TASK-RUN-4/results.json`
+validation/runs/TASK-RUN-4/summary.md:25:- `validation/runs/TASK-RUN-4/summary.md`
+validation/runs/TASK-RUN-4/summary.md:26:- `validation/runs/TASK-RUN-4/subtasks/`
+validation/runs/TASK-RUN-4/summary.md:37:Docker/container isolation was not implemented. It remains a future gap.
+validation/runs/TASK-RUN-4/summary.md:41:- `01-intake-and-plan`: TASK-RUN-1 used a stable task -> plan -> decomposition -> isolated snapshot -> report pattern.
+validation/runs/TASK-RUN-4/summary.md:48:Generated summaries can look current by run heading while retaining copied command/task wording from an older TASK-RUN artifact.
+validation/runs/TASK-RUN-4/summary.md:58:## TASK-RUN-1 Gaps Improved
+validation/runs/TASK-RUN-4/summary.md:61:- TASK-RUN validation artifacts are unhidden by gitignore policy for review.
+validation/runs/TASK-RUN-4/summary.md:65:## Remaining Gaps
+validation/runs/TASK-RUN-4/summary.md:67:- No Docker/container lane yet.
+validation/runs/TASK-RUN-4/summary.md:69:- Semantic planning, executor dispatch, aggregation, per-lane command evidence, and owner-brief correctness remain mostly manual/simulated.
+validation/runs/TASK-RUN-4/summary.md:71:## Recommended Next Milestone
+validation/runs/TASK-RUN-4/summary.md:73:Make the plan/decomposition and subtask evidence derive from the accepted task instead of the remaining static TASK-RUN template.
+docs/ROADMAP.md:39:   Execute locally or on VPS in a worktree, Docker/container, disposable workspace, or other bounded runtime.
+docs/ROADMAP.md:61:- `TASK-RUN-1`: completed the first manual end-to-end roadmap task run.
+docs/ROADMAP.md:62:- `TASK-RUN-2`: completed the repeatable task-run harness.
+docs/ROADMAP.md:63:- `TASK-RUN-3`: completed a gap review and exposed static planning/owner-summary limits.
+docs/ROADMAP.md:64:- `TASK-RUN-4`: completed stale-summary/current-command guard work.
+docs/ROADMAP.md:66:- `TASK-RUN-5`: completed semantic task-specific planning / owner-decision binding for the non-provider implementation gap.
+docs/ROADMAP.md:68:The loop is still local and providerless by default. It uses disposable workspace snapshots, local shell executor dispatch, deterministic evidence review, and owner-ready artifacts. Docker/container isolation, remote/VPS execution, provider-backed reviewers, and push/merge/deploy remain outside the default autonomous lane.
+docs/ROADMAP.md:72:The current milestone is `TASK-RUN-6: Roadmap/current-state synchronization from validation evidence`.
+docs/ROADMAP.md:74:`TASK-RUN-6` must:
+docs/ROADMAP.md:76:- read roadmap/current/use-case/decision/non-goal docs and TASK-RUN/GOVERNOR validation evidence;
+docs/ROADMAP.md:77:- remove stale language that treats TASK-RUN-1 as the only next milestone, except as historical context;
+docs/ROADMAP.md:82:The next milestone after TASK-RUN-6 should be selected from validation evidence, not from a static roadmap line.
+docs/CURRENT_STATE.md:5:RunForge is currently a local, deterministic, artifact-first task-run harness. It has proven a providerless local Agent OS loop for bounded roadmap/code tasks: intake by CLI, deterministic planning/decomposition, disposable workspace snapshots, local shell executor dispatch, logs/artifacts, checks, deterministic review, and owner-ready summaries. It is not yet a complete portable Agent OS because runtime isolation, remote/VPS execution, provider-backed review, richer semantic planning, and apply/merge/deploy control remain gated or missing.
+docs/CURRENT_STATE.md:31:- Local shell executor dispatch with per-subtask command logs and executor reports.
+docs/CURRENT_STATE.md:56:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision.
+docs/CURRENT_STATE.md:60:- `TASK-RUN-1`: first manual end-to-end roadmap task run completed.
+docs/CURRENT_STATE.md:61:- `TASK-RUN-2`: repeatable task-run harness completed.
+docs/CURRENT_STATE.md:62:- `TASK-RUN-3`: gap review completed; static planning and weak owner synthesis exposed.
+docs/CURRENT_STATE.md:63:- `TASK-RUN-4`: stale-summary/current-command guard completed.
+docs/CURRENT_STATE.md:65:- `TASK-RUN-5`: semantic task-specific planning / owner-decision binding completed for the non-provider implementation gap.
+docs/CURRENT_STATE.md:69:- Runtime selection across local worktree, Docker/container, VPS, or other isolated execution lanes.
+docs/CURRENT_STATE.md:72:- Richer semantic planning beyond current deterministic heuristics.
+docs/CURRENT_STATE.md:100:- `validation/runs/TASK-RUN-1/summary.md`
+docs/CURRENT_STATE.md:101:- `validation/runs/TASK-RUN-2/summary.md`
+docs/CURRENT_STATE.md:102:- `validation/runs/TASK-RUN-3/summary.md`
+docs/CURRENT_STATE.md:103:- `validation/runs/TASK-RUN-4/summary.md`
+docs/CURRENT_STATE.md:105:- `validation/runs/TASK-RUN-5/summary.md`
+docs/CURRENT_STATE.md:109:Do not continue Alpha-28. The current milestone is `TASK-RUN-6: Roadmap/current-state synchronization from validation evidence`. After TASK-RUN-6, the governor may select the next local providerless milestone from validation evidence, while stopping for secrets, provider config, push/merge/deploy, DB/prod, Alpha-28, or a strategic fork.
+
+## stderr
+(empty)

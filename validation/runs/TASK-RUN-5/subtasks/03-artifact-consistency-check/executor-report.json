@@ -1,0 +1,20 @@
+{
+  "request": {
+    "id": "TASK-RUN-5:03-artifact-consistency-check:local-shell",
+    "subtaskId": "03-artifact-consistency-check",
+    "command": "rg -n \"selectedMilestone|recommendedNextMilestone|Recommended Next Milestone|Selected Milestone|review\" src/run/task-run-renderer.ts src/run/task-run-reviewer.ts",
+    "cwd": "/tmp/runforge-task-run-5/03-artifact-consistency-check/workspace",
+    "artifactDir": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "local-shell",
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/stdout.log",
+    "stderrLog": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/stderr.log",
+    "commandLog": "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/command.log"
+  }
+}

@@ -1,0 +1,63 @@
+$ rg -n "missing|gap|not yet|future|frozen|out of scope|not the product|drift|container|VPS|executor|aggregation|owner" docs/ROADMAP.md docs/CURRENT_STATE.md docs/DECISIONS.md docs/NON_GOALS.md docs/USE_CASES.md
+executor: local-shell
+requestId: TASK-RUN-6:02-contradiction-and-gap-scan:local-shell
+cwd: /tmp/runforge-task-run-6/02-contradiction-and-gap-scan/workspace
+timeoutMs: 30000
+status: passed
+exitCode: 0
+signal: null
+
+## stdout
+docs/CURRENT_STATE.md:5:RunForge is currently a local, deterministic, artifact-first task-run harness. It has proven a providerless local Agent OS loop for bounded roadmap/code tasks: intake by CLI, deterministic planning/decomposition, disposable workspace snapshots, local shell executor dispatch, logs/artifacts, checks, deterministic review, and owner-ready summaries. It is not yet a complete portable Agent OS because runtime isolation, remote/VPS execution, provider-backed review, richer semantic planning, and apply/merge/deploy control remain gated or missing.
+docs/CURRENT_STATE.md:30:- Planner/subtask artifacts, disposable workspace snapshots, executor logs, review artifacts, summary, and results.
+docs/CURRENT_STATE.md:31:- Local shell executor dispatch with per-subtask command logs and executor reports.
+docs/CURRENT_STATE.md:33:- First governor loop that can select and run the next local providerless task-run without per-step owner approval.
+docs/CURRENT_STATE.md:56:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision.
+docs/CURRENT_STATE.md:62:- `TASK-RUN-3`: gap review completed; static planning and weak owner synthesis exposed.
+docs/CURRENT_STATE.md:65:- `TASK-RUN-5`: semantic task-specific planning / owner-decision binding completed for the non-provider implementation gap.
+docs/CURRENT_STATE.md:69:- Runtime selection across local worktree, Docker/container, VPS, or other isolated execution lanes.
+docs/CURRENT_STATE.md:73:- Stronger owner-ready synthesis across long or multi-domain task-runs.
+docs/CURRENT_STATE.md:74:- Apply / merge / send / continue controls remain owner-gated and are not autonomous.
+docs/CURRENT_STATE.md:83:- Internal artifact work that does not improve local providerless task execution, evidence, verification, or owner decisions.
+docs/CURRENT_STATE.md:84:- Push, merge, deploy, DB/prod access, secrets, or provider config without owner approval.
+docs/USE_CASES.md:20:- return an owner-ready report with evidence and a decision point.
+docs/USE_CASES.md:22:Minimum artifact: `owner-ready-report.md` or equivalent report that includes task, plan, subtask outcomes, execution locations, logs/artifacts, checks, unresolved gaps, and recommended decision.
+docs/USE_CASES.md:24:Milestone result: one real task moved from intake to verified result without requiring the owner to inspect raw packet internals first.
+docs/USE_CASES.md:36:- update owner-facing docs when validation evidence makes roadmap language stale;
+docs/USE_CASES.md:39:Minimum artifact: a `validation/runs/TASK-RUN-*` or `validation/runs/GOVERNOR-*` package with plan, results, summary, subtasks, evidence, and owner-ready decision.
+docs/USE_CASES.md:41:Milestone: the owner can give a high-level goal, and the governor can perform one local providerless roadmap loop with evidence and explicit stop gates.
+docs/USE_CASES.md:55:Goal: turn a large task into bounded executor-ready subtasks.
+docs/USE_CASES.md:61:Goal: run subtasks locally or on VPS without contaminating the source workspace.
+docs/USE_CASES.md:63:Minimum artifact: execution record with sandbox type, repo/worktree/container path, command log, and produced artifacts.
+docs/USE_CASES.md:75:Minimum artifact: owner-ready report with approve/reject/apply/merge/send/continue recommendation.
+docs/NON_GOALS.md:13:- Push, merge, deploy, DB/prod access, secrets, or provider configuration without owner approval.
+docs/NON_GOALS.md:29:- SaaS hosting before the local/VPS task loop works.
+docs/NON_GOALS.md:32:- Autonomous patch apply without owner control.
+docs/NON_GOALS.md:37:- Dashboards that require the owner to inspect raw internals before seeing the task outcome.
+docs/NON_GOALS.md:41:If a feature cannot answer "how does this improve the local providerless task-run/governor loop from intake to evidence to owner decision?", it is outside the current roadmap.
+docs/DECISIONS.md:7:Decision: RunForge / Factory is now framed as Agent OS / Task Factory, a portable task execution factory for routing meaningful tasks through intake, planning, decomposition, isolated execution, verification, aggregation, and human decision.
+docs/DECISIONS.md:9:This replaces the previous "choose one of owner brief / CI triage / task loop" milestone framing. Owner briefs, CI triage, PR readiness, handoffs, packets, and archives remain useful only as parts of end-to-end task execution.
+docs/DECISIONS.md:34:- Runtime / Sandbox: run locally or on VPS in worktrees, containers, or disposable workspaces.
+docs/DECISIONS.md:37:- Aggregation / Compression: collect results, compress context, detect conflicts, and expose gaps.
+docs/DECISIONS.md:47:- executor logs;
+docs/DECISIONS.md:50:- aggregation summary;
+docs/DECISIONS.md:51:- owner-ready report;
+docs/DECISIONS.md:72:Decision: the governor may continue autonomously for local providerless task-runs, evidence checks, documentation synchronization, and owner-ready reports.
+docs/ROADMAP.md:22:The product is not the internal artifact machinery. The product is reliable end-to-end task execution with enough isolation, evidence, verification, and owner control that a human can safely decide what happens next.
+docs/ROADMAP.md:26:The first user is an owner/operator who delegates real work across codebases, models, agents, tools, local machines, and VPS executors.
+docs/ROADMAP.md:39:   Execute locally or on VPS in a worktree, Docker/container, disposable workspace, or other bounded runtime.
+docs/ROADMAP.md:48:   Collect results, compress context, detect conflicts, expose missing evidence, and identify gaps between subtasks.
+docs/ROADMAP.md:55:The first practical value is one real end-to-end task run: the system accepts a meaningful task, plans it, decomposes it into 2-5 isolated subtasks, runs them in controlled environments, gathers artifacts, verifies the result, and returns an owner-ready report.
+docs/ROADMAP.md:63:- `TASK-RUN-3`: completed a gap review and exposed static planning/owner-summary limits.
+docs/ROADMAP.md:65:- `GOVERNOR-1`: completed the first self-driving roadmap loop and selected the next task-run without per-step owner approval.
+docs/ROADMAP.md:66:- `TASK-RUN-5`: completed semantic task-specific planning / owner-decision binding for the non-provider implementation gap.
+docs/ROADMAP.md:68:The loop is still local and providerless by default. It uses disposable workspace snapshots, local shell executor dispatch, deterministic evidence review, and owner-ready artifacts. Docker/container isolation, remote/VPS execution, provider-backed reviewers, and push/merge/deploy remain outside the default autonomous lane.
+docs/ROADMAP.md:95:These are not the product highway. They are the safety/evidence substrate for Agent OS and should be used only when they help complete end-to-end task execution.
+docs/ROADMAP.md:105:- Push, merge, deploy, DB/prod access, or secrets without owner approval.
+docs/ROADMAP.md:117:If these answers are missing or weak, do not start the task.
+docs/ROADMAP.md:121:The project is drifting when the main output is a new internal viewer, archive, schema, handoff shape, safety layer, or lifecycle report that does not help a task move from intake to verified result to human decision.
+docs/ROADMAP.md:123:The project is on course when a real task can enter the factory, be decomposed, run in isolated execution contexts, produce evidence, pass or fail checks honestly, and return a short owner-ready decision report.
+docs/ROADMAP.md:127:The governor may continue autonomously for local providerless task-runs, evidence checks, documentation synchronization, and owner-ready reports. It must stop for owner approval before secrets, provider configuration, push/merge/deploy, DB/prod access, Alpha-28, or a strategic product fork.
+
+## stderr
+(empty)

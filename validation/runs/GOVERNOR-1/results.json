@@ -1,0 +1,79 @@
+{
+  "runId": "GOVERNOR-1",
+  "date": "2026-07-10",
+  "branch": "codex/agent-os-governor-1",
+  "mode": "self-driving-roadmap-loop",
+  "status": "completed",
+  "providerMode": "providerless",
+  "ownerGoal": "Run the first self-driving roadmap loop and execute one next task-run without per-step owner approval.",
+  "docsRead": [
+    "docs/ROADMAP.md",
+    "docs/CURRENT_STATE.md",
+    "docs/USE_CASES.md",
+    "docs/NON_GOALS.md"
+  ],
+  "recentEvidenceRead": [
+    "validation/runs/TASK-RUN-1/summary.md",
+    "validation/runs/TASK-RUN-2/summary.md",
+    "validation/runs/TASK-RUN-3/summary.md",
+    "validation/runs/TASK-RUN-4/summary.md",
+    "validation/runs/TASK-RUN-4/results.json",
+    "validation/runs/AGENT-OS-PROVIDER-1-DEFAULT/summary.md",
+    "validation/runs/AGENT-OS-PROVIDER-1-DEFAULT/results.json",
+    "validation/runs/AGENT-OS-PROVIDER-1-REAL-OR-UNAVAILABLE/summary.md",
+    "validation/runs/AGENT-OS-PROVIDER-1-REAL-OR-UNAVAILABLE/results.json"
+  ],
+  "stateAssessment": {
+    "roadmapDocLag": true,
+    "roadmapDocLagNote": "Roadmap still names TASK-RUN-1 as the only next milestone, while validation evidence shows TASK-RUN-1 through provider-unavailable review lanes already exist.",
+    "currentUsefulGap": "Semantic task-specific planning and owner-decision binding.",
+    "notSelected": [
+      "Alpha-28",
+      "viewer/archive/handoff/OKF features",
+      "provider/reviewer microsteps",
+      "push/merge/deploy"
+    ]
+  },
+  "selectedMilestone": {
+    "id": "TASK-RUN-5",
+    "name": "Semantic task-specific planning",
+    "rationale": "TASK-RUN-4 recommended deriving plan/decomposition/evidence from accepted task text, and GOVERNOR-1 selected-task-run still showed stale provider-oriented owner synthesis for a non-provider task."
+  },
+  "selectedTaskRun": {
+    "command": "corepack pnpm dev task-run start --task \"Inspect task-run harness and identify the next non-provider implementation gap after executor dispatch\" --out validation/runs/GOVERNOR-1/selected-task-run",
+    "outDir": "validation/runs/GOVERNOR-1/selected-task-run",
+    "status": "completed",
+    "check": {
+      "command": "corepack pnpm check:structure",
+      "result": "passed"
+    },
+    "review": {
+      "provider": "providerless",
+      "reviewer": "deterministic-evidence-reviewer",
+      "status": "accepted",
+      "providerMetadata": null
+    }
+  },
+  "evidenceVerification": {
+    "subtaskCommandsPassed": true,
+    "executorReportsPresent": true,
+    "reviewAccepted": true,
+    "providerlessDefaultPreserved": true,
+    "ownerConclusionDriftDetected": true
+  },
+  "artifacts": {
+    "summary": "validation/runs/GOVERNOR-1/summary.md",
+    "results": "validation/runs/GOVERNOR-1/results.json",
+    "selectedTask": "validation/runs/GOVERNOR-1/selected-task.md",
+    "approvalGates": "validation/runs/GOVERNOR-1/approval-gates.md",
+    "selectedTaskRun": "validation/runs/GOVERNOR-1/selected-task-run/"
+  },
+  "approvalGates": {
+    "ownerApprovalNeededNow": false,
+    "secretsRequested": false,
+    "providerConfigUsed": false,
+    "pushMergeDeployAttempted": false,
+    "strategicForkReached": false
+  },
+  "recommendedNextMilestone": "Implement TASK-RUN-5: Semantic task-specific planning."
+}

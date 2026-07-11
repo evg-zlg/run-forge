@@ -1,0 +1,20 @@
+{
+  "request": {
+    "id": "TASK-RUN-5:02-owner-decision-binding:local-shell",
+    "subtaskId": "02-owner-decision-binding",
+    "command": "rg -n \"semantic task-specific planning|owner-decision binding|non-provider|provider|delegated\" src/run/task-run-owner-decision.ts tests/unit/task-run-renderer.test.ts",
+    "cwd": "/tmp/runforge-task-run-5/02-owner-decision-binding/workspace",
+    "artifactDir": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "local-shell",
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/stdout.log",
+    "stderrLog": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/stderr.log",
+    "commandLog": "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/command.log"
+  }
+}

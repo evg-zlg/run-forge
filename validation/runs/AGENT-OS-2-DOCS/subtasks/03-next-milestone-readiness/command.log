@@ -1,0 +1,35 @@
+$ rg -n "Next Milestone|TASK-RUN|Remaining Gaps|Recommended Next Milestone|semantic planning|executor dispatch|aggregation|Docker" docs/ROADMAP.md docs/CURRENT_STATE.md validation/runs/TASK-RUN-4/summary.md
+exitCode: 0
+
+## stdout
+docs/CURRENT_STATE.md:50:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision.
+docs/CURRENT_STATE.md:52:## Missing For TASK-RUN-1
+docs/CURRENT_STATE.md:56:- Runtime selection across local worktree, disposable workspace, Docker/container, or VPS.
+docs/CURRENT_STATE.md:88:Do not continue Alpha-28. The next milestone is only `TASK-RUN-1: First End-to-End Agent OS Task`.
+docs/ROADMAP.md:39:   Execute locally or on VPS in a worktree, Docker/container, disposable workspace, or other bounded runtime.
+docs/ROADMAP.md:57:## Next Milestone
+docs/ROADMAP.md:59:The only next milestone is `TASK-RUN-1: First End-to-End Agent OS Task`.
+docs/ROADMAP.md:61:`TASK-RUN-1` must:
+docs/ROADMAP.md:72:No other milestone should be started before `TASK-RUN-1` proves the loop.
+docs/ROADMAP.md:87:## Frozen Until TASK-RUN-1
+docs/ROADMAP.md:94:- Internal artifact work that does not make `TASK-RUN-1` more executable, verifiable, or decision-ready.
+validation/runs/TASK-RUN-4/summary.md:1:# TASK-RUN-4 Summary
+validation/runs/TASK-RUN-4/summary.md:7:Inspect the task-run harness and add one narrow guard that prevents stale copied task wording in generated TASK-RUN summaries
+validation/runs/TASK-RUN-4/summary.md:18:- `corepack pnpm dev task-run start --task "Inspect the task-run harness and add one narrow guard that prevents stale copied task wording in generated TASK-RUN summaries" --out validation/runs/TASK-RUN-4`
+validation/runs/TASK-RUN-4/summary.md:23:- `validation/runs/TASK-RUN-4/plan.md`
+validation/runs/TASK-RUN-4/summary.md:24:- `validation/runs/TASK-RUN-4/results.json`
+validation/runs/TASK-RUN-4/summary.md:25:- `validation/runs/TASK-RUN-4/summary.md`
+validation/runs/TASK-RUN-4/summary.md:26:- `validation/runs/TASK-RUN-4/subtasks/`
+validation/runs/TASK-RUN-4/summary.md:37:Docker/container isolation was not implemented. It remains a future gap.
+validation/runs/TASK-RUN-4/summary.md:41:- `01-intake-and-plan`: TASK-RUN-1 used a stable task -> plan -> decomposition -> isolated snapshot -> report pattern.
+validation/runs/TASK-RUN-4/summary.md:48:Generated summaries can look current by run heading while retaining copied command/task wording from an older TASK-RUN artifact.
+validation/runs/TASK-RUN-4/summary.md:58:## TASK-RUN-1 Gaps Improved
+validation/runs/TASK-RUN-4/summary.md:61:- TASK-RUN validation artifacts are unhidden by gitignore policy for review.
+validation/runs/TASK-RUN-4/summary.md:65:## Remaining Gaps
+validation/runs/TASK-RUN-4/summary.md:67:- No Docker/container lane yet.
+validation/runs/TASK-RUN-4/summary.md:69:- Semantic planning, executor dispatch, aggregation, per-lane command evidence, and owner-brief correctness remain mostly manual/simulated.
+validation/runs/TASK-RUN-4/summary.md:71:## Recommended Next Milestone
+validation/runs/TASK-RUN-4/summary.md:73:Make the plan/decomposition and subtask evidence derive from the accepted task instead of the remaining static TASK-RUN template.
+
+## stderr
+(empty)

@@ -1,0 +1,53 @@
+{
+  "reviewer": "deterministic-evidence-reviewer",
+  "provider": "providerless",
+  "status": "accepted",
+  "confidence": "medium",
+  "findings": [
+    {
+      "severity": "info",
+      "message": "Reviewed 3 subtask report(s), 3 command status record(s), and 1 owner check(s).",
+      "evidenceReferences": [
+        "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/report.md",
+        "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/report.md",
+        "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/report.md",
+        "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/command.log",
+        "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/stdout.log",
+        "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/stderr.log"
+      ]
+    },
+    {
+      "severity": "info",
+      "message": "All subtask evidence commands completed successfully.",
+      "evidenceReferences": []
+    },
+    {
+      "severity": "info",
+      "message": "The owner check passed.",
+      "evidenceReferences": []
+    }
+  ],
+  "risks": [
+    "Docker/container isolation is still recorded as a gap; disposable tmp workspace snapshots are used now.",
+    "Planner lanes, selected milestone, and owner conclusions still need stronger binding to the accepted task."
+  ],
+  "recommendedNextAction": "Owner can use the summary and review artifacts as evidence for the next milestone decision.",
+  "evidenceReferences": [
+    "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/report.md",
+    "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/report.md",
+    "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/report.md",
+    "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/command.log",
+    "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/stdout.log",
+    "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/stderr.log",
+    "validation/runs/TASK-RUN-5/subtasks/01-planner-task-binding/executor-report.json",
+    "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/command.log",
+    "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/stdout.log",
+    "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/stderr.log",
+    "validation/runs/TASK-RUN-5/subtasks/02-owner-decision-binding/executor-report.json",
+    "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/command.log",
+    "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/stdout.log",
+    "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/stderr.log",
+    "validation/runs/TASK-RUN-5/subtasks/03-artifact-consistency-check/executor-report.json"
+  ],
+  "humanDecisionRequired": true
+}

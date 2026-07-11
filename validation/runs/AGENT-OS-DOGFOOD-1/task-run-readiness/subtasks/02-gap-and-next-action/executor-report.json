@@ -1,0 +1,20 @@
+{
+  "request": {
+    "id": "task-run-readiness:02-gap-and-next-action:local-shell",
+    "subtaskId": "02-gap-and-next-action",
+    "command": "rg -n \"Next Milestone|Missing|Frozen|Out Of Scope|gap|decision\" docs/ROADMAP.md docs/NON_GOALS.md",
+    "cwd": "/tmp/runforge-task-run-readiness/02-gap-and-next-action/workspace",
+    "artifactDir": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action",
+    "timeoutMs": 30000
+  },
+  "result": {
+    "executor": "local-shell",
+    "status": "passed",
+    "exitCode": 0,
+    "signal": null,
+    "timedOut": false,
+    "stdoutLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/stdout.log",
+    "stderrLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/stderr.log",
+    "commandLog": "validation/runs/AGENT-OS-DOGFOOD-1/task-run-readiness/subtasks/02-gap-and-next-action/command.log"
+  }
+}

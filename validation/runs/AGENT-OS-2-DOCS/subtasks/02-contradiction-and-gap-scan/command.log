@@ -1,0 +1,37 @@
+$ rg -n "missing|gap|not yet|future|frozen|out of scope|not the product|drift|container|VPS|executor|aggregation|owner" docs/ROADMAP.md docs/CURRENT_STATE.md docs/DECISIONS.md docs/NON_GOALS.md docs/USE_CASES.md
+exitCode: 0
+
+## stdout
+docs/NON_GOALS.md:28:- SaaS hosting before the local/VPS task loop works.
+docs/NON_GOALS.md:31:- Autonomous patch apply without owner control.
+docs/NON_GOALS.md:36:- Dashboards that require the owner to inspect raw internals before seeing the task outcome.
+docs/USE_CASES.md:18:- return an owner-ready report with evidence and a decision point.
+docs/USE_CASES.md:20:Minimum artifact: `owner-ready-report.md` or equivalent report that includes task, plan, subtask outcomes, execution locations, logs/artifacts, checks, unresolved gaps, and recommended decision.
+docs/USE_CASES.md:22:Milestone: one real task can move from intake to verified result or honest blocker without requiring the owner to inspect raw packet internals first.
+docs/USE_CASES.md:36:Goal: turn a large task into bounded executor-ready subtasks.
+docs/USE_CASES.md:42:Goal: run subtasks locally or on VPS without contaminating the source workspace.
+docs/USE_CASES.md:44:Minimum artifact: execution record with sandbox type, repo/worktree/container path, command log, and produced artifacts.
+docs/USE_CASES.md:56:Minimum artifact: owner-ready report with approve/reject/apply/merge/send/continue recommendation.
+docs/DECISIONS.md:7:Decision: RunForge / Factory is now framed as Agent OS / Task Factory, a portable task execution factory for routing meaningful tasks through intake, planning, decomposition, isolated execution, verification, aggregation, and human decision.
+docs/DECISIONS.md:9:This replaces the previous "choose one of owner brief / CI triage / task loop" milestone framing. Owner briefs, CI triage, PR readiness, handoffs, packets, and archives remain useful only as parts of end-to-end task execution.
+docs/DECISIONS.md:34:- Runtime / Sandbox: run locally or on VPS in worktrees, containers, or disposable workspaces.
+docs/DECISIONS.md:37:- Aggregation / Compression: collect results, compress context, detect conflicts, and expose gaps.
+docs/DECISIONS.md:47:- executor logs;
+docs/DECISIONS.md:50:- aggregation summary;
+docs/DECISIONS.md:51:- owner-ready report;
+docs/ROADMAP.md:22:The product is not the internal artifact machinery. The product is reliable end-to-end task execution with enough isolation, evidence, verification, and owner control that a human can safely decide what happens next.
+docs/ROADMAP.md:26:The first user is an owner/operator who delegates real work across codebases, models, agents, tools, local machines, and VPS executors.
+docs/ROADMAP.md:39:   Execute locally or on VPS in a worktree, Docker/container, disposable workspace, or other bounded runtime.
+docs/ROADMAP.md:48:   Collect results, compress context, detect conflicts, expose missing evidence, and identify gaps between subtasks.
+docs/ROADMAP.md:55:The first practical value is one real end-to-end task run: the system accepts a meaningful task, plans it, decomposes it into 2-5 isolated subtasks, runs them in controlled environments, gathers artifacts, verifies the result, and returns an owner-ready report.
+docs/ROADMAP.md:70:- return an owner-ready report with evidence and a decision point.
+docs/ROADMAP.md:85:These are not the product highway. They are the safety/evidence substrate for Agent OS and should be used only when they help complete end-to-end task execution.
+docs/ROADMAP.md:106:If these answers are missing or weak, do not start the task.
+docs/ROADMAP.md:110:The project is drifting when the main output is a new internal viewer, archive, schema, handoff shape, safety layer, or lifecycle report that does not help a task move from intake to verified result to human decision.
+docs/ROADMAP.md:112:The project is on course when a real task can enter the factory, be decomposed, run in isolated execution contexts, produce evidence, pass or fail checks honestly, and return a short owner-ready decision report.
+docs/CURRENT_STATE.md:5:RunForge is currently a local, deterministic, artifact-first engineering harness. It can collect evidence, run bounded checks, classify failures, produce proposal/readiness packets, render packet views, record operator decisions, and preserve handoff/archive evidence. It is not yet a complete Agent OS / Task Factory because it has not proven one end-to-end task run.
+docs/CURRENT_STATE.md:50:This is not the product highway. It is safety/evidence substrate for Agent OS. These layers should be reused only when they help a task run from intake through isolated execution, verification, aggregation, and human decision.
+docs/CURRENT_STATE.md:56:- Runtime selection across local worktree, disposable workspace, Docker/container, or VPS.
+
+## stderr
+(empty)
