@@ -28,6 +28,7 @@ function startCommand(): Command {
     .option("--approval-mode <mode>", "owner gate; supported: 'require-owner-decision'", "require-owner-decision")
     .option("--apply-mode <mode>", "apply during start; supported: 'none', 'local-non-main-branch'", "none")
     .option("--target-branch <branch>", "explicit local non-main branch for local branch apply")
+    .option("--publication-mode <mode>", "owner-authorized publication; supported: 'draft-pr'", "none")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger, 300_000)
     .action(async (opts) => {
       try {
@@ -44,6 +45,7 @@ function startCommand(): Command {
             approvalMode: opts.approvalMode as string,
             applyMode: opts.applyMode as string,
             targetBranch: opts.targetBranch as string | undefined,
+            publicationMode: opts.publicationMode as string,
             commands: opts.command as string[],
             tmpRoot: opts.tmpRoot as string | undefined,
             timeoutMs: opts.timeoutMs as number

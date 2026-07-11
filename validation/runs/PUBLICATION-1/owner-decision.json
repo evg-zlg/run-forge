@@ -1,0 +1,11 @@
+{
+  "decision_id": "7e56df7f-475d-4efe-9698-083375befe6f",
+  "decision": "approve",
+  "run_id": "PUBLICATION-1",
+  "patch_package_hash": "b8aa99e6a77f4851fbea89c35c6f2a6a0296b8063cf28f59e9cc35948dbdc966",
+  "patch_diff_hash": "b5452f7609adf311b8fe0870635a1b5caa459a1903c76e1141ab08a1bf464198",
+  "target_mode": "controlled-worktree",
+  "target_branch_or_worktree": "runforge/publication-1-artifact",
+  "owner_note": "Delegated authority PUBLICATION-1-DEMO: Owner-authorized documentation-only commit, non-force branch push, and draft PR creation; merge and deploy remain forbidden.",
+  "created_at": "2026-07-11T14:35:08.249Z"
+}
