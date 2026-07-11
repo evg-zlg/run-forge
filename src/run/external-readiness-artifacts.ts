@@ -18,6 +18,7 @@ export async function writeExternalReadinessArtifacts(result: TaskRunResult, rep
       mode: result.runtime.mode,
       image: result.preparation?.image ?? result.runtime.image,
       target: result.preparation?.target ?? null,
+      preparationMode: result.preparationMode,
       preparationNetwork: result.preparation?.networkUsed ?? false,
       executionNetwork: "none"
     }
@@ -28,6 +29,7 @@ export async function writeExternalReadinessArtifacts(result: TaskRunResult, rep
     sourceBefore: before,
     sourceAfter: after,
     sourceUnchanged: result.sourceRepository.unchanged,
+    safety: result.safety,
     dependency: result.preparation,
     executionCommands: result.subtasks.map((item) => ({
       command: item.evidence.command,
@@ -57,9 +59,9 @@ function renderReadinessReport(result: TaskRunResult): string {
   const targetPassed = result.subtasks.every((item) => item.executor.status === "passed");
   const environmentFailure = result.subtasks.some((item) => /out of memory|cannot find module|EACCES|unsupported platform|missing optional dependency/i.test(`${item.executor.stdout}\n${item.executor.stderr}`));
   const factoryClassification = targetPassed ? "passed" : environmentFailure ? "environment/setup issue" : "deterministic failure";
-  const capabilityClassification = result.preparation && result.sourceRepository.unchanged && result.subtasks.some((item) => item.id === "02-test" && /RUN\s+v\d/i.test(item.executor.stdout))
-    ? "passed"
-    : "environment/setup issue";
+  const capabilityClassification = result.safety.sourceMutationDetected
+    ? "unsafe/not runnable"
+    : targetPassed ? "passed" : "environment/setup issue";
   return `# ${result.runId} External Execution Readiness Report
 
 ## Classifications
@@ -75,7 +77,8 @@ function renderReadinessReport(result: TaskRunResult): string {
 - Status before: ${result.sourceRepository.before?.status || "clean"}
 - Status after: ${result.sourceRepository.after?.status || "clean"}
 - Original repository changed: ${result.sourceRepository.unchanged ? "no" : "yes"}
-- Preparation strategy: \`${result.preparation?.strategy ?? "none"}\`
+- Preparation mode: \`${result.preparationMode}\`
+- Preparation strategy: \`${result.preparation?.strategy ?? "read-only host dependency snapshot"}\`
 - Package manager: \`${result.preparation?.packageManager ?? "not detected"}\`
 - Lockfile hash: \`${result.preparation?.lockfileHash ?? "not recorded"}\`
 - Preparation network used: ${result.preparation?.networkUsed ? "yes" : "no"}
@@ -88,6 +91,9 @@ function renderReadinessReport(result: TaskRunResult): string {
 ${result.subtasks.map((item) => `- \`${item.evidence.command}\`: ${item.executor.status} (exit ${item.executor.exitCode})`).join("\n")}
 
 RunForge check: \`${result.checks[0]?.command}\` -> ${result.checks[0]?.result}.
+
+Source immutability gate: \`${result.sourceRepository.unchanged ? "passed" : "failed"}\`.
+${result.safety.blockingFailures.map((item) => `- Blocking safety failure: ${item}`).join("\n")}
 
 ## Owner Guidance
 

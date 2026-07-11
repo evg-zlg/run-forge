@@ -1,8 +1,8 @@
 {
-  "capturedAt": "2026-07-11T07:05:27.981Z",
+  "capturedAt": "2026-07-11T10:31:33.456Z",
   "runForge": {
     "path": "/Users/evgeny/Documents/projects/RunForge",
-    "head": "95e3d8050110597ccbe8b9f6d805340188cbc793"
+    "head": "25c2904627bba094183fff29d0983dc56adcbd4f"
   },
   "target": {
     "path": "/Users/evgeny/Documents/projects/factory",
@@ -19,6 +19,7 @@
       "platform": "linux",
       "architecture": "arm64"
     },
+    "preparationMode": "explicit",
     "preparationNetwork": true,
     "executionNetwork": "none"
   }

@@ -1,6 +1,6 @@
 {
   "runId": "EXTERNAL-RUN-3",
-  "acceptedTask": "Run full external repository validation readiness loop",
+  "acceptedTask": "Run full external repository validation readiness loop after safety fix",
   "taskKind": "code-inspection",
   "plan": {
     "kind": "code-inspection",
@@ -18,92 +18,95 @@
     "recommendedNextMilestone": "safe disposable repair execution",
     "subtasks": [
       {
-        "id": "01-typecheck",
-        "goal": "Run the target repository typecheck.",
+        "id": "01-external-validation",
+        "goal": "Run external validation command 1.",
         "inputs": [
           "package.json",
-          "tsconfig.json",
-          "src"
+          "package-lock.json",
+          "src",
+          "tests"
         ],
-        "evidenceFocus": "TypeScript validation result.",
+        "evidenceFocus": "External repository validation result.",
         "evidenceCommand": "npm run typecheck"
       },
       {
-        "id": "02-test",
-        "goal": "Run the target repository test suite through collection and execution.",
+        "id": "02-external-validation",
+        "goal": "Run external validation command 2.",
         "inputs": [
           "package.json",
-          "tests",
-          "src"
+          "package-lock.json",
+          "src",
+          "tests"
         ],
-        "evidenceFocus": "Actual test collection and execution result.",
+        "evidenceFocus": "External repository validation result.",
         "evidenceCommand": "npm test"
       },
       {
-        "id": "03-build",
-        "goal": "Run the target repository production build.",
+        "id": "03-external-validation",
+        "goal": "Run external validation command 3.",
         "inputs": [
           "package.json",
-          "tsconfig.json",
-          "src"
+          "package-lock.json",
+          "src",
+          "tests"
         ],
-        "evidenceFocus": "Build validation result.",
+        "evidenceFocus": "External repository validation result.",
         "evidenceCommand": "npm run build"
       }
     ]
   },
   "subtaskReports": [
     {
-      "id": "01-typecheck",
-      "goal": "Run the target repository typecheck.",
-      "reportPath": "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/report.md",
+      "id": "01-external-validation",
+      "goal": "Run external validation command 1.",
+      "reportPath": "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/report.md",
       "findings": [
-        "TypeScript validation result. Evidence command passed with exit code 0.",
-        "01-typecheck inspected 3 input(s) and captured 2 stdout line(s). Sample: > factory-loop@0.1.0 typecheck | > tsc -p tsconfig.json --noEmit"
+        "External repository validation result. Evidence command passed with exit code 0.",
+        "01-external-validation inspected 4 input(s) and captured 2 stdout line(s). Sample: > factory-loop@0.1.0 typecheck | > tsc -p tsconfig.json --noEmit"
       ],
       "status": "done"
     },
     {
-      "id": "02-test",
-      "goal": "Run the target repository test suite through collection and execution.",
-      "reportPath": "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/report.md",
+      "id": "02-external-validation",
+      "goal": "Run external validation command 2.",
+      "reportPath": "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/report.md",
       "findings": [
-        "Actual test collection and execution result. Evidence command passed with exit code 0.",
-        "02-test inspected 3 input(s) and captured 560 stdout line(s). Sample: > factory-loop@0.1.0 test | > vitest run | RUN  v2.1.9 /workspace"
+        "External repository validation result. Evidence command passed with exit code 0.",
+        "02-external-validation inspected 4 input(s) and captured 561 stdout line(s). Sample: > factory-loop@0.1.0 test | > vitest run | RUN  v2.1.9 /workspace"
       ],
       "status": "done"
     },
     {
-      "id": "03-build",
-      "goal": "Run the target repository production build.",
-      "reportPath": "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/report.md",
+      "id": "03-external-validation",
+      "goal": "Run external validation command 3.",
+      "reportPath": "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/report.md",
       "findings": [
-        "Build validation result. Evidence command passed with exit code 0.",
-        "03-build inspected 3 input(s) and captured 2 stdout line(s). Sample: > factory-loop@0.1.0 build | > tsc -p tsconfig.json && cp -r src/ui/*.html src/ui/*.css src/ui/*.js dist/ui/ && cp -r src/ui/lib src/ui/views dist/ui/"
+        "External repository validation result. Evidence command passed with exit code 0.",
+        "03-external-validation inspected 4 input(s) and captured 2 stdout line(s). Sample: > factory-loop@0.1.0 build | > tsc -p tsconfig.json && cp -r src/ui/*.html src/ui/*.css src/ui/*.js dist/ui/ && cp -r src/ui/lib src/ui/views dist/ui/"
       ],
       "status": "done"
     }
   ],
   "executorResults": [
     {
-      "subtaskId": "01-typecheck",
-      "requestId": "EXTERNAL-RUN-3:01-typecheck:docker-shell",
+      "subtaskId": "01-external-validation",
+      "requestId": "EXTERNAL-RUN-3:01-external-validation:docker-shell",
       "executor": "docker-shell",
       "status": "passed",
       "exitCode": 0,
       "timedOut": false
     },
     {
-      "subtaskId": "02-test",
-      "requestId": "EXTERNAL-RUN-3:02-test:docker-shell",
+      "subtaskId": "02-external-validation",
+      "requestId": "EXTERNAL-RUN-3:02-external-validation:docker-shell",
       "executor": "docker-shell",
       "status": "passed",
       "exitCode": 0,
       "timedOut": false
     },
     {
-      "subtaskId": "03-build",
-      "requestId": "EXTERNAL-RUN-3:03-build:docker-shell",
+      "subtaskId": "03-external-validation",
+      "requestId": "EXTERNAL-RUN-3:03-external-validation:docker-shell",
       "executor": "docker-shell",
       "status": "passed",
       "exitCode": 0,
@@ -112,19 +115,19 @@
   ],
   "commandStatuses": [
     {
-      "subtaskId": "01-typecheck",
+      "subtaskId": "01-external-validation",
       "command": "npm run typecheck",
       "status": "passed",
       "exitCode": 0
     },
     {
-      "subtaskId": "02-test",
+      "subtaskId": "02-external-validation",
       "command": "npm test",
       "status": "passed",
       "exitCode": 0
     },
     {
-      "subtaskId": "03-build",
+      "subtaskId": "03-external-validation",
       "command": "npm run build",
       "status": "passed",
       "exitCode": 0
@@ -132,30 +135,35 @@
   ],
   "logPaths": [
     {
-      "subtaskId": "01-typecheck",
-      "commandLog": "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/command.log",
-      "stdoutLog": "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/stdout.log",
-      "stderrLog": "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/stderr.log",
-      "executorReport": "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/executor-report.json"
+      "subtaskId": "01-external-validation",
+      "commandLog": "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/command.log",
+      "stdoutLog": "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/stdout.log",
+      "stderrLog": "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/stderr.log",
+      "executorReport": "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/executor-report.json"
     },
     {
-      "subtaskId": "02-test",
-      "commandLog": "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/command.log",
-      "stdoutLog": "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/stdout.log",
-      "stderrLog": "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/stderr.log",
-      "executorReport": "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/executor-report.json"
+      "subtaskId": "02-external-validation",
+      "commandLog": "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/command.log",
+      "stdoutLog": "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/stdout.log",
+      "stderrLog": "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/stderr.log",
+      "executorReport": "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/executor-report.json"
     },
     {
-      "subtaskId": "03-build",
-      "commandLog": "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/command.log",
-      "stdoutLog": "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/stdout.log",
-      "stderrLog": "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/stderr.log",
-      "executorReport": "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/executor-report.json"
+      "subtaskId": "03-external-validation",
+      "commandLog": "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/command.log",
+      "stdoutLog": "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/stdout.log",
+      "stderrLog": "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/stderr.log",
+      "executorReport": "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/executor-report.json"
     }
   ],
   "checks": [
     {
-      "command": "corepack pnpm check:governance && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build",
+      "command": "corepack pnpm check:structure && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build",
+      "result": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "external-source-immutability",
       "result": "passed",
       "exitCode": 0
     }

@@ -55,6 +55,23 @@ describe("DockerShellExecutor policy", () => {
     expect(args.join(" ")).not.toContain("noexec");
     expect(args.find((item) => item.startsWith("type=bind"))).not.toContain("readonly");
   });
+
+  it("preserves no-preparation triage with a read-only source mount", async () => {
+    const root = await tempRoot();
+    const request = createExecutorRequest({
+      runId: "EXTERNAL-RUN-2",
+      subtaskId: "01-external-validation",
+      command: "node --version",
+      cwd: root,
+      artifactDir: join(root, "subtasks", "01-external-validation"),
+      lane: "docker-shell"
+    });
+
+    const args = dockerRunArgs(request, "runforge:local", "runforge-test", true, "/external/source");
+
+    expect(args).toContain("type=bind,src=/external/source,dst=/source,readonly");
+    expect(args).toEqual(expect.arrayContaining(["--network", "none"]));
+  });
 });
 
 describe("LocalShellExecutor", () => {

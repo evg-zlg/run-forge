@@ -1,17 +1,18 @@
-# 01-typecheck Brief
+# 03-external-validation Brief
 
-Goal: Run the target repository typecheck.
+Goal: Run external validation command 3.
 
 Workspace path: `/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-external-run-3/prepared-workspace`
 
 Inputs to inspect:
 - `package.json`
-- `tsconfig.json`
+- `package-lock.json`
 - `src`
+- `tests`
 
 Evidence command:
 ```bash
-npm run typecheck
+npm run build
 ```
 
 Required output: `report.md` with status, findings, command evidence, and artifacts.

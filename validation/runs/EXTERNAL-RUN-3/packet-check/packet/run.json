@@ -3,9 +3,9 @@
   "runId": "EXTERNAL-RUN-3-PACKET",
   "taskType": "external_command_check",
   "status": "passed",
-  "startedAt": "2026-07-11T07:18:15.838Z",
-  "finishedAt": "2026-07-11T07:18:16.023Z",
-  "durationMs": 185,
+  "startedAt": "2026-07-11T10:31:41.561Z",
+  "finishedAt": "2026-07-11T10:31:41.744Z",
+  "durationMs": 183,
   "cliExitPolicy": "packet",
   "cliExitCode": 0,
   "commandPolicy": {
@@ -28,7 +28,7 @@
     "mutationVerdict": "unchanged"
   },
   "workspace": {
-    "path": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-zd6ch6/factory",
+    "path": "/var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-T6h54g/factory",
     "changeSummary": {
       "method": "filesystem_snapshot",
       "status": "ok",

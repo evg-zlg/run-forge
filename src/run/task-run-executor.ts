@@ -119,7 +119,8 @@ export class DockerShellExecutor implements TaskRunExecutor {
   constructor(
     private readonly repoRoot: string,
     private readonly image: string,
-    private readonly writableWorkspace = false
+    private readonly writableWorkspace = false,
+    private readonly readonlySource?: string
   ) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
@@ -133,7 +134,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
     let timedOut = false;
 
     try {
-      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace), {
+      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace, this.readonlySource), {
         maxBuffer: 1024 * 1024 * 8,
         timeout: request.timeoutMs
       });
@@ -187,7 +188,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
   }
 }
 
-export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false): string[] {
+export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false, readonlySource?: string): string[] {
   return [
     "run",
     "--rm",
@@ -219,6 +220,7 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "--mount",
     `type=bind,src=${request.cwd},dst=/workspace${writableWorkspace ? "" : ",readonly"}`,
     ...(writableWorkspace ? ["--mount", `type=bind,src=${request.cwd}/.runforge-tmp,dst=/runforge-tmp`] : []),
+    ...(readonlySource ? ["--mount", `type=bind,src=${readonlySource},dst=/source,readonly`] : []),
     "--workdir",
     "/workspace",
     "--entrypoint",

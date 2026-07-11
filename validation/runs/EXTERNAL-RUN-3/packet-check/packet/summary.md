@@ -8,7 +8,7 @@ Command policy: on failure continue; final status rule failed_if_any_command_fai
 Repo: /Users/evgeny/Documents/projects/factory
 Original repo baseline: clean
 Original repo mutation verdict: unchanged
-Workspace: /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-zd6ch6/factory
+Workspace: /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-workspace-T6h54g/factory
 Workspace diff: filesystem_snapshot, ok
 Workspace changes: added 0, modified 0, deleted 0
 Workspace notable files: none

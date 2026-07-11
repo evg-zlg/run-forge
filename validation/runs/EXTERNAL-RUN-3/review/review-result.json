@@ -6,14 +6,14 @@
   "findings": [
     {
       "severity": "info",
-      "message": "Reviewed 3 subtask report(s), 3 command status record(s), and 1 owner check(s).",
+      "message": "Reviewed 3 subtask report(s), 3 command status record(s), and 2 owner check(s).",
       "evidenceReferences": [
-        "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/report.md",
-        "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/report.md",
-        "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/report.md",
-        "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/command.log",
-        "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/stdout.log",
-        "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/stderr.log"
+        "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/report.md",
+        "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/report.md",
+        "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/report.md",
+        "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/command.log",
+        "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/stdout.log",
+        "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/stderr.log"
       ]
     },
     {
@@ -33,21 +33,21 @@
   ],
   "recommendedNextAction": "Owner can use the summary and review artifacts as evidence for the next milestone decision.",
   "evidenceReferences": [
-    "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/report.md",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/report.md",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/report.md",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/command.log",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/stdout.log",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/stderr.log",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/01-typecheck/executor-report.json",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/command.log",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/stdout.log",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/stderr.log",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/02-test/executor-report.json",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/command.log",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/stdout.log",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/stderr.log",
-    "validation/runs/EXTERNAL-RUN-3/subtasks/03-build/executor-report.json"
+    "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/report.md",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/report.md",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/report.md",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/command.log",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/stdout.log",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/stderr.log",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/01-external-validation/executor-report.json",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/command.log",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/stdout.log",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/stderr.log",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/02-external-validation/executor-report.json",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/command.log",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/stdout.log",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/stderr.log",
+    "validation/runs/EXTERNAL-RUN-3/subtasks/03-external-validation/executor-report.json"
   ],
   "humanDecisionRequired": true
 }

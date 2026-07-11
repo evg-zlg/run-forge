@@ -1,17 +1,18 @@
-# 02-test Brief
+# 01-external-validation Brief
 
-Goal: Run the target repository test suite through collection and execution.
+Goal: Run external validation command 1.
 
 Workspace path: `/Users/evgeny/Documents/projects/.runforge-task-runs/runforge-external-run-3/prepared-workspace`
 
 Inputs to inspect:
 - `package.json`
-- `tests`
+- `package-lock.json`
 - `src`
+- `tests`
 
 Evidence command:
 ```bash
-npm test
+npm run typecheck
 ```
 
 Required output: `report.md` with status, findings, command evidence, and artifacts.

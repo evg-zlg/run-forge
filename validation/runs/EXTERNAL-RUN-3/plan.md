@@ -7,7 +7,7 @@ Task kind: `code-inspection`
 
 ## Accepted Task
 
-Run full external repository validation readiness loop
+Run full external repository validation readiness loop after safety fix
 
 ## Planning Basis
 
@@ -31,15 +31,15 @@ Run full external repository validation readiness loop
 
 ## Decomposition
 
-1. `01-typecheck`: Run the target repository typecheck.
-2. `02-test`: Run the target repository test suite through collection and execution.
-3. `03-build`: Run the target repository production build.
+1. `01-external-validation`: Run external validation command 1.
+2. `02-external-validation`: Run external validation command 2.
+3. `03-external-validation`: Run external validation command 3.
 
 ## Evidence Commands
 
-- `01-typecheck`: `npm run typecheck`
-- `02-test`: `npm test`
-- `03-build`: `npm run build`
+- `01-external-validation`: `npm run typecheck`
+- `02-external-validation`: `npm test`
+- `03-external-validation`: `npm run build`
 
 ## Executor
 
@@ -47,10 +47,10 @@ Each subtask evidence command is dispatched through `DockerShellExecutor` as an 
 
 ## Isolation
 
-Each subtask snapshot is mounted read-only into a network-disabled container using the prebuilt local image `runforge:local`.
+The original repository is not mounted. A prepared disposable workspace is mounted writable into network-disabled containers using `runforge:local`.
 
 ## Checks
 
 ```bash
-corepack pnpm check:governance && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build
+corepack pnpm check:structure && corepack pnpm typecheck && corepack pnpm test && corepack pnpm build
 ```

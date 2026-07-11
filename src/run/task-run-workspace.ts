@@ -1,4 +1,4 @@
-import { cp, mkdir } from "node:fs/promises";
+import { access, cp, mkdir, symlink } from "node:fs/promises";
 import { relative } from "node:path";
 
 export async function copyTaskRunWorkspace(repoRoot: string, workspace: string, outPath: string): Promise<void> {
@@ -13,6 +13,12 @@ export async function copyTaskRunWorkspace(repoRoot: string, workspace: string, 
       return !["node_modules", "dist", ".git", ".runforge", "artifacts", "runforge-artifacts"].includes(first!);
     }
   });
+}
+
+export async function prepareUnpreparedExternalWorkspace(sourceRepo: string, workspace: string): Promise<void> {
+  await mkdir(`${workspace}/.runforge-tmp`, { recursive: true });
+  const dependenciesExist = await access(`${sourceRepo}/node_modules`).then(() => true).catch(() => false);
+  if (dependenciesExist) await symlink("/source/node_modules", `${workspace}/node_modules`, "dir");
 }
 
 export function taskRunSlug(value: string): string {

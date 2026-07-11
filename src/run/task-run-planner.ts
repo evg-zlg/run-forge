@@ -1,4 +1,4 @@
-export type TaskKind = "docs-review" | "code-inspection" | "general-review" | "external-validation";
+export type TaskKind = "docs-review" | "code-inspection" | "general-review";
 
 export type PlannedSubtask = {
   id: string;
@@ -33,8 +33,9 @@ export function planTaskRun(task: string): TaskRunPlan {
   return generalPlan(task);
 }
 
-export function planExternalValidationTaskRun(task: string, lockfile: string): TaskRunPlan {
+export function planExternalValidationTaskRun(task: string, lockfile: string, commands: string[] = []): TaskRunPlan {
   const runner = lockfile === "pnpm-lock.yaml" ? "corepack pnpm" : lockfile === "yarn.lock" ? "corepack yarn" : "npm";
+  const selectedCommands = commands.length > 0 ? commands : [`${runner} run typecheck`, `${runner} test`, `${runner} run build`];
   return {
     kind: "code-inspection",
     planningBasis: [
@@ -43,11 +44,13 @@ export function planExternalValidationTaskRun(task: string, lockfile: string): T
     ],
     inputs: ["package.json", lockfile, "tsconfig.json", "src", "tests"],
     recommendedNextMilestone: "safe disposable repair execution",
-    subtasks: [
-      { id: "01-typecheck", goal: "Run the target repository typecheck.", inputs: ["package.json", "tsconfig.json", "src"], evidenceFocus: "TypeScript validation result.", evidenceCommand: `${runner} run typecheck` },
-      { id: "02-test", goal: "Run the target repository test suite through collection and execution.", inputs: ["package.json", "tests", "src"], evidenceFocus: "Actual test collection and execution result.", evidenceCommand: `${runner} test` },
-      { id: "03-build", goal: "Run the target repository production build.", inputs: ["package.json", "tsconfig.json", "src"], evidenceFocus: "Build validation result.", evidenceCommand: `${runner} run build` }
-    ]
+    subtasks: selectedCommands.map((command, index) => ({
+      id: `${String(index + 1).padStart(2, "0")}-external-validation`,
+      goal: `Run external validation command ${index + 1}.`,
+      inputs: ["package.json", lockfile, "src", "tests"],
+      evidenceFocus: "External repository validation result.",
+      evidenceCommand: command
+    }))
   };
 }
 

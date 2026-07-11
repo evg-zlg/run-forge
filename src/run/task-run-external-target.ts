@@ -1,61 +1,46 @@
-import { stat } from "node:fs/promises";
-import { isAbsolute, relative, resolve } from "node:path";
+import { realpath, stat } from "node:fs/promises";
+import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { blockedCommandReports } from "./external-command-check-helpers.js";
-import { gitSnapshot, mutationVerdictFor } from "./external-command-check-git.js";
-import type { GitSnapshot } from "./external-command-check-types.js";
-import type { CheckResult, TaskRunRuntime } from "./task-run-harness.js";
+import type { TaskRunRuntime } from "./task-run-harness.js";
 
-export type ExternalClassification = "passed" | "deterministic failure" | "environment/setup issue" | "unsafe/not runnable" | "needs owner approval";
-
-export async function prepareExternalTarget(input: {
-  repo?: string;
+export async function assertExternalTaskPolicy(input: {
+  repo: string;
   runtime: TaskRunRuntime;
   delegatedReview?: "mock" | "cli";
-  commands?: string[];
-}): Promise<{ repo: string; commands: string[]; before: GitSnapshot } | undefined> {
-  if (!input.repo) return undefined;
-  const repo = resolve(input.repo);
+  commands: string[];
+}): Promise<void> {
   if (input.runtime !== "docker") throw new Error("--repo requires --runtime docker.");
   if (input.delegatedReview) throw new Error("External task-run uses providerless deterministic review; delegated review is not allowed.");
-  const info = await stat(repo).catch(() => null);
-  if (!info?.isDirectory()) throw new Error(`--repo must be an existing directory: ${repo}`);
-  const commands = input.commands?.length ? input.commands : ["npm run typecheck", "npm test", "npm run build"];
-  const blocked = blockedCommandReports(commands, "main");
+  const info = await stat(input.repo).catch(() => null);
+  if (!info?.isDirectory()) throw new Error(`--repo must be an existing directory: ${input.repo}`);
+  const blocked = blockedCommandReports(input.commands, "main");
   if (blocked[0]) throw new Error(blocked[0].reason);
-  return { repo, commands, before: await gitSnapshot(repo) };
 }
 
-export async function finishExternalTarget(
-  prepared: { repo: string; commands: string[]; before: GitSnapshot },
-  checks: CheckResult[]
-): Promise<{
-  after: GitSnapshot;
-  mutationVerdict: "unchanged" | "changed" | "unknown";
-  capabilityClassification: ExternalClassification;
-  targetClassification: ExternalClassification;
-}> {
-  const after = await gitSnapshot(prepared.repo);
-  const mutationVerdict = mutationVerdictFor(prepared.before, after);
-  return {
-    after,
-    mutationVerdict,
-    capabilityClassification: mutationVerdict === "changed" ? "unsafe/not runnable" : "passed",
-    targetClassification: classifyTarget(checks)
-  };
-}
-
-export function assertExternalArtifactsOutsideTarget(repo: string, paths: string[]): void {
+export async function assertExternalPathsOutsideTarget(repo: string, paths: string[]): Promise<void> {
+  const canonicalRepo = await canonicalPath(repo);
   for (const path of paths) {
-    const fromTarget = relative(repo, resolve(path));
-    if (fromTarget === "" || (fromTarget !== ".." && !fromTarget.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(fromTarget))) {
-      throw new Error(`External task-run artifacts and tmp workspaces must be outside --repo: ${path}`);
-    }
+    const canonical = await canonicalPath(path);
+    const fromTarget = relative(canonicalRepo, canonical);
+    const inside = fromTarget === "" || (fromTarget !== ".." && !fromTarget.startsWith(`..${process.platform === "win32" ? "\\" : "/"}`) && !isAbsolute(fromTarget));
+    if (inside) throw new Error(`External task-run paths that may be cleaned or written must be outside --repo: ${path}`);
   }
 }
 
-function classifyTarget(checks: CheckResult[]): ExternalClassification {
-  if (checks.every((check) => check.result === "passed")) return "passed";
-  const diagnostic = checks.map((check) => `${check.stdout}\n${check.stderr}`).join("\n");
-  if (/optional dependency|Cannot find module.*rollup|MODULE_NOT_FOUND|unsupported platform|not found|ENOENT/i.test(diagnostic)) return "environment/setup issue";
-  return "deterministic failure";
+async function canonicalPath(input: string): Promise<string> {
+  let cursor = resolve(input);
+  const missing: string[] = [];
+  while (true) {
+    try {
+      const existing = await realpath(cursor);
+      return missing.reduceRight((path, segment) => join(path, segment), existing);
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== "ENOENT") throw new Error(`Cannot safely resolve path ${input}: ${String(error)}`);
+      const parent = dirname(cursor);
+      if (parent === cursor) throw new Error(`Cannot safely resolve path ${input}.`);
+      missing.push(basename(cursor));
+      cursor = parent;
+    }
+  }
 }

@@ -22,5 +22,6 @@ describe("external runtime preparation policy", () => {
       "npm run typecheck", "npm test", "npm run build"
     ]);
     expect(planExternalValidationTaskRun("validate", "pnpm-lock.yaml").subtasks[1]?.evidenceCommand).toBe("corepack pnpm test");
+    expect(planExternalValidationTaskRun("triage", "package-lock.json", ["node --version"]).subtasks.map((item) => item.evidenceCommand)).toEqual(["node --version"]);
   });
 });
