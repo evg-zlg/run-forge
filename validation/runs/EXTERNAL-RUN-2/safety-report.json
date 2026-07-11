@@ -1,0 +1,12 @@
+{
+  "schemaVersion": "external-task-run-1",
+  "runId": "EXTERNAL-RUN-2",
+  "originalRepoMutationAllowed": false,
+  "originalRepoMutationVerdict": "unchanged",
+  "network": "none",
+  "providerUsed": false,
+  "noPushAttempted": true,
+  "noMergeAttempted": true,
+  "noDeployAttempted": true,
+  "noApplyToOriginalRepoAttempted": true
+}

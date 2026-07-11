@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 import { ensureDir, writeJson, writeText } from "../core/artifact-store.js";
 import { createRunId } from "../core/trajectory.js";
 import { runExternalCommandCheck } from "./external-command-check.js";
-import { artifactTypeFor, writePacketManifest, type ArtifactRecord } from "./external-command-check-packet.js";
+import { artifactTypeFor, finalizePacketManifest, type ArtifactRecord } from "./external-command-check-packet.js";
 import type { CommandResult } from "./external-command-check-types.js";
 import { analyzeFailure } from "./external-failure-triage-classifier.js";
 import { renderEvidence, renderFailureTriage, renderHumanReview, renderSummary } from "./external-failure-triage-renderer.js";
@@ -190,10 +190,7 @@ export async function runExternalFailureTriage(options: ExternalFailureTriageOpt
   await markArtifact("trajectory.json");
   emit("run_finished", { status, category: analysis.category, confidence: analysis.confidence });
   await writeFile(join(packetDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
-  await markArtifact("events.jsonl");
-  await writePacketManifest(packetDir, artifactRecords);
-  await markArtifact("packet-manifest.json");
-  await writeFile(join(packetDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+  await finalizePacketManifest(packetDir, externalFailureTriageSchemaVersion);
 
   return {
     runId,

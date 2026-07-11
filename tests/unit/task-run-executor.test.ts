@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
@@ -35,6 +35,27 @@ describe("DockerShellExecutor policy", () => {
       "rg -n runtime src"
     ]));
     expect(args.find((item) => item.startsWith("type=bind"))).toContain("readonly");
+  });
+
+  it("mounts an external source read-only and its disposable workspace writable", async () => {
+    const workspace = await tempRoot();
+    const externalRepo = await tempRoot();
+    await mkdir(join(externalRepo, "node_modules"));
+    const request = createExecutorRequest({
+      runId: "EXTERNAL-RUN-2", subtaskId: "01-typecheck", command: "npm run typecheck",
+      cwd: workspace, artifactDir: join(workspace, "artifacts"), lane: "docker-shell"
+    });
+
+    const args = dockerRunArgs(request, "runforge:local", "runforge-external", externalRepo);
+    const mounts = args.filter((item) => item.startsWith("type=bind"));
+    expect(mounts).toContain(`type=bind,src=${externalRepo},dst=/source,readonly`);
+    expect(mounts).not.toContain(`type=bind,src=${join(externalRepo, "node_modules")},dst=/workspace/node_modules,readonly`);
+    expect(mounts).toContain(`type=bind,src=${workspace},dst=/workspace`);
+    expect(args).toContain("/tmp:rw,exec,nosuid,nodev,size=256m");
+    expect(args).toEqual(expect.arrayContaining(["--memory", "2g", "--cpus", "2", "--pids-limit", "512"]));
+    expect(args.at(-1)).toContain("git -C /source rev-parse HEAD");
+    expect(args.at(-1)).toContain("npm run typecheck");
+    expect(args.at(-1)).toContain("exit $runforge_status");
   });
 });
 

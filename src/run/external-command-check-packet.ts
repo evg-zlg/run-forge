@@ -1,4 +1,6 @@
-import { join } from "node:path";
+import { createHash } from "node:crypto";
+import { readFile, readdir, stat } from "node:fs/promises";
+import { join, relative } from "node:path";
 import { writeJson, writeText } from "../core/artifact-store.js";
 import { buildMetrics, renderSummary } from "./external-command-check-renderer.js";
 import type { WorkspaceChangeSummary } from "./external-command-check-git.js";
@@ -91,6 +93,37 @@ export async function writePacketManifest(packetDir: string, artifactRecords: Ma
         createdAt: artifact.createdAt
       }))
   });
+}
+
+/** Compute the manifest from final on-disk bytes. The manifest excludes itself. */
+export async function finalizePacketManifest(packetDir: string, schemaVersion: string): Promise<void> {
+  const files = (await packetFiles(packetDir))
+    .map((path) => relative(packetDir, path))
+    .filter((path) => path !== "packet-manifest.json")
+    .sort();
+  const artifacts = await Promise.all(files.map(async (path) => {
+    const fullPath = join(packetDir, path);
+    const bytes = await readFile(fullPath);
+    const info = await stat(fullPath);
+    return {
+      path,
+      type: artifactTypeFor(path),
+      sizeBytes: info.size,
+      hash: createHash("sha256").update(bytes).digest("hex"),
+      createdAt: info.mtime.toISOString()
+    };
+  }));
+  await writeJson(join(packetDir, "packet-manifest.json"), { schemaVersion, artifacts });
+}
+
+async function packetFiles(root: string): Promise<string[]> {
+  const entries = await readdir(root, { withFileTypes: true });
+  const nested = await Promise.all(entries.map(async (entry) => {
+    const path = join(root, entry.name);
+    if (entry.isDirectory()) return packetFiles(path);
+    return entry.isFile() ? [path] : [];
+  }));
+  return nested.flat();
 }
 
 export async function writeArtifacts(input: {

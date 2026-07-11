@@ -18,8 +18,8 @@ import {
   artifactTypeFor,
   buildSafetyReport,
   buildSetupPolicy,
+  finalizePacketManifest,
   writeArtifacts,
-  writePacketManifest,
   type ArtifactRecord
 } from "./external-command-check-packet.js";
 import {
@@ -263,10 +263,7 @@ export async function runExternalCommandCheck(options: ExternalCommandCheckOptio
   emit("summary_written", { artifactPath: "summary.md" });
   emit("run_finished", { status });
   await writeFile(join(packetDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
-  await markArtifact("events.jsonl");
-  await writePacketManifest(packetDir, artifactRecords);
-  await markArtifact("packet-manifest.json");
-  await writeFile(join(packetDir, "events.jsonl"), `${events.map((event) => JSON.stringify(event)).join("\n")}\n`, "utf8");
+  await finalizePacketManifest(packetDir, externalCheckSchemaVersion);
 
   return { runId, status, packetDir, repoPath, workspacePath, cliExitPolicy, cliExitCode, setupResults, commandResults, safetyReport };
 }

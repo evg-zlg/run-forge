@@ -1,10 +1,12 @@
-import { execFile } from "node:child_process";
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
-import { promisify } from "node:util";
 import { createExecutorRequest, DockerShellExecutor, LocalShellExecutor, type ExecutorResult, type TaskRunExecutor } from "./task-run-executor.js";
+import type { GitSnapshot } from "./external-command-check-types.js";
 import { ownerConclusion, recommendedNextStep, remainingGaps } from "./task-run-owner-decision.js";
-import { planTaskRun, type PlannedSubtask, type TaskKind } from "./task-run-planner.js";
+import { planExternalTaskRun, planTaskRun, type TaskKind } from "./task-run-planner.js";
+import { writeExternalTaskRunPacket } from "./task-run-external-artifacts.js";
+import { assertExternalArtifactsOutsideTarget, finishExternalTarget, prepareExternalTarget, type ExternalClassification } from "./task-run-external-target.js";
+import { checkFromSubtask, completeExecutedSubtask, copyTaskWorkspace, linkExternalNodeModules, parseProviderArgs, runOwnerCheck, slug } from "./task-run-harness-helpers.js";
 import {
   buildReviewRequest,
   buildProviderReviewMetadata,
@@ -19,8 +21,6 @@ import {
 } from "./task-run-reviewer.js";
 import { renderBrief, renderPlan, renderReport, renderSummary, toJsonResult, validateSummaryFreshness } from "./task-run-renderer.js";
 
-const execFileAsync = promisify(execFile);
-
 export type TaskRunRuntime = "local" | "docker";
 
 type TaskRunInput = {
@@ -31,6 +31,9 @@ type TaskRunInput = {
   delegatedReview?: "mock" | "cli";
   runtime?: TaskRunRuntime;
   dockerImage?: string;
+  repo?: string;
+  commands?: string[];
+  timeoutMs?: number;
 };
 
 export type Subtask = {
@@ -89,6 +92,18 @@ export type TaskRunResult = {
   };
   subtasks: Array<Subtask & { workspace: string; report: string }>;
   checks: CheckResult[];
+  externalTarget?: {
+    path: string;
+    before: GitSnapshot;
+    after: GitSnapshot;
+    mutationVerdict: "unchanged" | "changed" | "unknown";
+    commands: string[];
+    capabilityClassification: ExternalClassification;
+    targetClassification: ExternalClassification;
+    environment: string;
+    executionLog: string;
+    triageReport: string;
+  };
 };
 
 export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunResult> {
@@ -96,12 +111,16 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
   const outDir = resolve(repoRoot, input.out);
   const runId = basename(outDir);
   const runtime = input.runtime ?? "local";
-  const defaultTmpRoot = runtime === "docker" ? join(dirname(repoRoot), ".runforge-task-runs", `${slug(basename(repoRoot))}-${slug(runId)}`) : join("/tmp", `runforge-${slug(runId)}`);
+  const external = await prepareExternalTarget({ repo: input.repo, runtime, delegatedReview: input.delegatedReview, commands: input.commands });
+  const externalRepo = external?.repo;
+  const externalCommands = external?.commands ?? [];
+  const defaultTmpRoot = runtime === "docker" ? join(dirname(repoRoot), ".runforge-task-runs", `${slug(basename(externalRepo ?? repoRoot))}-${slug(runId)}`) : join("/tmp", `runforge-${slug(runId)}`);
   const tmpRoot = input.tmpRoot ? resolve(input.tmpRoot) : defaultTmpRoot;
-  const checkCommand = input.checkCommand ?? "corepack pnpm check:structure";
-  const plan = planTaskRun(input.task);
+  if (externalRepo) assertExternalArtifactsOutsideTarget(externalRepo, [outDir, tmpRoot]);
+  const checkCommand = externalRepo ? externalCommands.join(" && ") : input.checkCommand ?? "corepack pnpm check:structure";
+  const plan = externalRepo ? planExternalTaskRun(externalCommands) : planTaskRun(input.task);
   const dockerImage = input.dockerImage ?? "runforge:local";
-  const executor: TaskRunExecutor = runtime === "docker" ? new DockerShellExecutor(repoRoot, dockerImage) : new LocalShellExecutor(repoRoot);
+  const executor: TaskRunExecutor = runtime === "docker" ? new DockerShellExecutor(repoRoot, dockerImage, externalRepo) : new LocalShellExecutor(repoRoot);
 
   await rm(outDir, { recursive: true, force: true });
   await rm(tmpRoot, { recursive: true, force: true });
@@ -117,7 +136,9 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
     const subtaskDir = join(outDir, "subtasks", planned.id);
     const workspace = join(tmpRoot, planned.id, "workspace");
     await mkdir(subtaskDir, { recursive: true });
-    await copyWorkspace(repoRoot, workspace, relative(repoRoot, outDir));
+    const workspaceSource = externalRepo ?? repoRoot;
+    await copyTaskWorkspace(workspaceSource, workspace, relative(workspaceSource, outDir));
+    if (externalRepo) await linkExternalNodeModules(externalRepo, workspace);
     await writeFile(join(subtaskDir, "brief.md"), renderBrief(planned, workspace), "utf8");
     const executorRequest = createExecutorRequest({
       runId,
@@ -125,16 +146,16 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
       command: planned.evidenceCommand,
       cwd: workspace,
       artifactDir: subtaskDir,
-      lane: executor.lane
+      lane: executor.lane,
+      timeoutMs: input.timeoutMs
     });
     const executorResult = await executor.execute(executorRequest);
-    const evidence = toEvidenceRecord(planned, executorResult);
-    const subtask = completeSubtask(planned, evidence, executorResult);
+    const subtask = completeExecutedSubtask(planned, executorResult);
     await writeFile(join(subtaskDir, "report.md"), renderReport(subtask, workspace), "utf8");
     completedSubtasks.push({ ...subtask, workspace, report: relative(repoRoot, join(subtaskDir, "report.md")) });
   }
 
-  const check = await runCheck(checkCommand, repoRoot);
+  const checks = externalRepo ? completedSubtasks.map(checkFromSubtask) : [await runOwnerCheck(checkCommand, repoRoot)];
   const gaps = remainingGaps(plan.kind, input.task, runtime === "docker");
   const reviewDir = join(outDir, "review");
   const reviewRequestPath = join(reviewDir, "review-request.json");
@@ -149,7 +170,7 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
     taskKind: plan.kind,
     plan,
     subtasks: completedSubtasks,
-    checks: [check],
+    checks,
     gaps
   });
   const providerInput =
@@ -210,7 +231,12 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
   const resultsPath = join(outDir, "results.json");
   const summaryPath = join(outDir, "summary.md");
   const evidencePassed = completedSubtasks.every((subtask) => subtask.executor.status === "passed");
-  const status = check.result === "passed" && evidencePassed && reviewResult.status !== "provider_unavailable" ? "completed" : "failed";
+  const externalFinish = external ? await finishExternalTarget(external, checks) : undefined;
+  const originalUnchanged = externalFinish === undefined || externalFinish.mutationVerdict === "unchanged";
+  const status = checks.every((check) => check.result === "passed") && evidencePassed && originalUnchanged && reviewResult.status !== "provider_unavailable" ? "completed" : "failed";
+  const environmentPath = join(outDir, "environment.json");
+  const executionLogPath = join(outDir, "execution-log.md");
+  const triageReportPath = join(outDir, "external-triage-report.md");
   const result: TaskRunResult = {
     runId,
     task: input.task,
@@ -241,13 +267,26 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
       providerMetadataPayload: providerMetadata
     },
     subtasks: completedSubtasks,
-    checks: [check]
+    checks,
+    externalTarget: external && externalFinish ? {
+      path: external.repo,
+      before: external.before,
+      after: externalFinish.after,
+      mutationVerdict: externalFinish.mutationVerdict,
+      commands: externalCommands,
+      capabilityClassification: externalFinish.capabilityClassification,
+      targetClassification: externalFinish.targetClassification,
+      environment: relative(repoRoot, environmentPath),
+      executionLog: relative(repoRoot, executionLogPath),
+      triageReport: relative(repoRoot, triageReportPath)
+    } : undefined
   };
 
   const summary = renderSummary(result);
   validateSummaryFreshness(result, summary);
   await writeFile(resultsPath, JSON.stringify(toJsonResult(result), null, 2) + "\n", "utf8");
   await writeFile(summaryPath, summary, "utf8");
+  if (result.externalTarget) await writeExternalTaskRunPacket(result);
   return result;
 }
 
@@ -260,90 +299,7 @@ export function renderTaskRunCliSummary(result: TaskRunResult): string {
     `Review: ${result.review.markdown}`,
     `Tmp isolation root: ${result.tmpRoot}`,
     `Runtime: ${result.runtime.mode}${result.runtime.image ? ` (${result.runtime.image})` : ""}`,
-    `Check: ${result.checks[0]?.command} -> ${result.checks[0]?.result}`
+    ...result.checks.map((check) => `Check: ${check.command} -> ${check.result}`),
+    ...(result.externalTarget ? [`Original repo: ${result.externalTarget.mutationVerdict}`, `Factory target classification: ${result.externalTarget.targetClassification}`] : [])
   ].join("\n");
-}
-
-async function copyWorkspace(repoRoot: string, workspace: string, outPath: string): Promise<void> {
-  await mkdir(workspace, { recursive: true });
-  await cp(repoRoot, workspace, {
-    recursive: true,
-    filter: (source) => {
-      const path = relative(repoRoot, source);
-      if (!path) return true;
-      return !shouldSkipSnapshotPath(path, outPath);
-    }
-  });
-}
-
-function shouldSkipSnapshotPath(path: string, outPath: string): boolean {
-  const first = path.split("/")[0];
-  if (path === outPath || path.startsWith(`${outPath}/`)) return true;
-  return first === "node_modules" || first === "dist" || first === ".git" || first === ".runforge" || first === "artifacts" || first === "runforge-artifacts";
-}
-
-async function runCheck(command: string, cwd: string): Promise<CheckResult> {
-  try {
-    const { stdout, stderr } = await execFileAsync("sh", ["-lc", command], { cwd, maxBuffer: 1024 * 1024 * 8 });
-    return { command, result: "passed", exitCode: 0, stdout, stderr };
-  } catch (error) {
-    const err = error as { code?: number; stdout?: string; stderr?: string };
-    return {
-      command,
-      result: "failed",
-      exitCode: typeof err.code === "number" ? err.code : 1,
-      stdout: err.stdout ?? "",
-      stderr: err.stderr ?? ""
-    };
-  }
-}
-
-function toEvidenceRecord(subtask: PlannedSubtask, result: ExecutorResult): EvidenceRecord {
-  return {
-    command: subtask.evidenceCommand,
-    status: result.status,
-    exitCode: result.exitCode,
-    logPath: result.artifactPaths.commandLog,
-    inspected: subtask.inputs,
-    summary: summarizeEvidence(subtask, result),
-    executorReport: result.artifactPaths.report
-  };
-}
-
-function completeSubtask(subtask: PlannedSubtask, evidence: EvidenceRecord, executor: ExecutorResult): Subtask {
-  return {
-    id: subtask.id,
-    goal: subtask.goal,
-    inputs: subtask.inputs,
-    findings: [
-      `${subtask.evidenceFocus} Evidence command ${evidence.status} with exit code ${evidence.exitCode}.`,
-      evidence.summary
-    ],
-    status: "done",
-    artifacts: ["brief.md", "report.md", "command.log", "stdout.log", "stderr.log", "executor-report.json"],
-    evidence,
-    executor
-  };
-}
-
-function summarizeEvidence(subtask: PlannedSubtask, result: ExecutorResult): string {
-  const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const sample = lines.slice(0, 3).join(" | ");
-  if (lines.length === 0) return `${subtask.id} produced no stdout; inspect ${subtask.inputs.join(", ")} manually.`;
-  return `${subtask.id} inspected ${subtask.inputs.length} input(s) and captured ${lines.length} stdout line(s). Sample: ${sample}`;
-}
-
-function slug(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
-
-function parseProviderArgs(value: string | undefined): string[] {
-  if (!value?.trim()) return [];
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (Array.isArray(parsed) && parsed.every((item) => typeof item === "string")) return parsed;
-  } catch {
-    return [];
-  }
-  return [];
 }

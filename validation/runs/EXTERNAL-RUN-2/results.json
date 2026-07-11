@@ -1,0 +1,275 @@
+{
+  "runId": "EXTERNAL-RUN-2",
+  "date": "2026-07-10",
+  "taskAccepted": "Run safe external repository triage",
+  "taskKind": "external-validation",
+  "planningBasis": [
+    "An explicit external repository target was supplied.",
+    "Validation runs in disposable writable workspaces through the opt-in Docker executor.",
+    "The original repository is mounted read-only and checked before and after execution."
+  ],
+  "mode": "task-specific repeatable harness",
+  "status": "failed",
+  "artifacts": {
+    "plan": "validation/runs/EXTERNAL-RUN-2/plan.md",
+    "summary": "validation/runs/EXTERNAL-RUN-2/summary.md",
+    "results": "validation/runs/EXTERNAL-RUN-2/results.json",
+    "reviewRequest": "validation/runs/EXTERNAL-RUN-2/review/review-request.json",
+    "reviewResult": "validation/runs/EXTERNAL-RUN-2/review/review-result.json",
+    "reviewMarkdown": "validation/runs/EXTERNAL-RUN-2/review/review.md",
+    "providerReviewMetadata": null,
+    "environment": "validation/runs/EXTERNAL-RUN-2/environment.json",
+    "executionLog": "validation/runs/EXTERNAL-RUN-2/execution-log.md",
+    "externalTriageReport": "validation/runs/EXTERNAL-RUN-2/external-triage-report.md",
+    "subtasks": "validation/runs/EXTERNAL-RUN-2/subtasks/"
+  },
+  "isolation": {
+    "method": "read-only external source plus writable disposable Docker workspace",
+    "root": "/Users/evgeny/Documents/projects/RunForge-worktrees/.runforge-task-runs/factory-external-run-2",
+    "containerUsed": true,
+    "image": "runforge:local",
+    "network": "none"
+  },
+  "selectedMilestone": "broaden external task-run package-manager fixtures",
+  "executor": {
+    "lane": "docker-shell",
+    "dispatch": "planner subtasks are converted into executor requests before command execution"
+  },
+  "subtasks": [
+    {
+      "id": "01-external-validation",
+      "goal": "Run external validation command: npm run typecheck",
+      "workspace": "/Users/evgeny/Documents/projects/RunForge-worktrees/.runforge-task-runs/factory-external-run-2/01-external-validation/workspace",
+      "inputsInspected": [
+        "package.json",
+        "src",
+        "tests"
+      ],
+      "findings": [
+        "External target validation in a disposable Docker workspace. Evidence command passed with exit code 0.",
+        "01-external-validation inspected 3 input(s) and captured 8 stdout line(s). Sample: RUNFORGE_SOURCE_BEFORE_HEAD | d65ab9a9c8130f5d2c9214e8fdde2a278578afed | RUNFORGE_SOURCE_BEFORE_STATUS"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "npm run typecheck",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/command.log",
+        "inspected": [
+          "package.json",
+          "src",
+          "tests"
+        ],
+        "summary": "01-external-validation inspected 3 input(s) and captured 8 stdout line(s). Sample: RUNFORGE_SOURCE_BEFORE_HEAD | d65ab9a9c8130f5d2c9214e8fdde2a278578afed | RUNFORGE_SOURCE_BEFORE_STATUS",
+        "executorReport": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/executor-report.json"
+      },
+      "executor": {
+        "requestId": "EXTERNAL-RUN-2:01-external-validation:docker-shell",
+        "lane": "docker-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/command.log",
+          "stdoutLog": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stdout.log",
+          "stderrLog": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stderr.log",
+          "report": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/executor-report.json"
+        }
+      },
+      "report": "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/report.md"
+    },
+    {
+      "id": "02-external-validation",
+      "goal": "Run external validation command: npm test",
+      "workspace": "/Users/evgeny/Documents/projects/RunForge-worktrees/.runforge-task-runs/factory-external-run-2/02-external-validation/workspace",
+      "inputsInspected": [
+        "package.json",
+        "src",
+        "tests"
+      ],
+      "findings": [
+        "External target validation in a disposable Docker workspace. Evidence command failed with exit code 1.",
+        "02-external-validation inspected 3 input(s) and captured 8 stdout line(s). Sample: RUNFORGE_SOURCE_BEFORE_HEAD | d65ab9a9c8130f5d2c9214e8fdde2a278578afed | RUNFORGE_SOURCE_BEFORE_STATUS"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "npm test",
+        "status": "failed",
+        "exitCode": 1,
+        "logPath": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/command.log",
+        "inspected": [
+          "package.json",
+          "src",
+          "tests"
+        ],
+        "summary": "02-external-validation inspected 3 input(s) and captured 8 stdout line(s). Sample: RUNFORGE_SOURCE_BEFORE_HEAD | d65ab9a9c8130f5d2c9214e8fdde2a278578afed | RUNFORGE_SOURCE_BEFORE_STATUS",
+        "executorReport": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/executor-report.json"
+      },
+      "executor": {
+        "requestId": "EXTERNAL-RUN-2:02-external-validation:docker-shell",
+        "lane": "docker-shell",
+        "status": "failed",
+        "exitCode": 1,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/command.log",
+          "stdoutLog": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stdout.log",
+          "stderrLog": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stderr.log",
+          "report": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/executor-report.json"
+        }
+      },
+      "report": "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/report.md"
+    },
+    {
+      "id": "03-external-validation",
+      "goal": "Run external validation command: npm run build",
+      "workspace": "/Users/evgeny/Documents/projects/RunForge-worktrees/.runforge-task-runs/factory-external-run-2/03-external-validation/workspace",
+      "inputsInspected": [
+        "package.json",
+        "src",
+        "tests"
+      ],
+      "findings": [
+        "External target validation in a disposable Docker workspace. Evidence command passed with exit code 0.",
+        "03-external-validation inspected 3 input(s) and captured 8 stdout line(s). Sample: RUNFORGE_SOURCE_BEFORE_HEAD | d65ab9a9c8130f5d2c9214e8fdde2a278578afed | RUNFORGE_SOURCE_BEFORE_STATUS"
+      ],
+      "status": "done",
+      "artifacts": [
+        "brief.md",
+        "report.md",
+        "command.log",
+        "stdout.log",
+        "stderr.log",
+        "executor-report.json"
+      ],
+      "evidence": {
+        "command": "npm run build",
+        "status": "passed",
+        "exitCode": 0,
+        "logPath": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/command.log",
+        "inspected": [
+          "package.json",
+          "src",
+          "tests"
+        ],
+        "summary": "03-external-validation inspected 3 input(s) and captured 8 stdout line(s). Sample: RUNFORGE_SOURCE_BEFORE_HEAD | d65ab9a9c8130f5d2c9214e8fdde2a278578afed | RUNFORGE_SOURCE_BEFORE_STATUS",
+        "executorReport": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/executor-report.json"
+      },
+      "executor": {
+        "requestId": "EXTERNAL-RUN-2:03-external-validation:docker-shell",
+        "lane": "docker-shell",
+        "status": "passed",
+        "exitCode": 0,
+        "signal": null,
+        "timedOut": false,
+        "artifactPaths": {
+          "commandLog": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/command.log",
+          "stdoutLog": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/stdout.log",
+          "stderrLog": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/stderr.log",
+          "report": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/executor-report.json"
+        }
+      },
+      "report": "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/report.md"
+    }
+  ],
+  "checks": [
+    {
+      "command": "npm run typecheck",
+      "result": "passed",
+      "exitCode": 0
+    },
+    {
+      "command": "npm test",
+      "result": "failed",
+      "exitCode": 1
+    },
+    {
+      "command": "npm run build",
+      "result": "passed",
+      "exitCode": 0
+    }
+  ],
+  "review": {
+    "request": "validation/runs/EXTERNAL-RUN-2/review/review-request.json",
+    "result": "validation/runs/EXTERNAL-RUN-2/review/review-result.json",
+    "markdown": "validation/runs/EXTERNAL-RUN-2/review/review.md",
+    "reviewer": "deterministic-evidence-reviewer",
+    "provider": "providerless",
+    "providerMetadata": null,
+    "safety": {
+      "mode": "providerless",
+      "readOnly": true,
+      "mutationForbidden": true,
+      "networkAccess": "not_requested",
+      "secretsAccess": "not_requested",
+      "repoAccess": "evidence_packet_only"
+    },
+    "status": "blocked",
+    "confidence": "low",
+    "humanDecisionRequired": true,
+    "recommendedNextAction": "Owner should inspect failed command/check evidence before treating this run as complete.",
+    "evidenceReferences": [
+      "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/report.md",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/report.md",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/report.md",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/command.log",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stdout.log",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/stderr.log",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/01-external-validation/executor-report.json",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/command.log",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stdout.log",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/stderr.log",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/02-external-validation/executor-report.json",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/command.log",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/stdout.log",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/stderr.log",
+      "validation/runs/EXTERNAL-RUN-2/subtasks/03-external-validation/executor-report.json"
+    ]
+  },
+  "ownerConclusion": "The external target was validated through the first-class task-run planner, Docker executor, providerless review, and artifact aggregation path. The original repository is a read-only source; commands run only in disposable writable workspaces.",
+  "remainingGaps": [
+    "Offline validation reuses an existing target node_modules snapshot when present; platform-specific optional packages may require a separately prepared Linux dependency cache."
+  ],
+  "recommendedNextMilestone": "broaden external task-run package-manager fixtures",
+  "recommendedNextStep": "Recommended next milestone: broaden external task-run package-manager fixtures.",
+  "externalTarget": {
+    "path": "/Users/evgeny/Documents/projects/factory",
+    "before": {
+      "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "status": ""
+    },
+    "after": {
+      "head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "status": ""
+    },
+    "mutationVerdict": "unchanged",
+    "commands": [
+      "npm run typecheck",
+      "npm test",
+      "npm run build"
+    ],
+    "capabilityClassification": "passed",
+    "targetClassification": "environment/setup issue",
+    "environment": "validation/runs/EXTERNAL-RUN-2/environment.json",
+    "executionLog": "validation/runs/EXTERNAL-RUN-2/execution-log.md",
+    "triageReport": "validation/runs/EXTERNAL-RUN-2/external-triage-report.md"
+  }
+}

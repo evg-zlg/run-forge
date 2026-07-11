@@ -1,4 +1,4 @@
-export type TaskKind = "docs-review" | "code-inspection" | "general-review";
+export type TaskKind = "docs-review" | "code-inspection" | "general-review" | "external-validation";
 
 export type PlannedSubtask = {
   id: string;
@@ -31,6 +31,26 @@ export function planTaskRun(task: string): TaskRunPlan {
   if (kind === "docs-review") return docsPlan(task);
   if (kind === "code-inspection") return codePlan(task);
   return generalPlan(task);
+}
+
+export function planExternalTaskRun(commands: string[]): TaskRunPlan {
+  return {
+    kind: "external-validation",
+    planningBasis: [
+      "An explicit external repository target was supplied.",
+      "Validation runs in disposable writable workspaces through the opt-in Docker executor.",
+      "The original repository is mounted read-only and checked before and after execution."
+    ],
+    inputs: ["package.json", "package-lock.json", "src", "tests"],
+    recommendedNextMilestone: "broaden external task-run package-manager fixtures",
+    subtasks: commands.map((command, index) => ({
+      id: `${String(index + 1).padStart(2, "0")}-external-validation`,
+      goal: `Run external validation command: ${command}`,
+      inputs: ["package.json", "src", "tests"],
+      evidenceFocus: "External target validation in a disposable Docker workspace.",
+      evidenceCommand: command
+    }))
+  };
 }
 
 function classifyTask(task: string): TaskKind {

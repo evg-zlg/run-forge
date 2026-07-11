@@ -8,6 +8,8 @@ validation/runs/*
 !validation/runs/.gitkeep
 !validation/runs/*/
 validation/runs/*/*
+!validation/runs/EXTERNAL-RUN-2/
+!validation/runs/EXTERNAL-RUN-2/**
 !validation/runs/*/score.json
 !validation/runs/ALPHA-3/summary.md
 !validation/runs/ALPHA-3/results.json

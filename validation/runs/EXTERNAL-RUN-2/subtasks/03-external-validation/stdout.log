@@ -1,0 +1,10 @@
+RUNFORGE_SOURCE_BEFORE_HEAD
+d65ab9a9c8130f5d2c9214e8fdde2a278578afed
+RUNFORGE_SOURCE_BEFORE_STATUS
+
+> factory-loop@0.1.0 build
+> tsc -p tsconfig.json && cp -r src/ui/*.html src/ui/*.css src/ui/*.js dist/ui/ && cp -r src/ui/lib src/ui/views dist/ui/
+
+RUNFORGE_SOURCE_AFTER_HEAD
+d65ab9a9c8130f5d2c9214e8fdde2a278578afed
+RUNFORGE_SOURCE_AFTER_STATUS
