@@ -22,16 +22,17 @@ export function evaluateLocalBranchAuthority(envelope: AuthorityEnvelope, input:
 }
 
 export async function createLocalBranchWorktree(input: { repo: string; worktree: string; branch: string; sourceHead: string; patchPath: string }): Promise<void> {
-  const existing = await execFileAsync("git", ["-C", input.repo, "show-ref", "--verify", "--quiet", `refs/heads/${input.branch}`]).then(() => true, () => false);
-  if (existing) throw new Error(`Local target branch already exists: ${input.branch}. Refusing an implicit update.`);
+  const existingHead = await execFileAsync("git", ["-C", input.repo, "show-ref", "--verify", "--hash", `refs/heads/${input.branch}`]).then((value) => value.stdout.trim(), () => null);
+  if (existingHead !== null && existingHead !== input.sourceHead) throw new Error(`Local target branch diverged from the authority-recorded source HEAD: ${input.branch}.`);
   await mkdir(resolve(input.worktree, ".."), { recursive: true });
-  await execFileAsync("git", ["-C", input.repo, "worktree", "add", "-b", input.branch, input.worktree, input.sourceHead]);
+  const worktreeArgs = existingHead === null ? ["worktree", "add", "-b", input.branch, input.worktree, input.sourceHead] : ["worktree", "add", input.worktree, input.branch];
+  await execFileAsync("git", ["-C", input.repo, ...worktreeArgs]);
   try {
     await execFileAsync("git", ["apply", "--check", input.patchPath], { cwd: input.worktree });
     await execFileAsync("git", ["apply", input.patchPath], { cwd: input.worktree });
   } catch (error) {
     await execFileAsync("git", ["-C", input.repo, "worktree", "remove", "--force", input.worktree]).catch(() => undefined);
-    await execFileAsync("git", ["-C", input.repo, "branch", "-D", input.branch]).catch(() => undefined);
+    if (existingHead === null) await execFileAsync("git", ["-C", input.repo, "branch", "-D", input.branch]).catch(() => undefined);
     throw error;
   }
 }

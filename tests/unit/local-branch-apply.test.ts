@@ -1,5 +1,10 @@
+import { execFile } from "node:child_process";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
-import { evaluateLocalBranchAuthority } from "../../src/run/local-branch-apply.js";
+import { createLocalBranchWorktree, evaluateLocalBranchAuthority } from "../../src/run/local-branch-apply.js";
 import type { AuthorityEnvelope } from "../../src/run/delegated-authority.js";
 
 describe("local non-main branch authority", () => {
@@ -22,7 +27,20 @@ describe("local non-main branch authority", () => {
   it("accepts the exact authority-bound local branch contour", () => {
     expect(evaluateLocalBranchAuthority(authority(), input()).classification).toBe("accepted");
   });
+
+  it("reuses only an existing branch at the recorded source HEAD", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-local-branch-")); const repo = join(root, "repo"); const worktree = join(root, "worktree");
+    await git(["init", "-q", "-b", "main", repo]); await writeFile(join(repo, "README.md"), "before\n");
+    await git(["-C", repo, "add", "README.md"]); await git(["-C", repo, "-c", "user.name=RunForge", "-c", "user.email=runforge@example.invalid", "commit", "-qm", "base"]);
+    const head = (await git(["-C", repo, "rev-parse", "HEAD"])).trim(); await git(["-C", repo, "branch", "runforge/demo", head]);
+    const patch = join(root, "patch.diff"); await writeFile(patch, "diff --git a/README.md b/README.md\nindex 90be1f3..2d39083 100644\n--- a/README.md\n+++ b/README.md\n@@ -1 +1,2 @@\n before\n+after\n");
+    await createLocalBranchWorktree({ repo, worktree, branch: "runforge/demo", sourceHead: head, patchPath: patch });
+    expect(await readFile(join(worktree, "README.md"), "utf8")).toContain("after"); await rm(root, { recursive: true, force: true });
+  });
 });
+
+const execFileAsync = promisify(execFile);
+async function git(args: string[]): Promise<string> { return (await execFileAsync("git", args)).stdout; }
 
 function input(override: Partial<Parameters<typeof evaluateLocalBranchAuthority>[1]> = {}): Parameters<typeof evaluateLocalBranchAuthority>[1] {
   return { targetBranch: "runforge/demo", sourceBranch: "source", defaultBranch: "develop", sourceRepo: "/factory", worktreePath: "/artifacts/local-worktree", sourceClean: true, expectedPatchHash: "patch", currentPatchHash: "patch", ...override };
