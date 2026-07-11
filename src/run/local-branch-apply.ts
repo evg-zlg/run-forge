@@ -46,15 +46,16 @@ export async function withIsolatedGitMetadata<T>(worktree: string, action: () =>
   finally { await rm(gitPath, { recursive: true, force: true }); await writeFile(gitPath, pointer, "utf8"); }
 }
 
-export async function writeLocalBranchPrPackage(out: string, input: { branch: string; worktree: string; validationPassed: boolean }): Promise<void> {
+export async function writeLocalBranchPrPackage(out: string, input: { branch: string; worktree: string; validationPassed: boolean; title?: string; summary?: string; files?: string[] }): Promise<void> {
   const dir = join(out, "pr-package"); await mkdir(dir, { recursive: true });
-  await writeFile(join(dir, "pr-title.txt"), "Document offline validation workflow\n");
-  await writeFile(join(dir, "pr-body.md"), `## Summary\n\n- Document the existing offline validation workflow.\n\n## Validation\n\n- Local non-main branch validation: ${input.validationPassed ? "passed" : "failed"}\n`);
+  const files = input.files ?? ["README.md"];
+  await writeFile(join(dir, "pr-title.txt"), `${input.title ?? "Document offline validation workflow"}\n`);
+  await writeFile(join(dir, "pr-body.md"), `## Summary\n\n- ${input.summary ?? "Document the existing offline validation workflow."}\n\n## Changed files\n\n${files.map((file) => `- \`${file}\``).join("\n")}\n\n## Validation\n\n- Docker network disabled\n- Local non-main branch validation: ${input.validationPassed ? "passed" : "failed"}\n`);
   await writeFile(join(dir, "branch-summary.md"), `# Branch Summary\n\n- Local branch: \`${input.branch}\`\n- Worktree: \`${input.worktree}\`\n- Push performed: no\n`);
-  await writeFile(join(dir, "changed-files.md"), "# Changed Files\n\n- `README.md` — documentation-only offline validation guidance.\n");
+  await writeFile(join(dir, "changed-files.md"), `# Changed Files\n\n${files.map((file) => `- \`${file}\``).join("\n")}\n`);
   await writeFile(join(dir, "validation-summary.md"), `# Validation Summary\n\nDocker runtime network was disabled. Branch validation passed: **${input.validationPassed}**.\n`);
-  await writeFile(join(dir, "risk-assessment.md"), "# Risk Assessment\n\nLow risk, documentation only. No provider, database, production, secret, deploy, push, merge, or external PR action.\n");
-  await writeFile(join(dir, "manual-push-instructions.md"), `# Manual Push Instructions\n\nAfter owner review only:\n\n1. Inspect and commit the prepared change: \`git -C ${input.worktree} diff && git -C ${input.worktree} add README.md && git -C ${input.worktree} commit -m "Document offline validation workflow"\`.\n2. Publish separately: \`git -C ${input.worktree} push -u origin ${input.branch}\`.\n\nRunForge executed neither commit nor push.\n`);
+  await writeFile(join(dir, "risk-assessment.md"), "# Risk Assessment\n\nLow-risk bounded patch. No provider, database, production, secret, deploy, merge, or main-branch action.\n");
+  await writeFile(join(dir, "manual-push-instructions.md"), `# Manual Push Instructions\n\nAfter owner review only:\n\n1. Inspect and commit only the listed changed files.\n2. Publish separately: \`git -C ${input.worktree} push -u origin ${input.branch}\`.\n\nRunForge executed neither commit nor push while generating this package.\n`);
   await writeFile(join(dir, "manual-create-pr-instructions.md"), "# Manual PR Instructions\n\nAfter an owner-authorized push, create the PR manually using `pr-title.txt` and `pr-body.md`.\n");
   await writeFile(join(dir, "rollback-instructions.md"), `# Rollback Instructions\n\nRemove the worktree and local branch: \`git worktree remove ${input.worktree}\`, then \`git branch -D ${input.branch}\`.\n`);
   await writeFile(join(dir, "owner-next-actions.md"), "# Owner Next Actions\n\nReview the local branch diff, validation evidence, and risk assessment. Decide separately whether publication is authorized.\n");

@@ -33,6 +33,12 @@ describe("external execution gates", () => {
     expect(() => validateExternalExecutionModes({ ...valid, applyMode: "local-non-main-branch", targetBranch: "runforge/demo", publicationMode: "draft-pr" })).not.toThrow();
   });
 
+  it("requires a plan only for code repair mode", () => {
+    expect(() => validateExternalExecutionModes({ ...valid, repairMode: "code" })).toThrow("requires --repair-plan");
+    expect(() => validateExternalExecutionModes({ ...valid, repairMode: "code", repairPlan: "plan.json" })).not.toThrow();
+    expect(() => validateExternalExecutionModes({ ...valid, repairPlan: "plan.json" })).toThrow("requires --repair-mode code");
+  });
+
   it.each([
     [{ runtime: "local" }, "--runtime docker"],
     [{ prepareRuntime: "none" }, "--prepare-runtime explicit"],

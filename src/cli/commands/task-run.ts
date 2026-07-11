@@ -23,7 +23,9 @@ function startCommand(): Command {
     .option("--runtime <mode>", "subtask runtime; supported: 'local', 'docker'", "local")
     .option("--docker-image <image>", "prebuilt local image for --runtime docker", "runforge:local")
     .option("--prepare-runtime <mode>", "explicit dependency preparation; supported: 'explicit'", "none")
-    .option("--repair-mode <mode>", "external repair mode; supported: 'disposable'")
+    .option("--repair-mode <mode>", "external repair mode; supported: 'disposable', 'code'")
+    .option("--repair-plan <path>", "bounded JSON repair plan required by --repair-mode code")
+    .option("--existing-candidate <id>", "known existing candidate/PR identity; repeatable", collect, [])
     .option("--authority <path>", "delegated owner authority envelope")
     .option("--approval-mode <mode>", "owner gate; supported: 'require-owner-decision'", "require-owner-decision")
     .option("--apply-mode <mode>", "apply during start; supported: 'none', 'local-non-main-branch'", "none")
@@ -41,6 +43,8 @@ function startCommand(): Command {
             dockerImage: opts.dockerImage as string,
             prepareRuntime: opts.prepareRuntime as string,
             repairMode: opts.repairMode as string,
+            repairPlan: opts.repairPlan as string | undefined,
+            existingCandidates: opts.existingCandidate as string[],
             authority: opts.authority as string | undefined,
             approvalMode: opts.approvalMode as string,
             applyMode: opts.applyMode as string,

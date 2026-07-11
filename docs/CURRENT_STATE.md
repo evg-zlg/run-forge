@@ -2,7 +2,7 @@
 
 Status date: 2026-07-11.
 
-RunForge is currently a local, deterministic, artifact-first task-run harness. PRs #47 through #51 are merged. External validation, explicit runtime preparation, disposable repair, artifact-contained apply, real owner decisions, delegated authority, and local non-main branch preparation are proven. PUBLICATION-1 adds independently authorized commit, non-force push, and draft-PR gates while continuing to prohibit merge and deploy.
+RunForge is currently a local, deterministic, artifact-first task-run harness. PRs #47 through #52 are merged. External validation, explicit runtime preparation, disposable repair, artifact-contained apply, real owner decisions, delegated authority, local non-main branch preparation, and draft-only publication are proven. REAL-USE-CAMPAIGN-1 adds a reusable bounded code-repair executor while continuing to prohibit target merge and deploy.
 
 ## Current North Star
 
@@ -34,6 +34,8 @@ task
 - Explicit preparation records its network use, lockfile hash, package manager, image identity, target platform, timestamps, and command log. The subsequent task execution remains network-disabled.
 - External task-runs reject output/tmp/workspace paths inside the source repository and treat any before/after source mutation as a blocking safety failure.
 - External repair mode creates a deterministic low-risk patch only in a disposable workspace, validates it offline, runs providerless review, and stops at the owner gate by default.
+- `--repair-mode code --repair-plan <json>` accepts exact bounded replacements, allowed files, a maximum changed-file count, and deterministic validation commands; it refuses traversal/symlink escapes, ambiguous anchors, env/lockfile/deploy/migration/secret paths, unsafe commands, dirty sources, and declared duplicate candidates.
+- Code repair plans generate reusable plan/report evidence, multi-file patches, providerless scope review, controlled apply, non-main branch validation, and authority-bound draft publication without provider calls.
 - `task-run start` now stops at `awaiting_owner_decision`; `task-run owner-decision` records the owner's decision, target branch, note, timestamp, run ID, and patch hashes; `task-run continue` rejects missing, non-approving, stale, source-changing, or unsafe-target decisions before controlled apply.
 - A valid approval may apply only to an artifact-contained controlled worktree and produces an owner-controlled PR creation package. It never creates the real branch, pushes, opens a PR, merges, deploys, or changes target `main`.
 - Deterministic evidence review as the default offline lane.
@@ -78,6 +80,7 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 - `AUTHORITY-1`: delegated authority is validated against the canonical repo, hard safety denies, patch scope/risk, hashes, and artifact-contained target; covered actions continue automatically with a JSONL decision audit trail.
 - `BRANCH-PR-1`: owner-authorized local non-main branch/worktree apply and offline validation, with a manual PR package and no push or external PR creation.
 - `PUBLICATION-1`: separately authorized non-main commit, non-force push, and draft PR creation with per-action audit decisions; merge and deploy remain prohibited.
+- `REAL-USE-CAMPAIGN-1`: first-class bounded code repair implemented and used to produce green Factory draft PR #165 from a two-file parser/test plan; Factory main remained unchanged.
 
 ## Current Gaps
 
@@ -87,7 +90,7 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 - Richer semantic planning beyond current deterministic heuristics.
 - Stronger owner-ready synthesis across long or multi-domain task-runs.
 - Docs-review planning still needs fresher validation evidence selection; TASK-RUN-6 showed next-milestone readiness evidence still querying TASK-RUN-4 while current evidence reaches TASK-RUN-6.
-- Owner-controlled creation of the real non-main branch and PR remains the next milestone; push, PR creation, merge, and deploy are not supported by this contour.
+- Code repair authoring still uses exact replacement anchors; richer deterministic patch planning and additional operation types remain future work.
 
 ## Frozen
 
@@ -123,4 +126,4 @@ This is not the product highway. It is safety/evidence substrate for Agent OS. T
 
 ## Immediate Constraint
 
-Do not continue Alpha-28. EXTERNAL-RUN-2/3 are merged, external Docker validation with explicit preparation is proven, and EXTERNAL-EXECUTION-1 adds disposable repair plus a controlled apply gate. The next large milestone should be a real owner-approved non-main apply/PR workflow, only after this safety proof; continue to stop for target-main mutation, automatic push/merge/deploy, secrets, providers, DB/prod, or another strategic fork.
+Use the bounded code-repair path for day-to-day low-risk tasks and collect real refusal/success evidence. Continue to stop for target-main mutation, target PR merge, deploy, secrets, providers, DB/prod, or another strategic fork.
