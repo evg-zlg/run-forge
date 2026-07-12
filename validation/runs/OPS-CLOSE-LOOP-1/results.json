@@ -1,0 +1,45 @@
+{
+  "task": "OPS-CLOSE-LOOP-1",
+  "status": "passed",
+  "completed_at": "2026-07-12T17:15:06+05:00",
+  "runforge": {
+    "starting_sha": "e6639729c45aa0322a0ce43dd3e1facd5d96f0ff",
+    "code_fix_needed": false,
+    "pr_url": null,
+    "merge_sha": null
+  },
+  "upravdom": {
+    "main_before": "2409eb40522a8b73ce22aa30a884dd777e4958e0",
+    "main_after": "2409eb40522a8b73ce22aa30a884dd777e4958e0",
+    "main_changed": false,
+    "branch": "runforge/add-decimal-radix-date",
+    "commit": "4c98e96d33321f2ab194dc11d053fc6b86996a63",
+    "draft_pr_url": "https://github.com/evg-zlg/upravdom/pull/13",
+    "draft_pr_number": 13,
+    "merge_state": "CLEAN"
+  },
+  "validation": {
+    "patch_apply_check": "passed",
+    "diff_check": "passed",
+    "targeted_assertion": "passed",
+    "targeted_lint": "passed",
+    "full_lint": "passed",
+    "tests": { "status": "passed", "files": 39, "tests": 181 },
+    "webpack_build": "passed",
+    "turbopack_build": "environment_blocked_local_bind",
+    "independent_review": "no_findings"
+  },
+  "network": {
+    "runtime_network_disabled": true,
+    "preparation_network_disabled": true,
+    "registry_contact": false,
+    "network_used": false
+  },
+  "ci": {
+    "status": "not_configured_or_not_emitted",
+    "checks": [],
+    "workflow_runs": []
+  },
+  "normal_autopilot_closes_loop": false,
+  "normal_autopilot_note": "Owner-operated promotion succeeded; unattended patch-package publication was not implemented or demonstrated."
+}

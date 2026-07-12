@@ -1,0 +1,23 @@
+{
+  "schemaVersion": "ops-close-loop-1",
+  "status": "passed",
+  "requiredFiles": [
+    "summary.md",
+    "results.json",
+    "close-loop-report.md",
+    "network-phase-report.md",
+    "validation-report.md",
+    "publication-report.md",
+    "execution-log.md",
+    "packet-validation.json"
+  ],
+  "missing": [],
+  "patch_promoted_to_draft_pr": true,
+  "target_main_unchanged": true,
+  "runtime_network_disabled": true,
+  "dependency_preparation_network_used": false,
+  "registry_contact_observed": false,
+  "ci_monitored": true,
+  "ci_checks_emitted": false,
+  "runforge_fix_needed": false
+}
