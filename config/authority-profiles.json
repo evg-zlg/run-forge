@@ -1,0 +1,44 @@
+{
+  "low-risk-code": {
+    "allowed_actions": ["inspect", "validate", "edit_non_main_worktree", "commit_non_main", "push_non_main", "create_draft_pr", "monitor_ci", "create_patch_package"],
+    "forbidden_actions": ["push_to_main", "force_push", "merge_target_pr", "deploy", "db_access", "production_access", "secret_access", "provider_calls", "runtime_network_during_validation", "run_migrations"],
+    "allowed_file_patterns": ["src/**", "tests/**", "docs/**", "*.md", "package.json"],
+    "forbidden_file_patterns": ["**/.env*", "**/secrets/**", "**/migrations/**", ".github/workflows/**"],
+    "publication_permission": "draft_pr",
+    "validation_policy": "declared local checks with network disabled",
+    "ci_policy": "monitor created draft PR; never bypass required checks",
+    "stop_conditions": ["dirty target main", "source HEAD changes", "forbidden file", "validation failure", "authority ambiguity"]
+  },
+  "frontend-low-risk": {
+    "extends": "low-risk-code",
+    "allowed_actions": ["inspect", "validate", "edit_non_main_worktree", "create_draft_pr", "monitor_ci", "create_patch_package"],
+    "forbidden_actions": ["push_to_main", "force_push", "merge_target_pr", "deploy", "db_access", "production_access", "secret_access", "provider_calls", "runtime_network_during_validation", "run_migrations"],
+    "allowed_file_patterns": ["src/**", "tests/**", "public/**", "*.md", "package.json"],
+    "forbidden_file_patterns": ["**/.env*", "**/secrets/**", "**/migrations/**", ".github/workflows/**"],
+    "publication_permission": "draft_pr",
+    "validation_policy": "frontend lint, typecheck, tests, and build with network disabled",
+    "ci_policy": "monitor created draft PR",
+    "stop_conditions": ["backend or catalog data mutation", "source HEAD changes", "visual acceptance unavailable"]
+  },
+  "read-only-triage": {
+    "allowed_actions": ["inspect", "discover_candidates", "read_validation_configuration"],
+    "forbidden_actions": ["edit", "commit", "push", "create_pr", "push_to_main", "force_push", "merge_target_pr", "deploy", "db_access", "production_access", "secret_access", "provider_calls", "runtime_network_during_validation", "run_migrations"],
+    "allowed_file_patterns": ["**"],
+    "forbidden_file_patterns": ["**/.env*", "**/secrets/**", "**/migrations/**"],
+    "publication_permission": "none",
+    "validation_policy": "static read-only inspection only",
+    "ci_policy": "report existing evidence only",
+    "stop_conditions": ["any mutation requested", "secret-like path", "DB or production boundary"]
+  },
+  "patch-package-only": {
+    "extends": "low-risk-code",
+    "allowed_actions": ["inspect", "validate", "create_patch_package"],
+    "forbidden_actions": ["push", "create_pr", "push_to_main", "force_push", "merge_target_pr", "deploy", "db_access", "production_access", "secret_access", "provider_calls", "runtime_network_during_validation", "run_migrations"],
+    "allowed_file_patterns": ["src/**", "tests/**", "docs/**", "*.md"],
+    "forbidden_file_patterns": ["**/.env*", "**/secrets/**", "**/migrations/**", ".github/workflows/**"],
+    "publication_permission": "patch_package",
+    "validation_policy": "validate isolated patch workspace with network disabled",
+    "ci_policy": "not applicable until owner publishes",
+    "stop_conditions": ["patch cannot be reproduced", "source HEAD changes", "forbidden file"]
+  }
+}

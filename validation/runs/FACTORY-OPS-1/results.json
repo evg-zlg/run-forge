@@ -1,0 +1,15 @@
+{
+  "status": "completed",
+  "projects": {
+    "factory": {
+      "candidates_evaluated": 1,
+      "selected": 0,
+      "target_unchanged": true
+    },
+    "upravdom": {
+      "candidates_evaluated": 1,
+      "selected": 1,
+      "target_unchanged": true
+    }
+  }
+}

@@ -1,0 +1,11 @@
+[
+  {
+    "id": "validation-typecheck-gap",
+    "source": "package_script_gap",
+    "title": "No typecheck script declared",
+    "risk": "medium",
+    "duplicate": false,
+    "recommended_action": "owner_review",
+    "evidence": "bounded local repository scan"
+  }
+]

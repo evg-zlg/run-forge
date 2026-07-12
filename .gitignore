@@ -145,6 +145,8 @@ validation/runs/EXTERNAL-EXECUTION-1/validation/**
 !validation/runs/ADMIN-UI-4/visual-review.md
 !validation/runs/PACKET-VALIDATION/summary.md
 !validation/runs/PACKET-VALIDATION/results.json
+!validation/runs/FACTORY-OPS-1/
+!validation/runs/FACTORY-OPS-1/**
 .DS_Store
 *.log.local
 *.zip
