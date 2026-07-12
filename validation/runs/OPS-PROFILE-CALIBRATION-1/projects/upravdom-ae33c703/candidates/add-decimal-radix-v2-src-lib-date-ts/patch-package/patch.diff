@@ -1,0 +1,100 @@
+diff --git a/src/lib/date.ts b/src/lib/date.ts
+--- a/src/lib/date.ts
++++ b/src/lib/date.ts
+@@ -1,95 +1,95 @@
+ // Преобразует локальную дату (из календаря) в UTC строку YYYY-MM-DD
+ export function localDateToUTC(date: Date): string {
+   const utc = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()))
+   return utc.toISOString().split('T')[0]
+ }
+ 
+ // Преобразует UTC строку в локальную дату для отображения DD.MM.YYYY
+ export function utcToLocalDisplay(utcDate: string): string {
+   const [year, month, day] = utcDate.split('-')
+   return `${day}.${month}.${year}`
+ }
+ 
+ // Преобразует UTC строку в объект Date (локальный)
+ export function utcToDate(utcDate: string): Date {
+   const [year, month, day] = utcDate.split('-')
+-  return new Date(parseInt(year), parseInt(month) - 1, parseInt(day))
++  return new Date(parseInt(year, 10), parseInt(month, 10) - 1, parseInt(day, 10))
+ }
+ 
+ // Получить сегодняшнюю дату в UTC
+ export function getTodayUTC(): string {
+   const now = new Date()
+   const utc = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()))
+   return utc.toISOString().split('T')[0]
+ }
+ 
+ // Получить завтрашнюю дату в UTC
+ export function getTomorrowUTC(): string {
+   const tomorrow = new Date()
+   tomorrow.setDate(tomorrow.getDate() + 1)
+   const utc = new Date(Date.UTC(tomorrow.getFullYear(), tomorrow.getMonth(), tomorrow.getDate()))
+   return utc.toISOString().split('T')[0]
+ }
+ 
+ // Получить дату через N дней от переданной (в UTC)
+ export function addDaysUTC(date: Date, days: number): string {
+   const result = new Date(date)
+   result.setDate(result.getDate() + days)
+   const utc = new Date(Date.UTC(result.getFullYear(), result.getMonth(), result.getDate()))
+   return utc.toISOString().split('T')[0]
+ }
+ 
+ /** Календарное смещение для строки YYYY-MM-DD без сдвига из‑за часового пояса. */
+ export function addDaysToIsoDate(isoYmd: string, days: number): string {
+   const raw = String(isoYmd).split('T')[0]
+   const parts = raw.split('-').map((p) => parseInt(p, 10))
+   if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) {
+     return raw
+   }
+   const [y, m, d] = parts
+   const dt = new Date(y, m - 1, d)
+   dt.setDate(dt.getDate() + days)
+   return formatDateToYMD(dt)
+ }
+ 
+ // Форматирует Date или строку в YYYY-MM-DD (локальная дата)
+ export function formatDateToYMD(date: Date | string): string {
+   // Если пришла строка, преобразуем в Date
+   let dateObj: Date
+   if (typeof date === 'string') {
+     // Если строка в формате YYYY-MM-DD
+     const parts = date.split('-')
+     if (parts.length === 3) {
+       dateObj = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+     } else {
+       dateObj = new Date(date)
+     }
+   } else {
+     dateObj = date
+   }
+   
+   const year = dateObj.getFullYear()
+   const month = String(dateObj.getMonth() + 1).padStart(2, '0')
+   const day = String(dateObj.getDate()).padStart(2, '0')
+   return `${year}-${month}-${day}`
+ }
+ 
+ // Форматирует Date или строку в DD.MM.YYYY для отображения
+ export function formatDateToDMY(date: Date | string): string {
+   let dateObj: Date
+   if (typeof date === 'string') {
+     const parts = date.split('-')
+     if (parts.length === 3) {
+       dateObj = new Date(parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]))
+     } else {
+       dateObj = new Date(date)
+     }
+   } else {
+     dateObj = date
+   }
+   
+   const year = dateObj.getFullYear()
+   const month = String(dateObj.getMonth() + 1).padStart(2, '0')
+   const day = String(dateObj.getDate()).padStart(2, '0')
+   return `${day}.${month}.${year}`
+ }

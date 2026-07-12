@@ -1,0 +1,8 @@
+{
+  "candidate_id": "cli-argument-handling-scripts-pocketbase-household-foundation-mjs",
+  "allowed_files": [
+    "scripts/pocketbase/household-foundation.mjs"
+  ],
+  "transformation": "none without owner decision",
+  "authority": "low-risk only"
+}

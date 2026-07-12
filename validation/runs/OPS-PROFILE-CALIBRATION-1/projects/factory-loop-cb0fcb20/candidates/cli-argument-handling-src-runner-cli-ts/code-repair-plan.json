@@ -1,0 +1,8 @@
+{
+  "candidate_id": "cli-argument-handling-src-runner-cli-ts",
+  "allowed_files": [
+    "src/runner/cli.ts"
+  ],
+  "transformation": "none without owner decision",
+  "authority": "low-risk only"
+}

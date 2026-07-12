@@ -1,0 +1,219 @@
+{
+  "project": "upravdom-ae33c703",
+  "candidates": [
+    {
+      "id": "cli-argument-handling-scripts-pocketbase-activity-history-mjs",
+      "source": "cli_parser_review",
+      "title": "Review positional argument, empty input, and unknown flag handling",
+      "risk": "medium",
+      "file": "scripts/pocketbase/activity-history.mjs",
+      "line": 251,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "scripts/pocketbase/activity-history.mjs:251",
+      "candidate_risk": "unknown",
+      "action_decision": "needs-owner-decision",
+      "decision_reason": "Candidate files are unknown or outside the explicit candidate allowlist."
+    },
+    {
+      "id": "malformed-json-handling-scripts-pocketbase-collection-apply-mjs",
+      "source": "json_report_review",
+      "title": "Verify malformed JSON/report input is handled",
+      "risk": "medium",
+      "file": "scripts/pocketbase/collection-apply.mjs",
+      "line": 2,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "scripts/pocketbase/collection-apply.mjs:2",
+      "candidate_risk": "unknown",
+      "action_decision": "needs-owner-decision",
+      "decision_reason": "Candidate files are unknown or outside the explicit candidate allowlist."
+    },
+    {
+      "id": "cli-argument-handling-scripts-pocketbase-household-foundation-mjs",
+      "source": "cli_parser_review",
+      "title": "Review positional argument, empty input, and unknown flag handling",
+      "risk": "medium",
+      "file": "scripts/pocketbase/household-foundation.mjs",
+      "line": 531,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "scripts/pocketbase/household-foundation.mjs:531",
+      "candidate_risk": "unknown",
+      "action_decision": "needs-owner-decision",
+      "decision_reason": "Candidate files are unknown or outside the explicit candidate allowlist."
+    },
+    {
+      "id": "cli-argument-handling-scripts-pocketbase-preserve-user-cleanup-mjs",
+      "source": "cli_parser_review",
+      "title": "Review positional argument, empty input, and unknown flag handling",
+      "risk": "medium",
+      "file": "scripts/pocketbase/preserve-user-cleanup.mjs",
+      "line": 419,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "scripts/pocketbase/preserve-user-cleanup.mjs:419",
+      "candidate_risk": "unknown",
+      "action_decision": "needs-owner-decision",
+      "decision_reason": "Candidate files are unknown or outside the explicit candidate allowlist."
+    },
+    {
+      "id": "malformed-json-handling-src-actions-photos-ts",
+      "source": "json_report_review",
+      "title": "Verify malformed JSON/report input is handled",
+      "risk": "medium",
+      "file": "src/actions/photos.ts",
+      "line": 49,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "src/actions/photos.ts:49",
+      "candidate_risk": "frontend-only",
+      "action_decision": "draft-pr-allowed",
+      "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+    },
+    {
+      "id": "malformed-json-handling-src-app-api-plants-identify-route-ts",
+      "source": "json_report_review",
+      "title": "Verify malformed JSON/report input is handled",
+      "risk": "medium",
+      "file": "src/app/api/plants/identify/route.ts",
+      "line": 74,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "src/app/api/plants/identify/route.ts:74",
+      "candidate_risk": "frontend-only",
+      "action_decision": "draft-pr-allowed",
+      "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+    },
+    {
+      "id": "range-validation-src-components-ui-textarea-tsx",
+      "source": "validator_review",
+      "title": "Review boundary and range validation coverage",
+      "risk": "medium",
+      "file": "src/components/ui/textarea.tsx",
+      "line": 10,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "src/components/ui/textarea.tsx:10",
+      "candidate_risk": "frontend-only",
+      "action_decision": "draft-pr-allowed",
+      "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+    },
+    {
+      "id": "add-decimal-radix-v2-src-lib-date-ts",
+      "source": "strict_integer_radix",
+      "title": "Declare decimal radix for parsed date components",
+      "risk": "low",
+      "file": "src/lib/date.ts",
+      "line": 16,
+      "duplicate": false,
+      "recommended_action": "execute_patch_package",
+      "evidence": "src/lib/date.ts:16",
+      "candidate_risk": "safe-utility",
+      "action_decision": "draft-pr-allowed",
+      "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+    },
+    {
+      "id": "malformed-json-handling-src-lib-objectai-care-plan-ts",
+      "source": "json_report_review",
+      "title": "Verify malformed JSON/report input is handled",
+      "risk": "medium",
+      "file": "src/lib/objectAi/care-plan.ts",
+      "line": 340,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "src/lib/objectAi/care-plan.ts:340",
+      "candidate_risk": "safe-utility",
+      "action_decision": "draft-pr-allowed",
+      "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+    },
+    {
+      "id": "malformed-json-handling-src-lib-plantidentification-providers-plantnet-ts",
+      "source": "json_report_review",
+      "title": "Verify malformed JSON/report input is handled",
+      "risk": "medium",
+      "file": "src/lib/plantIdentification/providers/plantnet.ts",
+      "line": 157,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "src/lib/plantIdentification/providers/plantnet.ts:157",
+      "candidate_risk": "safe-utility",
+      "action_decision": "draft-pr-allowed",
+      "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+    },
+    {
+      "id": "malformed-json-handling-src-modules-offline-queue-storage-ts",
+      "source": "json_report_review",
+      "title": "Verify malformed JSON/report input is handled",
+      "risk": "medium",
+      "file": "src/modules/offline-queue/storage.ts",
+      "line": 41,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "src/modules/offline-queue/storage.ts:41",
+      "candidate_risk": "frontend-only",
+      "action_decision": "draft-pr-allowed",
+      "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+    },
+    {
+      "id": "malformed-json-handling-src-modules-reminders-local-drafts-ts",
+      "source": "json_report_review",
+      "title": "Verify malformed JSON/report input is handled",
+      "risk": "medium",
+      "file": "src/modules/reminders/local-drafts.ts",
+      "line": 38,
+      "duplicate": false,
+      "recommended_action": "inspect_or_patch_package",
+      "evidence": "src/modules/reminders/local-drafts.ts:38",
+      "candidate_risk": "frontend-only",
+      "action_decision": "draft-pr-allowed",
+      "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+    },
+    {
+      "id": "validation-typecheck-gap",
+      "source": "package_script_gap",
+      "title": "No typecheck script declared",
+      "risk": "medium",
+      "file": "package.json",
+      "line": 1,
+      "duplicate": false,
+      "recommended_action": "owner_review",
+      "evidence": "package.json:1",
+      "candidate_risk": "unknown",
+      "action_decision": "needs-owner-decision",
+      "decision_reason": "Candidate files are unknown or outside the explicit candidate allowlist."
+    }
+  ],
+  "selected": [
+    "add-decimal-radix-v2-src-lib-date-ts",
+    "cli-argument-handling-scripts-pocketbase-activity-history-mjs",
+    "cli-argument-handling-scripts-pocketbase-household-foundation-mjs"
+  ],
+  "outcomes": [
+    {
+      "candidate_id": "add-decimal-radix-v2-src-lib-date-ts",
+      "outcome": "draft-pr-created",
+      "reason": "All authority, validation, duplicate, branch, and draft-only gates passed.",
+      "patch_package": "/Users/evgeny/Documents/projects/RunForge/validation/runs/OPS-PROFILE-CALIBRATION-1/projects/upravdom-ae33c703/candidates/add-decimal-radix-v2-src-lib-date-ts/patch-package",
+      "branch": "runforge/auto-add-decimal-radix-v2-src-lib-date-ts-190c87ad",
+      "commit_sha": "a960f9dd280472e724b66621670037d0d5defc0d",
+      "pr_url": "https://github.com/evg-zlg/upravdom/pull/14"
+    },
+    {
+      "candidate_id": "cli-argument-handling-scripts-pocketbase-activity-history-mjs",
+      "outcome": "needs-owner-decision",
+      "reason": "Candidate files are unknown or outside the explicit candidate allowlist."
+    },
+    {
+      "candidate_id": "cli-argument-handling-scripts-pocketbase-household-foundation-mjs",
+      "outcome": "needs-owner-decision",
+      "reason": "Candidate files are unknown or outside the explicit candidate allowlist."
+    },
+    {
+      "candidate_id": "validation-typecheck-gap",
+      "outcome": "needs-owner-decision",
+      "reason": "Validation policy is incomplete; available safe checks may continue, but the owner should decide whether this script is required."
+    }
+  ],
+  "source_unchanged": true
+}

@@ -1,0 +1,68 @@
+{
+  "project_kind": "frontend-app",
+  "risk_zones": [
+    {
+      "pattern": "auth/**",
+      "risk": "auth-sensitive"
+    },
+    {
+      "pattern": "**/auth/**",
+      "risk": "auth-sensitive"
+    },
+    {
+      "pattern": "db/**",
+      "risk": "db-sensitive"
+    },
+    {
+      "pattern": "**/db/**",
+      "risk": "db-sensitive"
+    },
+    {
+      "pattern": "**/prisma/**",
+      "risk": "db-sensitive"
+    },
+    {
+      "pattern": "**/migrations/**",
+      "risk": "migration-sensitive"
+    },
+    {
+      "pattern": "infra/**",
+      "risk": "prod-sensitive"
+    },
+    {
+      "pattern": "deploy/**",
+      "risk": "prod-sensitive"
+    },
+    {
+      "pattern": "**/.env*",
+      "risk": "prod-sensitive"
+    },
+    {
+      "pattern": "**/secrets/**",
+      "risk": "prod-sensitive"
+    }
+  ],
+  "risky_file_patterns": [
+    "config/**",
+    "scripts/**",
+    "infra/**",
+    "Dockerfile*",
+    ".github/workflows/**"
+  ],
+  "forbidden_file_patterns": [
+    "**/.env*",
+    "**/secrets/**",
+    "**/migrations/**",
+    "**/deploy/**",
+    "**/infra/**"
+  ],
+  "db_indicators": [],
+  "prod_indicators": [
+    "docs/product/ACCEPTANCE.md",
+    "docs/product/ROADMAP.md",
+    "docs/product/VISION.md"
+  ],
+  "secret_indicators": [],
+  "migration_indicators": [],
+  "deploy_indicators": []
+}

@@ -1,0 +1,21 @@
+{
+  "sources": [
+    "safe_todo",
+    "validation_script_gap",
+    "docs_test_mismatch",
+    "small_input_validation"
+  ],
+  "max_files": 5,
+  "exclude_risk_zones": true,
+  "duplicate_key": "candidate-id+repo-head",
+  "require_non_main_workspace_for_edits": true,
+  "decision_model": [
+    "draft-pr-allowed",
+    "patch-package-only",
+    "read-only-triage",
+    "needs-owner-decision",
+    "rejected-risk",
+    "duplicate-existing"
+  ],
+  "validation_confidence": "high"
+}

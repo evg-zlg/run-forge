@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import type { ProjectKind } from "./candidate-authority.js";
 
 type PackageJson = { name?: string; scripts?: Record<string, string>; dependencies?: Record<string, string>; devDependencies?: Record<string, string>; bin?: unknown };
 export type ProjectProfile = {
@@ -11,6 +12,7 @@ export type ProjectProfile = {
   safe_file_patterns: string[]; risky_file_patterns: string[]; forbidden_file_patterns: string[];
   db_indicators: string[]; prod_indicators: string[]; secret_indicators: string[]; migration_indicators: string[]; deploy_indicators: string[];
   validation_profile: Record<string, unknown>; recommended_authority_profile: string; candidate_policy: Record<string, unknown>;
+  project_kind: ProjectKind; risk_zones: Array<{ pattern: string; risk: string }>;
   last_discovered_at: string; confidence: number; open_questions: string[]; evidence_files: string[]; profile_hash: string;
 };
 
@@ -28,7 +30,8 @@ export async function discoverProject(repoInput: string): Promise<ProjectProfile
     test: scriptCommands(packageManager, scripts, /(^|:)test($|:)/), build: scriptCommands(packageManager, scripts, /(^|:)build($|:)/),
     typecheck: scriptCommands(packageManager, scripts, /(typecheck|type-check)/), lint: scriptCommands(packageManager, scripts, /(^|:)lint($|:)/)
   };
-  const recommended = recommendAuthority(pkg, frameworks, indicators);
+  const projectKind = classifyProject(pkg, frameworks, indicators);
+  const recommended = recommendAuthority(projectKind);
   const head = git(repo, ["rev-parse", "HEAD"]);
   const projectName = pkg?.name ?? basename(repo);
   const projectKey = `${slug(projectName)}-${createHash("sha256").update(repo).digest("hex").slice(0, 8)}`;
@@ -42,7 +45,7 @@ export async function discoverProject(repoInput: string): Promise<ProjectProfile
     forbidden_file_patterns: ["**/.env*", "**/secrets/**", "**/migrations/**", "**/deploy/**", "**/infra/**"],
     ...indicators,
     validation_profile: { network: "disabled", setup: "owner_review_if_required", commands, forbidden_command_terms: ["migrate", "deploy", "release", "production", "seed"] },
-    recommended_authority_profile: recommended,
+    project_kind: projectKind, risk_zones: riskZones(indicators), recommended_authority_profile: recommended,
     candidate_policy: { sources: ["safe_todo", "validation_script_gap", "docs_test_mismatch", "small_input_validation"], max_files: 5, exclude_risk_zones: true, duplicate_key: "candidate-id+repo-head", require_non_main_workspace_for_edits: true },
     last_discovered_at: new Date().toISOString(), confidence: confidence(pkg, files, commands),
     open_questions: [commands.test.length ? "" : "No declared test command was found.", languageStack.includes("typescript") && !commands.typecheck.length ? "No declared typecheck command was found." : ""].filter(Boolean), evidence_files: evidenceFiles
@@ -54,7 +57,9 @@ function detectPackageManager(files: string[]) { if (files.includes("pnpm-lock.y
 function detectFrameworks(deps: Record<string, string>, files: string[]) { const names = ["next", "react", "vue", "@angular/core", "svelte", "express", "fastify", "commander", "vite", "vitest", "playwright"].filter((name) => name in deps); if (files.some((x) => /(^|\/)Dockerfile$/.test(x))) names.push("docker"); return [...new Set(names)]; }
 function detectLanguages(files: string[]) { const values = new Set<string>(); for (const file of files) { if (/\.tsx?$/.test(file)) values.add("typescript"); else if (/\.jsx?$/.test(file)) values.add("javascript"); else if (/\.py$/.test(file)) values.add("python"); else if (/\.go$/.test(file)) values.add("go"); else if (/\.rs$/.test(file)) values.add("rust"); else if (/\.swift$/.test(file)) values.add("swift"); } return [...values]; }
 function riskIndicators(files: string[]) { const pick = (pattern: RegExp) => files.filter((file) => pattern.test(file)).slice(0, 30); return { db_indicators: pick(/(^|\/)(db|database|prisma)(\/|$)|\.sql$/i), prod_indicators: pick(/prod(uction)?/i), secret_indicators: pick(/(^|\/)(\.env\.example|\.env\.sample)$|secret/i), migration_indicators: pick(/(^|\/)migrations?(\/|$)/i), deploy_indicators: pick(/(^|\/)(deploy|infra|terraform|helm|k8s)(\/|$)|Dockerfile/i) }; }
-function recommendAuthority(pkg: PackageJson | null, frameworks: string[], risk: ReturnType<typeof riskIndicators>) { if (risk.db_indicators.length || risk.prod_indicators.length || risk.migration_indicators.length) return "read-only-triage"; const frontend = frameworks.some((x) => ["next", "react", "vue", "@angular/core", "svelte", "vite"].includes(x)); if (frontend) return "frontend-low-risk"; if (pkg?.bin || frameworks.includes("commander")) return "cli-tooling-low-risk"; return "auto-low-risk"; }
+function classifyProject(pkg: PackageJson | null, frameworks: string[], risk: ReturnType<typeof riskIndicators>): ProjectKind { const frontend = frameworks.some((x) => ["next", "react", "vue", "@angular/core", "svelte", "vite"].includes(x)); const server = frameworks.some((x) => ["express", "fastify"].includes(x)); if (pkg?.bin || frameworks.includes("commander")) return "cli-tooling"; const strongDb = risk.db_indicators.length >= 4 || risk.migration_indicators.length >= 2; if (strongDb && (risk.prod_indicators.length >= 2 || risk.migration_indicators.length >= 2)) return "db-sensitive"; if (frontend && (server || risk.db_indicators.length > 0)) return "fullstack-app"; if (frontend) return "frontend-app"; return "unknown"; }
+function recommendAuthority(kind: ProjectKind) { if (kind === "db-sensitive") return "read-only-triage"; if (kind === "frontend-app" || kind === "fullstack-app") return "frontend-low-risk"; if (kind === "cli-tooling") return "cli-tooling-low-risk"; return "auto-low-risk"; }
+function riskZones(risk: ReturnType<typeof riskIndicators>) { const zones = [{ pattern: "auth/**", risk: "auth-sensitive" }, { pattern: "**/auth/**", risk: "auth-sensitive" }, { pattern: "db/**", risk: "db-sensitive" }, { pattern: "**/db/**", risk: "db-sensitive" }, { pattern: "**/prisma/**", risk: "db-sensitive" }, { pattern: "**/migrations/**", risk: "migration-sensitive" }, { pattern: "infra/**", risk: "prod-sensitive" }, { pattern: "deploy/**", risk: "prod-sensitive" }, { pattern: "**/.env*", risk: "prod-sensitive" }, { pattern: "**/secrets/**", risk: "prod-sensitive" }]; return zones.filter((zone) => zone.risk === "auth-sensitive" || Object.values(risk).flat().length > 0); }
 function scriptCommands(packageManager: string, scripts: Record<string, string>, pattern: RegExp) { const runner = packageManager === "unknown" ? "package-manager" : packageManager.replace(/-compatible-unknown$/, ""); return Object.keys(scripts).filter((name) => pattern.test(name)).slice(0, 8).map((name) => `${runner} run ${name}`); }
 function knownCi(files: string[]) { const ci = new Set<string>(); if (files.some((x) => x.startsWith(".github/workflows/"))) ci.add("github-actions"); if (files.some((x) => /(^|\/)\.buildkite(\/|$)|buildkite/i.test(x))) ci.add("buildkite"); if (files.includes(".gitlab-ci.yml")) ci.add("gitlab-ci"); return [...ci]; }
 function defaultBranch(repo: string) { const symbolic = gitOptional(repo, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]); return symbolic?.replace(/^origin\//, "") ?? "unknown"; }

@@ -1,0 +1,55 @@
+{
+  "requested_profile": "auto-low-risk",
+  "selected_profile": "cli-tooling-low-risk",
+  "recommendation": "cli-tooling-low-risk",
+  "profile": {
+    "extends": "low-risk-code",
+    "allowed_actions": [
+      "inspect",
+      "validate",
+      "create_patch_package",
+      "promote_patch_package_to_branch",
+      "commit_to_non_main_branch",
+      "push_non_main_branch",
+      "create_draft_pr",
+      "monitor_ci"
+    ],
+    "forbidden_actions": [
+      "push_to_main",
+      "force_push",
+      "merge_target_pr",
+      "deploy",
+      "db_access",
+      "production_access",
+      "secret_access",
+      "provider_calls",
+      "runtime_network_during_validation",
+      "run_migrations"
+    ],
+    "allowed_file_patterns": [
+      "src/**",
+      "tests/**",
+      "test/**",
+      "docs/**",
+      "*.md",
+      "package.json"
+    ],
+    "forbidden_file_patterns": [
+      "**/.env*",
+      "**/secrets/**",
+      "**/migrations/**",
+      "**/deploy/**",
+      "**/infra/**"
+    ],
+    "publication_permission": "draft_pr",
+    "validation_policy": "discovered CLI tests, typecheck, lint, and build with network disabled",
+    "ci_policy": "monitor created draft PR; never bypass required checks",
+    "stop_conditions": [
+      "CLI compatibility uncertainty",
+      "source HEAD changes",
+      "forbidden file",
+      "validation failure"
+    ]
+  },
+  "autopilot": true
+}

@@ -1,0 +1,21 @@
+{
+  "candidate": {
+    "id": "cli-argument-handling-src-scripts-agents-codex-agent-test-ts",
+    "source": "cli_parser_review",
+    "title": "Review positional argument, empty input, and unknown flag handling",
+    "risk": "medium",
+    "file": "src/scripts/agents/codex-agent.test.ts",
+    "line": 136,
+    "duplicate": false,
+    "recommended_action": "inspect_or_patch_package",
+    "evidence": "src/scripts/agents/codex-agent.test.ts:136",
+    "candidate_risk": "safe-test",
+    "action_decision": "draft-pr-allowed",
+    "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+  },
+  "outcome": {
+    "candidate_id": "cli-argument-handling-src-scripts-agents-codex-agent-test-ts",
+    "outcome": "needs-owner-decision",
+    "reason": "The candidate requires product judgment or authority expansion."
+  }
+}

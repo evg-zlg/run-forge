@@ -1,0 +1,8 @@
+{
+  "candidate_id": "cli-argument-handling-scripts-pocketbase-activity-history-mjs",
+  "allowed_files": [
+    "scripts/pocketbase/activity-history.mjs"
+  ],
+  "transformation": "none without owner decision",
+  "authority": "low-risk only"
+}
