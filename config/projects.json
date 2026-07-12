@@ -1,0 +1,6 @@
+{
+  "factory": { "path": "/Users/evgeny/Documents/projects/factory", "risk": "developer-tooling", "default_profile": "low-risk-code" },
+  "upravdom": { "path": "/Users/evgeny/Documents/projects/upravdom", "risk": "app", "default_profile": "low-risk-code" },
+  "autokitaec": { "path": "/Users/evgeny/Documents/autokitaec", "risk": "frontend/catalog", "default_profile": "frontend-low-risk" },
+  "smartsql": { "path": "/Users/evgeny/Documents/projects/smartsql", "risk": "db/prod-sensitive", "default_profile": "read-only-triage" }
+}

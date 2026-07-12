@@ -1,0 +1,35 @@
+{
+  "projects": [
+    "factory",
+    "upravdom"
+  ],
+  "project": "upravdom",
+  "project_states": {
+    "factory": {
+      "main_head_before": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "main_head_after": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "status_before": "",
+      "status_after": ""
+    },
+    "upravdom": {
+      "main_head_before": "2a3eb28e3abc96eca23d897674c62080ff0dc7fa",
+      "main_head_after": "2a3eb28e3abc96eca23d897674c62080ff0dc7fa",
+      "status_before": "",
+      "status_after": ""
+    }
+  },
+  "main_head_before": "2a3eb28e3abc96eca23d897674c62080ff0dc7fa",
+  "main_head_after": "2a3eb28e3abc96eca23d897674c62080ff0dc7fa",
+  "open_runforge_prs_detected": [],
+  "candidates_evaluated": [
+    "factory:no-obvious-safe-candidate",
+    "upravdom:validation-typecheck-gap"
+  ],
+  "candidates_executed": [],
+  "draft_prs_created": [],
+  "patch_packages_created": [],
+  "owner_decisions_needed": [
+    "upravdom:validation-typecheck-gap"
+  ],
+  "next_suggested_run": "corepack pnpm dev factory ops run --project upravdom --profile low-risk-code --batch-size 3 --out validation/runs/FACTORY-OPS-1"
+}
