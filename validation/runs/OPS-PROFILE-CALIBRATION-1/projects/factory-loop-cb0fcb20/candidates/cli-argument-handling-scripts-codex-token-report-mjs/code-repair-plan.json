@@ -1,0 +1,8 @@
+{
+  "candidate_id": "cli-argument-handling-scripts-codex-token-report-mjs",
+  "allowed_files": [
+    "scripts/codex-token-report.mjs"
+  ],
+  "transformation": "none without owner decision",
+  "authority": "low-risk only"
+}

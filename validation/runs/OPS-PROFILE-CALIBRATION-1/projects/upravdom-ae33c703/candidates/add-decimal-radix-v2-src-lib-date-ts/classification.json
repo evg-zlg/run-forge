@@ -1,0 +1,25 @@
+{
+  "candidate": {
+    "id": "add-decimal-radix-v2-src-lib-date-ts",
+    "source": "strict_integer_radix",
+    "title": "Declare decimal radix for parsed date components",
+    "risk": "low",
+    "file": "src/lib/date.ts",
+    "line": 16,
+    "duplicate": false,
+    "recommended_action": "execute_patch_package",
+    "evidence": "src/lib/date.ts:16",
+    "candidate_risk": "safe-utility",
+    "action_decision": "draft-pr-allowed",
+    "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+  },
+  "outcome": {
+    "candidate_id": "add-decimal-radix-v2-src-lib-date-ts",
+    "outcome": "draft-pr-created",
+    "reason": "All authority, validation, duplicate, branch, and draft-only gates passed.",
+    "patch_package": "/Users/evgeny/Documents/projects/RunForge/validation/runs/OPS-PROFILE-CALIBRATION-1/projects/upravdom-ae33c703/candidates/add-decimal-radix-v2-src-lib-date-ts/patch-package",
+    "branch": "runforge/auto-add-decimal-radix-v2-src-lib-date-ts-190c87ad",
+    "commit_sha": "a960f9dd280472e724b66621670037d0d5defc0d",
+    "pr_url": "https://github.com/evg-zlg/upravdom/pull/14"
+  }
+}

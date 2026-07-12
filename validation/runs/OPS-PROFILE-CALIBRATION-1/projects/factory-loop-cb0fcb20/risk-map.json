@@ -1,0 +1,87 @@
+{
+  "project_kind": "cli-tooling",
+  "risk_zones": [
+    {
+      "pattern": "auth/**",
+      "risk": "auth-sensitive"
+    },
+    {
+      "pattern": "**/auth/**",
+      "risk": "auth-sensitive"
+    },
+    {
+      "pattern": "db/**",
+      "risk": "db-sensitive"
+    },
+    {
+      "pattern": "**/db/**",
+      "risk": "db-sensitive"
+    },
+    {
+      "pattern": "**/prisma/**",
+      "risk": "db-sensitive"
+    },
+    {
+      "pattern": "**/migrations/**",
+      "risk": "migration-sensitive"
+    },
+    {
+      "pattern": "infra/**",
+      "risk": "prod-sensitive"
+    },
+    {
+      "pattern": "deploy/**",
+      "risk": "prod-sensitive"
+    },
+    {
+      "pattern": "**/.env*",
+      "risk": "prod-sensitive"
+    },
+    {
+      "pattern": "**/secrets/**",
+      "risk": "prod-sensitive"
+    }
+  ],
+  "risky_file_patterns": [
+    "config/**",
+    "scripts/**",
+    "infra/**",
+    "Dockerfile*",
+    ".github/workflows/**"
+  ],
+  "forbidden_file_patterns": [
+    "**/.env*",
+    "**/secrets/**",
+    "**/migrations/**",
+    "**/deploy/**",
+    "**/infra/**"
+  ],
+  "db_indicators": [
+    "prisma/migrations/20250609000000_init/migration.sql",
+    "prisma/migrations/20260610000001_add_repo_worker_executor_kind/migration.sql",
+    "prisma/migrations/20260615000000_add_gateway_usage/migration.sql",
+    "prisma/migrations/migration_lock.toml",
+    "prisma/schema.prisma"
+  ],
+  "prod_indicators": [
+    "docs/PRODUCT_PRINCIPLES.md"
+  ],
+  "secret_indicators": [
+    ".env.example",
+    "src/runner/secret-scan.test.ts",
+    "src/runner/secret-scan.ts"
+  ],
+  "migration_indicators": [
+    "prisma/migrations/20250609000000_init/migration.sql",
+    "prisma/migrations/20260610000001_add_repo_worker_executor_kind/migration.sql",
+    "prisma/migrations/20260615000000_add_gateway_usage/migration.sql",
+    "prisma/migrations/migration_lock.toml"
+  ],
+  "deploy_indicators": [
+    "deploy/Dockerfile",
+    "deploy/README.md",
+    "deploy/docker-compose.staging.test.ts",
+    "deploy/docker-compose.staging.yml",
+    "deploy/env.example"
+  ]
+}

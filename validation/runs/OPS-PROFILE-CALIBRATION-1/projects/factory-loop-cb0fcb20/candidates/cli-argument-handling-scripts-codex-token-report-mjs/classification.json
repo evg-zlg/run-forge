@@ -1,0 +1,21 @@
+{
+  "candidate": {
+    "id": "cli-argument-handling-scripts-codex-token-report-mjs",
+    "source": "cli_parser_review",
+    "title": "Review positional argument, empty input, and unknown flag handling",
+    "risk": "medium",
+    "file": "scripts/codex-token-report.mjs",
+    "line": 383,
+    "duplicate": false,
+    "recommended_action": "inspect_or_patch_package",
+    "evidence": "scripts/codex-token-report.mjs:383",
+    "candidate_risk": "unknown",
+    "action_decision": "needs-owner-decision",
+    "decision_reason": "Candidate files are unknown or outside the explicit candidate allowlist."
+  },
+  "outcome": {
+    "candidate_id": "cli-argument-handling-scripts-codex-token-report-mjs",
+    "outcome": "needs-owner-decision",
+    "reason": "Candidate files are unknown or outside the explicit candidate allowlist."
+  }
+}

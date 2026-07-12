@@ -1,0 +1,8 @@
+{
+  "candidate_id": "cli-argument-handling-src-scripts-agents-echo-agent-ts",
+  "allowed_files": [
+    "src/scripts/agents/echo-agent.ts"
+  ],
+  "transformation": "none without owner decision",
+  "authority": "low-risk only"
+}

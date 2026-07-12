@@ -1,0 +1,8 @@
+{
+  "candidate_id": "cli-argument-handling-scripts-factory-local-dogfood-smoke-mjs",
+  "allowed_files": [
+    "scripts/factory-local-dogfood-smoke.mjs"
+  ],
+  "transformation": "none without owner decision",
+  "authority": "low-risk only"
+}

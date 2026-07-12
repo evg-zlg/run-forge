@@ -1,0 +1,8 @@
+{
+  "candidate_id": "add-decimal-radix-v2-src-lib-date-ts",
+  "allowed_files": [
+    "src/lib/date.ts"
+  ],
+  "transformation": "add explicit decimal radix to date-component parseInt calls",
+  "authority": "low-risk only"
+}

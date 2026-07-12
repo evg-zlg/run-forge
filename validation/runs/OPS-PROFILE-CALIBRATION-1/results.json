@@ -1,0 +1,25 @@
+{
+  "status": "completed",
+  "projects": {
+    "upravdom-ae33c703": {
+      "candidates_evaluated": 13,
+      "candidates_executed": 1,
+      "patch_packages": 1,
+      "promotions": 1,
+      "draft_prs": [
+        "https://github.com/evg-zlg/upravdom/pull/14"
+      ],
+      "owner_decisions": 3,
+      "target_unchanged": true
+    },
+    "factory-loop-cb0fcb20": {
+      "candidates_evaluated": 60,
+      "candidates_executed": 0,
+      "patch_packages": 0,
+      "promotions": 0,
+      "draft_prs": [],
+      "owner_decisions": 3,
+      "target_unchanged": true
+    }
+  }
+}

@@ -3,11 +3,12 @@ import { access, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promise
 import { basename, dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { discoverProject } from "./project-discovery.js";
+import { decideCandidateAuthority, patternMatches, type CandidateDecision, type CandidateRisk } from "./candidate-authority.js";
 
 type Project = { path: string; risk: string; default_profile: string };
 type Profile = { publication_permission: string; allowed_actions?: string[]; allowed_file_patterns?: string[]; forbidden_file_patterns?: string[] };
 export type FactoryOpsOptions = { project?: string; repo?: string; profile?: string; batchSize: number; out: string; registry?: string; profiles?: string; cache?: string; autopilot?: boolean };
-type Candidate = { id: string; source: string; title: string; risk: "low" | "medium" | "high"; file?: string; line?: number; duplicate: boolean; recommended_action: string; evidence: string };
+type Candidate = { id: string; source: string; title: string; risk: "low" | "medium" | "high"; file?: string; line?: number; duplicate: boolean; recommended_action: string; evidence: string; candidate_risk?: CandidateRisk; action_decision?: CandidateDecision; decision_reason?: string };
 type Outcome = { candidate_id: string; outcome: "draft-pr-created" | "patch-package-ready" | "duplicate-existing" | "needs-owner-decision" | "rejected-risk" | "rejected-policy" | "validation-failed" | "unsafe/not-runnable"; reason: string; patch_package?: string; branch?: string; commit_sha?: string; pr_url?: string };
 type OpsState = { projects?: string[]; project_states?: Record<string, unknown>; candidates_evaluated?: string[]; candidates_executed?: string[]; draft_prs_created?: string[]; patch_packages_created?: string[]; owner_decisions_needed?: string[] };
 
@@ -39,6 +40,12 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   const packaged = await existingPackages(projectOut);
   const branchRefs = git(project.path, ["branch", "--all", "--format=%(refname:short)"]).split("\n").filter((x) => /runforge|codex\//i.test(x));
   const candidates = await discover(project.path, seen, packaged);
+  const validationConfidence = [...discovered.test_commands, ...discovered.build_commands, ...discovered.typecheck_commands, ...discovered.lint_commands].length > 0 ? "high" as const : "low" as const;
+  const publicationActionsCovered = ["promote_patch_package_to_branch", "commit_to_non_main_branch", "push_non_main_branch", "create_draft_pr"].every((action) => profile.allowed_actions?.includes(action));
+  for (const item of candidates) {
+    const decision = decideCandidateAuthority({ files: item.file ? [item.file] : [], projectKind: discovered.project_kind, allowedFilePatterns: profile.allowed_file_patterns ?? [], forbiddenFilePatterns: profile.forbidden_file_patterns ?? [], publicationPermission: profile.publication_permission, publicationActionsCovered, validationConfidence, duplicateExisting: item.duplicate });
+    item.candidate_risk = decision.risk; item.action_decision = decision.decision; item.decision_reason = decision.reason;
+  }
   const selected = candidates.filter((item) => !item.duplicate).sort(candidateRank).slice(0, options.batchSize);
   const outcomes: Outcome[] = [];
   for (const item of candidates.filter((candidate) => candidate.duplicate)) outcomes.push({ candidate_id: item.id, outcome: "duplicate-existing", reason: "Candidate is present in prior ops state or an existing patch package." });
@@ -64,7 +71,7 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   await writeJson(join(projectOut, "project-profile.json"), discovered);
   await writeJson(join(projectOut, "validation-profile.json"), { key: profileKey, discovered: discovered.validation_profile, authority: profile });
   await writeJson(join(projectOut, "risk-map.json"), pickRisk(discovered));
-  await writeJson(join(projectOut, "candidate-policy.json"), discovered.candidate_policy);
+  await writeJson(join(projectOut, "candidate-policy.json"), { ...discovered.candidate_policy, decision_model: ["draft-pr-allowed", "patch-package-only", "read-only-triage", "needs-owner-decision", "rejected-risk", "duplicate-existing"], validation_confidence: validationConfidence });
   await writeJson(join(projectOut, "authority.json"), { requested_profile: requestedProfile, selected_profile: profileKey, recommendation: discovered.recommended_authority_profile, profile, autopilot: Boolean(options.autopilot) });
   await writeJson(join(projectOut, "results.json"), { project: projectKey, candidates, selected: selected.map((x) => x.id), outcomes, source_unchanged: true });
   await writeFile(join(projectOut, "candidate-selection-report.md"), selectionReport(candidates, selected, outcomes));
@@ -82,8 +89,9 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   await writeFile(join(out, "promotion-report.md"), promotionReport(outcomes));
   await writeFile(join(projectOut, "promotion-report.md"), promotionReport(outcomes));
   await writeFile(join(out, "network-phase-report.md"), "# Network phase report\n\n- Discovery and patch validation: network denied/not required.\n- Git remote and GitHub publication: network allowed only for duplicate detection, non-force branch push, draft PR creation, and CI metadata.\n- Provider, DB, production, deployment, migration, and secret access: none.\n");
-  await writeFile(join(out, "summary.md"), `# OPS-AUTOPILOT-1\n\nProject ${projectKey}: ${candidates.length} evaluated, ${executed.length} executed, ${packages.length} patch packages, ${decisions.length} owner decisions. Target HEAD and status remained unchanged.\n`);
-  await writeJson(join(out, "packet-validation.json"), { valid: true, required_top_level_artifacts: ["summary.md", "results.json", "owner-inbox.md", "autopilot-report.md", "ops-state.json", "execution-log.md", "packet-validation.json"], safety: { target_unchanged: true, provider_calls: false, runtime_network: false, target_main_mutation: false } });
+  await writeFile(join(out, "summary.md"), `# Autopilot profile calibration\n\nProject ${projectKey}: ${candidates.length} evaluated, ${executed.length} executed, ${packages.length} patch packages, ${decisions.length} owner decisions. Target HEAD and status remained unchanged.\n`);
+  await writeFile(join(out, "profile-calibration-report.md"), `# Profile calibration report\n\n- Project: \`${projectKey}\`\n- Project kind: \`${discovered.project_kind}\`\n- Recommended/selected profile: \`${discovered.recommended_authority_profile}\` / \`${profileKey}\`\n- Risk zones remain project-scoped; candidate authority is decided from files, forbidden zones, validation confidence, duplicates, and publication coverage.\n- Draft PR allowed candidates: ${candidates.filter((candidate) => candidate.action_decision === "draft-pr-allowed").length}\n- Rejected or owner-decision candidates: ${candidates.filter((candidate) => ["rejected-risk", "read-only-triage", "needs-owner-decision"].includes(candidate.action_decision ?? "")).length}\n`);
+  await writeJson(join(out, "packet-validation.json"), { valid: true, required_top_level_artifacts: ["summary.md", "results.json", "profile-calibration-report.md", "owner-inbox.md", "autopilot-report.md", "ops-state.json", "execution-log.md", "packet-validation.json"], safety: { target_unchanged: true, provider_calls: false, runtime_network: false, target_main_mutation: false } });
   return { out, project: projectKey, recommendedProfile: discovered.recommended_authority_profile, selectedProfile: profileKey, cacheProfile, cacheStatus, candidates: candidates.length, selected: selected.length, executed: executed.length, patchPackages: packages.length, promotions: outcomes.filter((x) => x.outcome === "draft-pr-created").length, draftPrs: outcomes.flatMap((x) => x.pr_url ? [x.pr_url] : []), ownerDecisions: decisions.length, targetUnchanged: true };
 }
 
@@ -91,7 +99,9 @@ async function executeCandidate(repo: string, projectOut: string, item: Candidat
   const dir = join(projectOut, "candidates", item.id); await mkdir(dir, { recursive: true });
   const packageDir = join(dir, "patch-package"); await mkdir(packageDir, { recursive: true });
   let outcome: Outcome;
-  if (item.risk === "high") outcome = { candidate_id: item.id, outcome: "rejected-risk", reason: "Candidate is outside the low-risk authority boundary." };
+  if (item.action_decision === "rejected-risk" || item.action_decision === "read-only-triage") outcome = { candidate_id: item.id, outcome: "rejected-risk", reason: item.decision_reason ?? "Candidate is outside the low-risk authority boundary." };
+  else if (item.action_decision === "needs-owner-decision") outcome = { candidate_id: item.id, outcome: "needs-owner-decision", reason: item.decision_reason ?? "Candidate needs owner decision." };
+  else if (item.risk === "high") outcome = { candidate_id: item.id, outcome: "rejected-risk", reason: "Candidate is outside the low-risk authority boundary." };
   else if (!autopilot || item.risk !== "low" || !["markdown_trailing_whitespace", "strict_integer_radix"].includes(item.source) || !item.file) outcome = { candidate_id: item.id, outcome: "needs-owner-decision", reason: autopilot ? "The candidate requires product judgment or authority expansion." : "Autopilot was not enabled." };
   else if (!allowsPatchPackage(profile, item.file, item.source)) outcome = { candidate_id: item.id, outcome: "rejected-policy", reason: "Candidate touches a forbidden or non-allowed file." };
   else {
@@ -106,7 +116,7 @@ async function executeCandidate(repo: string, projectOut: string, item: Candidat
     await writeFile(join(packageDir, "risk-assessment.md"), `# Risk assessment\n\nRisk is low: the deterministic patch is limited to \`${item.source}\` in one safe-zone file. Publication is intentionally not performed by this package.\n`);
     await writeFile(join(packageDir, "owner-next-action.md"), "# Owner next action\n\nReview `patch.diff`, apply it in a non-main worktree, run available local validation with network disabled, then decide whether to publish.\n");
     outcome = { candidate_id: item.id, outcome: "patch-package-ready", reason: "Deterministic low-risk patch package is validated and source repository was not edited.", patch_package: packageDir };
-    if (canPromote(profile)) outcome = await promotePatchPackage({ repo, dir, packageDir, item, profile, baseline, defaultBranch, patch, outcome });
+    if (item.action_decision === "draft-pr-allowed" && canPromote(profile)) outcome = await promotePatchPackage({ repo, dir, packageDir, item, profile, baseline, defaultBranch, patch, outcome });
   }
   if (!["draft-pr-created", "patch-package-ready"].includes(outcome.outcome)) await writeFile(join(packageDir, "NOT_CREATED.md"), `# Patch package not created\n\nOutcome: **${outcome.outcome}**. ${outcome.reason}\n`);
   await writeJson(join(dir, "classification.json"), { candidate: item, outcome });
@@ -227,9 +237,9 @@ async function existingPackages(projectOut: string) { const root = join(projectO
 function unifiedPatch(file: string, before: string, after: string) { const old = patchLines(before), next = patchLines(after); let body = `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1,${old.length} +1,${next.length} @@\n`; for (let i = 0; i < old.length; i++) body += old[i] === next[i] ? ` ${old[i]}\n` : `-${old[i]}\n+${next[i]}\n`; return body; }
 function patchLines(value: string) { const lines = value.split("\n"); if (value.endsWith("\n")) lines.pop(); return lines; }
 function allowsPatchPackage(profile: Profile, file: string, source: string) { const allowed = profile.allowed_file_patterns ?? []; return (file.endsWith(".md") || source === "strict_integer_radix") && isSafeCandidateFile(file) && (!allowed.length || allowed.some((pattern) => profilePatternMatches(pattern, file))) && !(profile.forbidden_file_patterns ?? []).some((pattern) => profilePatternMatches(pattern, file)); }
-function profilePatternMatches(pattern: string, file: string) { const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, "\\$&").replaceAll("**", "::ALL::").replaceAll("*", "[^/]*").replaceAll("::ALL::", ".*"); return new RegExp(`^${escaped}$`, "i").test(file); }
+function profilePatternMatches(pattern: string, file: string) { return patternMatches(pattern, file); }
 function forbiddenPatternMatches(pattern: string, file: string) { const token = pattern.replace(/^\*\*\//, "").replace(/\/\*\*$/, "").replace(/\*/g, ""); return token.length > 0 && file.toLowerCase().includes(token.toLowerCase()); }
-function pickRisk(value: Awaited<ReturnType<typeof discoverProject>>) { return { risky_file_patterns: value.risky_file_patterns, forbidden_file_patterns: value.forbidden_file_patterns, db_indicators: value.db_indicators, prod_indicators: value.prod_indicators, secret_indicators: value.secret_indicators, migration_indicators: value.migration_indicators, deploy_indicators: value.deploy_indicators }; }
+function pickRisk(value: Awaited<ReturnType<typeof discoverProject>>) { return { project_kind: value.project_kind, risk_zones: value.risk_zones, risky_file_patterns: value.risky_file_patterns, forbidden_file_patterns: value.forbidden_file_patterns, db_indicators: value.db_indicators, prod_indicators: value.prod_indicators, secret_indicators: value.secret_indicators, migration_indicators: value.migration_indicators, deploy_indicators: value.deploy_indicators }; }
 function snapshot(repo: string) { return { head: git(repo, ["rev-parse", "HEAD"]), status: git(repo, ["status", "--porcelain=v1"]) }; }
 function git(repo: string, args: string[]) { return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); }
 function gitOptional(repo: string, args: string[]) { try { return git(repo, args); } catch { return null; } }

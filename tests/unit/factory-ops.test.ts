@@ -38,9 +38,10 @@ describe("factory ops", () => {
 
   it("autopilot executes a deterministic low-risk candidate into a patch package", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-autopilot-"));
-    const repo = join(root, "cli"); await mkdir(join(repo, "docs"), { recursive: true });
+    const repo = join(root, "cli"); await mkdir(join(repo, "docs"), { recursive: true }); await mkdir(join(repo, "prisma", "migrations", "001"), { recursive: true });
     await writeFile(join(repo, "package.json"), JSON.stringify({ name: "cli", bin: { cli: "index.js" }, scripts: { test: "node --test", typecheck: "tsc --noEmit" }, dependencies: { commander: "1" } }));
     await writeFile(join(repo, "docs", "guide.md"), "# Guide  \n\nSafe text.\n");
+    await writeFile(join(repo, "prisma", "schema.prisma"), "model Run { id Int @id }\n"); await writeFile(join(repo, "prisma", "migrations", "001", "up.sql"), "select 1;\n");
     execFileSync("git", ["init", "-q", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
     const profiles = join(root, "profiles.json"); const out = join(root, "out");
     await writeFile(profiles, JSON.stringify({ "cli-tooling-low-risk": { publication_permission: "draft_pr", allowed_actions: ["create_patch_package"], allowed_file_patterns: ["docs/**"] } }));
@@ -74,11 +75,12 @@ describe("factory ops", () => {
     expect(report).toContain("trim-docs-commands-md`:");
   });
 
-  it("defaults a frontend repository with database indicators to read-only triage", async () => {
+  it("keeps a SmartSQL-like DB/production repository on read-only triage", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-smartsql-like-")); const repo = join(root, "app");
-    await mkdir(join(repo, "prisma"), { recursive: true });
+    await mkdir(join(repo, "prisma", "migrations", "001"), { recursive: true }); await mkdir(join(repo, "db", "migrations", "002"), { recursive: true }); await mkdir(join(repo, "production"), { recursive: true });
     await writeFile(join(repo, "package.json"), JSON.stringify({ name: "app", scripts: { test: "vitest run" }, dependencies: { react: "1", vite: "1" } }));
     await writeFile(join(repo, "prisma", "schema.prisma"), "model User { id Int @id }\n");
+    await writeFile(join(repo, "prisma", "migrations", "001", "up.sql"), "select 1;\n"); await writeFile(join(repo, "db", "migrations", "002", "up.sql"), "select 1;\n"); await writeFile(join(repo, "production", "database.ts"), "export {};\n");
     execFileSync("git", ["init", "-q", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
     const profiles = join(root, "profiles.json"); await writeFile(profiles, JSON.stringify({ "read-only-triage": { publication_permission: "none" } }));
     const result = await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 1, out: join(root, "out"), profiles, cache: join(root, "cache"), registry: join(root, "missing.json"), autopilot: true });
@@ -91,9 +93,9 @@ describe("factory ops", () => {
     await writeFile(join(repo, "package.json"), JSON.stringify({ name: "app", scripts: { test: "vitest run" }, dependencies: { react: "1" } }));
     await writeFile(join(repo, "docs", "guide.md"), "# Safe guide  \n"); await writeFile(join(repo, "prisma", "schema.prisma"), "model User { id Int @id }\n");
     execFileSync("git", ["init", "-q", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
-    const profiles = join(root, "profiles.json"); await writeFile(profiles, JSON.stringify({ "read-only-triage": { publication_permission: "none", forbidden_file_patterns: ["**/.env*", "**/migrations/**"] } }));
+    const profiles = join(root, "profiles.json"); await writeFile(profiles, JSON.stringify({ "frontend-low-risk": { publication_permission: "patch_package", allowed_actions: ["create_patch_package"], allowed_file_patterns: ["docs/**"], forbidden_file_patterns: ["**/.env*", "**/migrations/**"] } }));
     const result = await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 1, out: join(root, "out"), profiles, cache: join(root, "cache"), registry: join(root, "missing.json"), autopilot: true });
-    expect(result).toMatchObject({ selectedProfile: "read-only-triage", executed: 1, patchPackages: 1, targetUnchanged: true });
+    expect(result).toMatchObject({ selectedProfile: "frontend-low-risk", executed: 1, patchPackages: 1, targetUnchanged: true });
     expect(execFileSync("git", ["-C", repo, "status", "--porcelain"], { encoding: "utf8" })).toBe("");
   });
 
@@ -103,6 +105,6 @@ describe("factory ops", () => {
     await writeFile(join(repo, "docs", "guide.md"), "# Guide  \n"); execFileSync("git", ["init", "-q", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
     const profiles = join(root, "profiles.json"); const out = join(root, "out"); await writeFile(profiles, JSON.stringify({ "cli-tooling-low-risk": { publication_permission: "draft_pr", allowed_actions: ["create_patch_package", "promote_patch_package_to_branch", "commit_to_non_main_branch", "push_non_main_branch", "create_draft_pr"], allowed_file_patterns: ["src/**"] } }));
     await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 1, out, profiles, cache: join(root, "cache"), registry: join(root, "missing.json"), autopilot: true });
-    expect(await readFile(join(out, "projects", (await readdir(join(out, "projects")))[0]!, "candidates", "trim-docs-guide-md", "classification.json"), "utf8")).toContain("rejected-policy");
+    expect(await readFile(join(out, "projects", (await readdir(join(out, "projects")))[0]!, "candidates", "trim-docs-guide-md", "classification.json"), "utf8")).toContain("needs-owner-decision");
   });
 });

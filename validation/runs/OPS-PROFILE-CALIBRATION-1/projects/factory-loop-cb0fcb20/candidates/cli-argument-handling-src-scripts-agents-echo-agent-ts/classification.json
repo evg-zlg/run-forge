@@ -1,0 +1,21 @@
+{
+  "candidate": {
+    "id": "cli-argument-handling-src-scripts-agents-echo-agent-ts",
+    "source": "cli_parser_review",
+    "title": "Review positional argument, empty input, and unknown flag handling",
+    "risk": "medium",
+    "file": "src/scripts/agents/echo-agent.ts",
+    "line": 279,
+    "duplicate": false,
+    "recommended_action": "inspect_or_patch_package",
+    "evidence": "src/scripts/agents/echo-agent.ts:279",
+    "candidate_risk": "frontend-only",
+    "action_decision": "draft-pr-allowed",
+    "decision_reason": "Safe candidate files, validation, and candidate-scoped publication authority all pass."
+  },
+  "outcome": {
+    "candidate_id": "cli-argument-handling-src-scripts-agents-echo-agent-ts",
+    "outcome": "needs-owner-decision",
+    "reason": "The candidate requires product judgment or authority expansion."
+  }
+}
