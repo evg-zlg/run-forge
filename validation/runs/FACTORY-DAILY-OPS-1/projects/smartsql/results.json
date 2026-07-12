@@ -1,0 +1,14 @@
+{
+  "project": "smartsql",
+  "path": "/Users/evgeny/Documents/projects/smartsql",
+  "exists": true,
+  "git": true,
+  "mode": "read-only-triage",
+  "head_before": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+  "head_after": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+  "branch": "codex/fin-6-prep-amocrm-client-rules-passports",
+  "status_before": "M frontend/app/finance/operations/operations-shell.tsx\n M frontend/components/finance/finance-montage-deal-drawer.tsx\n M frontend/components/finance/finance-montage-deals-view.tsx\n M reports/agentops-daily/agent-run-ledger.jsonl\n M shared/src/finance-crm-event-display.ts\n?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/agent-factory/task-packets/ops-w-3253.md\n?? reports/agent-runs/run-883a1fbabc37/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/DATA-W-3181-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/MP-W-3082-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? reports/projectops/OPS-W-2960-R001.json\n?? reports/projectops/OPS-W-3219-R001.json\n?? reports/projectops/OPS-W-3253-R001.json\n?? reports/projectops/OPS-W-3270-R001.json\n?? reports/projectops/run-883a1fbabc37.json\n?? tmp/",
+  "status_after": "M frontend/app/finance/operations/operations-shell.tsx\n M frontend/components/finance/finance-montage-deal-drawer.tsx\n M frontend/components/finance/finance-montage-deals-view.tsx\n M reports/agentops-daily/agent-run-ledger.jsonl\n M shared/src/finance-crm-event-display.ts\n?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/agent-factory/task-packets/ops-w-3253.md\n?? reports/agent-runs/run-883a1fbabc37/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/DATA-W-3181-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/MP-W-3082-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? reports/projectops/OPS-W-2960-R001.json\n?? reports/projectops/OPS-W-3219-R001.json\n?? reports/projectops/OPS-W-3253-R001.json\n?? reports/projectops/OPS-W-3270-R001.json\n?? reports/projectops/run-883a1fbabc37.json\n?? tmp/",
+  "remote": "deskbuilder/smartsql",
+  "items": []
+}
