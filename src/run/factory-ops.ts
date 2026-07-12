@@ -34,14 +34,16 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   const projectOut = join(out, "projects", projectKey);
   await mkdir(projectOut, { recursive: true });
   const previous = await optionalJson<OpsState>(join(out, "ops-state.json")) ?? {};
-  const seen = (previous.candidates_evaluated ?? []).filter((id) => id.startsWith(`${projectKey}:`)).map((id) => id.slice(projectKey.length + 1));
+  const handledIds = [...(previous.candidates_executed ?? []), ...(previous.owner_decisions_needed ?? [])];
+  const seen = handledIds.filter((id) => id.startsWith(`${projectKey}:`)).map((id) => id.slice(projectKey.length + 1));
   const packaged = await existingPackages(projectOut);
   const branchRefs = git(project.path, ["branch", "--all", "--format=%(refname:short)"]).split("\n").filter((x) => /runforge|codex\//i.test(x));
   const candidates = await discover(project.path, seen, packaged);
-  const selected = candidates.filter((item) => !item.duplicate).slice(0, options.batchSize);
+  const selected = candidates.filter((item) => !item.duplicate).sort(candidateRank).slice(0, options.batchSize);
   const outcomes: Outcome[] = [];
   for (const item of candidates.filter((candidate) => candidate.duplicate)) outcomes.push({ candidate_id: item.id, outcome: "skip_duplicate", reason: "Candidate is present in prior ops state or an existing patch package." });
   for (const item of selected) outcomes.push(await executeCandidate(project.path, projectOut, item, profile, Boolean(options.autopilot)));
+  for (const item of candidates.filter((candidate) => !candidate.duplicate && !selected.some((selectedItem) => selectedItem.id === candidate.id) && candidate.source === "package_script_gap")) outcomes.push({ candidate_id: item.id, outcome: "owner_decision_needed", reason: "Validation policy is incomplete; available safe checks may continue, but the owner should decide whether this script is required." });
   const after = snapshot(project.path);
   if (before.head !== after.head || before.status !== after.status) throw new Error("Target repository changed during factory ops run.");
 
@@ -87,19 +89,23 @@ async function executeCandidate(repo: string, projectOut: string, item: Candidat
   const packageDir = join(dir, "patch-package"); await mkdir(packageDir, { recursive: true });
   let outcome: Outcome;
   if (item.risk === "high") outcome = { candidate_id: item.id, outcome: "rejected_with_evidence", reason: "Candidate is outside the low-risk authority boundary." };
-  else if (!autopilot || item.risk !== "low" || item.source !== "markdown_trailing_whitespace" || !item.file || !allows(profile, item.file)) outcome = { candidate_id: item.id, outcome: "owner_decision_needed", reason: autopilot ? "The candidate requires product judgment or authority expansion." : "Autopilot was not enabled." };
+  else if (!autopilot || item.risk !== "low" || !["markdown_trailing_whitespace", "strict_integer_radix"].includes(item.source) || !item.file || !allowsPatchPackage(profile, item.file, item.source)) outcome = { candidate_id: item.id, outcome: "owner_decision_needed", reason: autopilot ? "The candidate requires product judgment or authority expansion." : "Autopilot was not enabled." };
   else {
     const source = await readFile(join(repo, item.file), "utf8");
-    const repaired = source.split("\n").map((line) => line.replace(/[ \t]+$/g, "")).join("\n");
+    const repaired = item.source === "strict_integer_radix" ? source.replace(/\bparseInt\s*\(\s*(year|month|day)\s*\)/g, "parseInt($1, 10)") : source.split("\n").map((line) => line.replace(/[ \t]+$/g, "")).join("\n");
     const patch = unifiedPatch(item.file, source, repaired);
     await writeFile(join(packageDir, "patch.diff"), patch);
     await writeJson(join(packageDir, "manifest.json"), { candidate_id: item.id, source_head: snapshot(repo).head, files: [item.file], risk: "low", mutation_target: "patch-package-only", sha256: createHash("sha256").update(patch).digest("hex") });
     await writeFile(join(packageDir, "apply-instructions.md"), "Apply only after review in a non-main worktree with `git apply --check patch.diff && git apply patch.diff`.\n");
-    outcome = { candidate_id: item.id, outcome: "patch_package_created", reason: "Deterministic whitespace-only repair is authority-covered; source repository was not edited.", patch_package: packageDir };
+    await writeFile(join(packageDir, "validation-before.md"), `# Validation before\n\nStatic inspection found trailing horizontal whitespace at \`${item.evidence}\`. The source repository was clean at \`${snapshot(repo).head}\`.\n`);
+    await writeFile(join(packageDir, "validation-after.md"), `# Validation after\n\nThe generated patch applies only the deterministic \`${item.source}\` repair. The source repository was not modified; apply and run the repository's available checks in an isolated non-main worktree.\n`);
+    await writeFile(join(packageDir, "risk-assessment.md"), `# Risk assessment\n\nRisk is low: the deterministic patch is limited to \`${item.source}\` in one safe-zone file. Publication is intentionally not performed by this package.\n`);
+    await writeFile(join(packageDir, "owner-next-action.md"), "# Owner next action\n\nReview `patch.diff`, apply it in a non-main worktree, run available local validation with network disabled, then decide whether to publish.\n");
+    outcome = { candidate_id: item.id, outcome: "patch_package_created", reason: profile.publication_permission === "none" ? "Publication is unavailable, so a deterministic safe-zone repair was handed off as a patch package; source repository was not edited." : "Deterministic whitespace-only repair is authority-covered; source repository was not edited.", patch_package: packageDir };
   }
   if (outcome.outcome !== "patch_package_created") await writeFile(join(packageDir, "NOT_CREATED.md"), `# Patch package not created\n\nOutcome: **${outcome.outcome}**. ${outcome.reason}\n`);
   await writeJson(join(dir, "classification.json"), { candidate: item, outcome });
-  await writeJson(join(dir, "code-repair-plan.json"), { candidate_id: item.id, allowed_files: item.file ? [item.file] : [], transformation: item.source === "markdown_trailing_whitespace" ? "remove trailing horizontal whitespace" : "none without owner decision", authority: "low-risk only" });
+  await writeJson(join(dir, "code-repair-plan.json"), { candidate_id: item.id, allowed_files: item.file ? [item.file] : [], transformation: item.source === "markdown_trailing_whitespace" ? "remove trailing horizontal whitespace" : item.source === "strict_integer_radix" ? "add explicit decimal radix to date-component parseInt calls" : "none without owner decision", authority: "low-risk only" });
   await writeFile(join(dir, "validation-before.md"), `# Validation before\n\nStatic evidence captured at ${item.evidence}. Source HEAD: ${snapshot(repo).head}. Runtime/network commands were not needed.\n`);
   await writeFile(join(dir, "validation-after.md"), `# Validation after\n\nOutcome: **${outcome.outcome}**. ${outcome.outcome === "patch_package_created" ? "Patch is whitespace-only and source HEAD/status are unchanged." : "No patch was applied."}\n`);
   await writeFile(join(dir, "ci-analysis.md"), "# CI analysis\n\nNo draft PR was created. CI monitoring is not applicable; provider calls were not made.\n");
@@ -108,15 +114,21 @@ async function executeCandidate(repo: string, projectOut: string, item: Candidat
 }
 
 async function discover(repo: string, seen: string[], packaged: string[]): Promise<Candidate[]> {
-  const files = (await walk(repo, 4)).filter((file) => /(^|\/)(src|test|tests|docs)\//.test(file) || /(^|\/)README[^/]*\.md$/i.test(file)).filter((file) => /\.(ts|tsx|js|jsx|md)$/.test(file)).slice(0, 300);
+  const files = (await walk(repo, 6)).filter(isSafeCandidateFile).slice(0, 800);
   const found: Candidate[] = [];
   for (const file of files) {
     const text = await readFile(join(repo, file), "utf8").catch(() => ""); const lines = text.split("\n");
     const whitespace = file.endsWith(".md") ? lines.findIndex((line) => /[ \t]+$/.test(line)) : -1;
     if (whitespace >= 0) found.push(makeCandidate(`trim-${slug(file)}`, "markdown_trailing_whitespace", "Remove trailing whitespace from Markdown", "low", file, whitespace + 1, seen, packaged, "execute_patch_package"));
     const todo = lines.findIndex((line) => /\b(TODO|FIXME)\b/.test(line));
-    if (todo >= 0) found.push(makeCandidate(`todo-${slug(file)}`, "safe_todo", lines[todo].trim().slice(0, 140), file.endsWith(".md") || /test/.test(file) ? "medium" : "high", file, todo + 1, seen, packaged, "owner_review"));
-    if (found.length >= 20) break;
+    if (todo >= 0) found.push(makeCandidate(`todo-${slug(file)}`, "safe_todo", lines[todo].trim().slice(0, 140), file.endsWith(".md") || /(^|\/)(test|tests)\//.test(file) ? "medium" : "high", file, todo + 1, seen, packaged, "owner_review"));
+    const dateInteger = lines.findIndex((value) => /\bparseInt\s*\(\s*(year|month|day)\s*\)/.test(value));
+    if (dateInteger >= 0) found.push(makeCandidate(`add-decimal-radix-v2-${slug(file)}`, "strict_integer_radix", "Declare decimal radix for parsed date components", "low", file, dateInteger + 1, seen, packaged, "execute_patch_package"));
+    else addPatternCandidate(found, file, lines, /\b(?:Number\.)?parseInt\s*\([^,)]*\)/, "strict-integer-parsing", "integer_parser_review", "Integer parsing does not declare a radix", "medium", seen, packaged);
+    addPatternCandidate(found, file, lines, /\bJSON\.parse\s*\(/, "malformed-json-handling", "json_report_review", "Verify malformed JSON/report input is handled", /(^|\/)(test|tests)\//.test(file) ? "low" : "medium", seen, packaged);
+    addPatternCandidate(found, file, lines, /\b(process\.argv|\.argument\s*\(|\.positional\s*\()/, "cli-argument-handling", "cli_parser_review", "Review positional argument, empty input, and unknown flag handling", /(^|\/)(test|tests)\//.test(file) ? "low" : "medium", seen, packaged);
+    addPatternCandidate(found, file, lines, /\b(min|max|range)\b.*(?:throw|error|invalid)|(?:throw|error|invalid).*\b(min|max|range)\b/i, "range-validation", "validator_review", "Review boundary and range validation coverage", /(^|\/)(test|tests)\//.test(file) ? "low" : "medium", seen, packaged);
+    if (found.length >= 60) break;
   }
   const pkg = await optionalJson<{ scripts?: Record<string, string> }>(join(repo, "package.json"));
   if (pkg?.scripts && !pkg.scripts.typecheck) found.push(makeCandidate("validation-typecheck-gap", "package_script_gap", "No typecheck script declared", "medium", "package.json", 1, seen, packaged, "owner_review"));
@@ -125,10 +137,28 @@ async function discover(repo: string, seen: string[], packaged: string[]): Promi
   return found;
 }
 
+function isSafeCandidateFile(file: string) {
+  if (/(^|\/)(\.env[^/]*|secrets?|migrations?|deploy|infra|production|prod)(\/|$)/i.test(file)) return false;
+  if (/(^|\/)(auth|payments?|database|db)(\/|$)/i.test(file)) return false;
+  return (/\.(ts|tsx|js|jsx|mjs|cjs|md|json)$/.test(file) && (/(^|\/)(src|lib|bin|cli|cmd|commands|test|tests|docs|scripts)\//.test(file) || /(^|\/)README[^/]*\.md$/i.test(file) || /(^|\/)package\.json$/.test(file)));
+}
+
+function addPatternCandidate(found: Candidate[], file: string, lines: string[], pattern: RegExp, id: string, source: string, title: string, risk: Candidate["risk"], seen: string[], packaged: string[]) {
+  const line = lines.findIndex((value) => pattern.test(value));
+  if (line >= 0) found.push(makeCandidate(`${id}-${slug(file)}`, source, title, risk, file, line + 1, seen, packaged, "inspect_or_patch_package"));
+}
+
+function candidateRank(a: Candidate, b: Candidate) {
+  const score = (item: Candidate) => ["markdown_trailing_whitespace", "strict_integer_radix"].includes(item.source) && item.risk === "low" ? 0 : item.risk === "low" ? 1 : item.source === "package_script_gap" ? 3 : item.risk === "medium" ? 2 : 4;
+  return score(a) - score(b) || a.id.localeCompare(b.id);
+}
+
 function makeCandidate(id: string, source: string, title: string, risk: Candidate["risk"], file: string | undefined, line: number | undefined, seen: string[], packaged: string[], action: string): Candidate { return { id, source, title, risk, file, line, duplicate: seen.includes(id) || packaged.includes(id), recommended_action: action, evidence: file ? `${file}:${line ?? 1}` : "bounded local repository scan" }; }
 async function existingPackages(projectOut: string) { const root = join(projectOut, "candidates"); const entries = await readdir(root, { withFileTypes: true }).catch(() => []); const result: string[] = []; for (const entry of entries) if (entry.isDirectory()) { try { await access(join(root, entry.name, "patch-package", "manifest.json")); result.push(entry.name); } catch { /* absent */ } } return result; }
-function unifiedPatch(file: string, before: string, after: string) { const old = before.split("\n"), next = after.split("\n"); let body = `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1,${old.length} +1,${next.length} @@\n`; for (let i = 0; i < old.length; i++) body += old[i] === next[i] ? ` ${old[i]}\n` : `-${old[i]}\n+${next[i]}\n`; return body; }
-function allows(profile: Profile, file: string) { return profile.publication_permission !== "none" && file.endsWith(".md") && !(profile.forbidden_file_patterns ?? []).some((pattern) => pattern.includes(".env") && file.includes(".env")); }
+function unifiedPatch(file: string, before: string, after: string) { const old = patchLines(before), next = patchLines(after); let body = `diff --git a/${file} b/${file}\n--- a/${file}\n+++ b/${file}\n@@ -1,${old.length} +1,${next.length} @@\n`; for (let i = 0; i < old.length; i++) body += old[i] === next[i] ? ` ${old[i]}\n` : `-${old[i]}\n+${next[i]}\n`; return body; }
+function patchLines(value: string) { const lines = value.split("\n"); if (value.endsWith("\n")) lines.pop(); return lines; }
+function allowsPatchPackage(profile: Profile, file: string, source: string) { return (file.endsWith(".md") || source === "strict_integer_radix") && isSafeCandidateFile(file) && !(profile.forbidden_file_patterns ?? []).some((pattern) => forbiddenPatternMatches(pattern, file)); }
+function forbiddenPatternMatches(pattern: string, file: string) { const token = pattern.replace(/^\*\*\//, "").replace(/\/\*\*$/, "").replace(/\*/g, ""); return token.length > 0 && file.toLowerCase().includes(token.toLowerCase()); }
 function pickRisk(value: Awaited<ReturnType<typeof discoverProject>>) { return { risky_file_patterns: value.risky_file_patterns, forbidden_file_patterns: value.forbidden_file_patterns, db_indicators: value.db_indicators, prod_indicators: value.prod_indicators, secret_indicators: value.secret_indicators, migration_indicators: value.migration_indicators, deploy_indicators: value.deploy_indicators }; }
 function snapshot(repo: string) { return { head: git(repo, ["rev-parse", "HEAD"]), status: git(repo, ["status", "--porcelain=v1"]) }; }
 function git(repo: string, args: string[]) { return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] }).trim(); }
@@ -136,8 +166,8 @@ async function walk(root: string, depth: number, dir = ""): Promise<string[]> { 
 async function json<T>(path: string): Promise<T> { return JSON.parse(await readFile(path, "utf8")) as T; }
 async function optionalJson<T>(path: string): Promise<T | null> { try { return await json<T>(path); } catch { return null; } }
 async function writeJson(path: string, value: unknown) { await mkdir(dirname(path), { recursive: true }); await writeFile(path, `${JSON.stringify(value, null, 2)}\n`); }
-async function updateInbox(path: string, project: string, outcomes: Outcome[], next: string) { const old = await readFile(path, "utf8").catch(() => "# Owner inbox\n"); const clean = old.replace(new RegExp(`\\n## Project: ${escapeRegex(project)}[\\s\\S]*?(?=\\n## Project:|$)`), ""); const decisions = outcomes.filter((x) => x.outcome === "owner_decision_needed"); await writeFile(path, `${clean.trimEnd()}\n\n## Project: ${project}\n\n- Patch packages created: ${outcomes.filter((x) => x.outcome === "patch_package_created").length}\n- Duplicates skipped: ${outcomes.filter((x) => x.outcome === "skip_duplicate").length}\n- Rejected with evidence: ${outcomes.filter((x) => x.outcome === "rejected_with_evidence").length}\n- Owner decisions needed: ${decisions.length}\n${decisions.map((x) => `  - \`${x.candidate_id}\`: ${x.reason}`).join("\n") || "  - None."}\n\nNext normal run: \`${next}\`\n`); }
-function selectionReport(all: Candidate[], selected: Candidate[], outcomes: Outcome[]) { return `# Candidate selection\n\n- Evaluated: ${all.length}\n- Selected this run: ${selected.length}\n- Duplicate: ${all.filter((x) => x.duplicate).length}\n- Low / medium / high: ${["low", "medium", "high"].map((risk) => all.filter((x) => x.risk === risk).length).join(" / ")}\n\n${outcomes.map((x) => `- \`${x.candidate_id}\`: **${x.outcome}** — ${x.reason}`).join("\n")}\n`; }
+async function updateInbox(path: string, project: string, outcomes: Outcome[], next: string) { const old = await readFile(path, "utf8").catch(() => "# Owner inbox\n"); const clean = old.replace(new RegExp(`\\n## Project: ${escapeRegex(project)}[\\s\\S]*?(?=\\n## Project:|$)`), ""); const packages = outcomes.filter((x) => x.outcome === "patch_package_created"); const decisions = outcomes.filter((x) => x.outcome === "owner_decision_needed"); await writeFile(path, `${clean.trimEnd()}\n\n## Project: ${project}\n\n- Executed: ${packages.length}\n- Patch-package-ready: ${packages.length}\n${packages.map((x) => `  - \`${x.candidate_id}\`: ${x.patch_package}`).join("\n") || "  - None."}\n- Duplicate: ${outcomes.filter((x) => x.outcome === "skip_duplicate").length}\n- Rejected-risk: ${outcomes.filter((x) => x.outcome === "rejected_with_evidence").length}\n- Needs-owner-decision: ${decisions.length}\n${decisions.map((x) => `  - \`${x.candidate_id}\`: ${x.reason}`).join("\n") || "  - None."}\n\nNext normal run: \`${next}\`\n`); }
+function selectionReport(all: Candidate[], selected: Candidate[], outcomes: Outcome[]) { return `# Candidate selection\n\n- Evaluated: ${all.length}\n- Selected this run: ${selected.length}\n- Duplicate: ${all.filter((x) => x.duplicate).length}\n- Low / medium / high: ${["low", "medium", "high"].map((risk) => all.filter((x) => x.risk === risk).length).join(" / ")}\n\n## Inventory\n\n${all.map((x) => `- \`${x.id}\`: ${x.risk}; ${x.source}; ${x.evidence}; ${selected.some((item) => item.id === x.id) ? "selected" : x.duplicate ? "duplicate" : "deferred"}`).join("\n")}\n\n## Outcomes\n\n${outcomes.map((x) => `- \`${x.candidate_id}\`: **${x.outcome}** — ${x.reason}`).join("\n")}\n`; }
 function slug(value: string) { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "candidate"; }
 function shellDisplay(value: string) { return /\s/.test(value) ? `'${value.replace(/'/g, `'\\''`)}'` : value; }
 function escapeRegex(value: string) { return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); }
