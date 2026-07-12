@@ -1,0 +1,8 @@
+{
+  "candidate_id": "validation-typecheck-gap",
+  "allowed_files": [
+    "package.json"
+  ],
+  "transformation": "none without owner decision",
+  "authority": "low-risk only"
+}

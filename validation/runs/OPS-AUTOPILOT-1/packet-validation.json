@@ -1,0 +1,18 @@
+{
+  "valid": true,
+  "required_top_level_artifacts": [
+    "summary.md",
+    "results.json",
+    "owner-inbox.md",
+    "autopilot-report.md",
+    "ops-state.json",
+    "execution-log.md",
+    "packet-validation.json"
+  ],
+  "safety": {
+    "target_unchanged": true,
+    "provider_calls": false,
+    "runtime_network": false,
+    "target_main_mutation": false
+  }
+}

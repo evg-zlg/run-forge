@@ -1,0 +1,2 @@
+- 2026-07-12T09:28:55.191Z factory-loop-cb0fcb20: profile=cli-tooling-low-risk; evaluated=1; executed=0; decisions=0; target-unchanged=yes; network/provider/db/prod/migrations=none
+- 2026-07-12T09:28:55.673Z upravdom-ae33c703: profile=frontend-low-risk; evaluated=1; executed=0; decisions=1; target-unchanged=yes; network/provider/db/prod/migrations=none
