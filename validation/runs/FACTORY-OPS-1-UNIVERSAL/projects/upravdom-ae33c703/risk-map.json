@@ -1,0 +1,25 @@
+{
+  "risky_file_patterns": [
+    "config/**",
+    "scripts/**",
+    "infra/**",
+    "Dockerfile*",
+    ".github/workflows/**"
+  ],
+  "forbidden_file_patterns": [
+    "**/.env*",
+    "**/secrets/**",
+    "**/migrations/**",
+    "**/deploy/**",
+    "**/infra/**"
+  ],
+  "db_indicators": [],
+  "prod_indicators": [
+    "docs/product/ACCEPTANCE.md",
+    "docs/product/ROADMAP.md",
+    "docs/product/VISION.md"
+  ],
+  "secret_indicators": [],
+  "migration_indicators": [],
+  "deploy_indicators": []
+}

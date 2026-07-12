@@ -1,0 +1,15 @@
+{
+  "status": "completed",
+  "projects": {
+    "factory-loop-cb0fcb20": {
+      "candidates_evaluated": 1,
+      "selected": 0,
+      "target_unchanged": true
+    },
+    "upravdom-ae33c703": {
+      "candidates_evaluated": 1,
+      "selected": 1,
+      "target_unchanged": true
+    }
+  }
+}

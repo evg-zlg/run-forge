@@ -19,4 +19,20 @@ describe("factory ops", () => {
     expect(await readFile(join(out, "owner-inbox.md"), "utf8")).toContain("Owner inbox");
     expect(execFileSync("git", ["-C", repo, "status", "--porcelain"], { encoding: "utf8" })).toBe("");
   });
+
+  it("onboards an unknown repository without a registry entry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-unknown-"));
+    const repo = join(root, "unknown-app"); await mkdir(join(repo, "src"), { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "unknown-app", scripts: { test: "vitest run", build: "vite build" }, dependencies: { react: "1", vite: "1" } }));
+    await writeFile(join(repo, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    await writeFile(join(repo, "src", "index.ts"), "export const ready = true;\n");
+    execFileSync("git", ["init", "-q", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
+    const profiles = join(root, "profiles.json"); const out = join(root, "out"); const cache = join(root, "cache");
+    await writeFile(profiles, JSON.stringify({ "frontend-low-risk": { publication_permission: "draft_pr" } }));
+    const result = await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 2, out, profiles, cache, registry: join(root, "missing-registry.json") });
+    expect(result.recommendedProfile).toBe("frontend-low-risk");
+    const profile = JSON.parse(await readFile(join(out, "projects", result.project, "project-profile.json"), "utf8"));
+    expect(profile).toMatchObject({ package_manager: "pnpm", frameworks: expect.arrayContaining(["react", "vite"]) });
+    expect(await readFile(result.cacheProfile, "utf8")).toContain('"source_repo_path"');
+  });
 });
