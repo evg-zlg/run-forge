@@ -1,0 +1,6 @@
+{
+  "valid": true,
+  "required_artifacts_present": ["summary.md", "results.json", "owner-inbox.md", "promotion-report.md", "network-phase-report.md", "execution-log.md", "packet-validation.json"],
+  "dogfood_evidence": ["upravdom", "factory"],
+  "safety": { "source_immutability": true, "runtime_network_denied_or_not_required": true, "no_forbidden_action": true }
+}

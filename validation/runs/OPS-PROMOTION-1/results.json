@@ -1,0 +1,10 @@
+{
+  "status": "completed",
+  "starting_runforge_sha": "e6639729c45aa0322a0ce43dd3e1facd5d96f0ff",
+  "pr_58": "closed-evidence-only",
+  "dogfood": {
+    "upravdom": { "head_before": "2409eb40522a8b73ce22aa30a884dd777e4958e0", "head_after": "2409eb40522a8b73ce22aa30a884dd777e4958e0", "candidates": 13, "patch_packages": 1, "promotions": 0, "outcome": "patch-package-ready", "existing_draft_pr": "https://github.com/evg-zlg/upravdom/pull/13" },
+    "factory": { "head_before": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed", "head_after": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed", "candidates": 60, "patch_packages": 0, "promotions": 0, "outcome": "needs-owner-decision" }
+  },
+  "safety": { "target_main_changed": false, "force_push": false, "target_pr_merge": false, "deploy": false, "db_prod_secrets_provider": false, "runtime_validation_network": false }
+}
