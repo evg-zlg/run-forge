@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
@@ -49,7 +49,7 @@ describe("factory ops", () => {
     expect(result).toMatchObject({ selectedProfile: "cli-tooling-low-risk", executed: 1, patchPackages: 1, targetUnchanged: true });
     const candidate = join(out, "projects", result.project, "candidates", "trim-docs-guide-md");
     expect(await readFile(join(candidate, "patch-package", "patch.diff"), "utf8")).toContain("-# Guide  ");
-    expect(await readFile(join(candidate, "classification.json"), "utf8")).toContain("patch_package_created");
+    expect(await readFile(join(candidate, "classification.json"), "utf8")).toContain("patch-package-ready");
     expect(await readFile(join(candidate, "patch-package", "risk-assessment.md"), "utf8")).toContain("deterministic patch");
     expect(await readFile(join(candidate, "patch-package", "owner-next-action.md"), "utf8")).toContain("non-main worktree");
     execFileSync("git", ["-C", repo, "apply", "--check", join(candidate, "patch-package", "patch.diff")]);
@@ -95,5 +95,14 @@ describe("factory ops", () => {
     const result = await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 1, out: join(root, "out"), profiles, cache: join(root, "cache"), registry: join(root, "missing.json"), autopilot: true });
     expect(result).toMatchObject({ selectedProfile: "read-only-triage", executed: 1, patchPackages: 1, targetUnchanged: true });
     expect(execFileSync("git", ["-C", repo, "status", "--porcelain"], { encoding: "utf8" })).toBe("");
+  });
+
+  it("rejects a deterministic candidate outside the profile allowlist", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-profile-files-")); const repo = join(root, "app");
+    await mkdir(join(repo, "docs"), { recursive: true }); await writeFile(join(repo, "package.json"), JSON.stringify({ name: "cli", bin: "index.js", scripts: { test: "node --test", typecheck: "tsc --noEmit" } }));
+    await writeFile(join(repo, "docs", "guide.md"), "# Guide  \n"); execFileSync("git", ["init", "-q", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
+    const profiles = join(root, "profiles.json"); const out = join(root, "out"); await writeFile(profiles, JSON.stringify({ "cli-tooling-low-risk": { publication_permission: "draft_pr", allowed_actions: ["create_patch_package", "promote_patch_package_to_branch", "commit_to_non_main_branch", "push_non_main_branch", "create_draft_pr"], allowed_file_patterns: ["src/**"] } }));
+    await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 1, out, profiles, cache: join(root, "cache"), registry: join(root, "missing.json"), autopilot: true });
+    expect(await readFile(join(out, "projects", (await readdir(join(out, "projects")))[0]!, "candidates", "trim-docs-guide-md", "classification.json"), "utf8")).toContain("rejected-policy");
   });
 });
