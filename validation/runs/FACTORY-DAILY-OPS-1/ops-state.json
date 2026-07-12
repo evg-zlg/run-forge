@@ -1,0 +1,158 @@
+{
+  "projects_inspected": [
+    {
+      "project": "factory",
+      "path": "/Users/evgeny/Documents/projects/factory",
+      "exists": true,
+      "git": true,
+      "mode": "read-only-triage",
+      "head_before": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "head_after": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+      "status_before": "",
+      "status_after": ""
+    },
+    {
+      "project": "upravdom",
+      "path": "/Users/evgeny/Documents/projects/upravdom",
+      "exists": true,
+      "git": true,
+      "mode": "read-only-triage",
+      "head_before": "2409eb40522a8b73ce22aa30a884dd777e4958e0",
+      "head_after": "2409eb40522a8b73ce22aa30a884dd777e4958e0",
+      "status_before": "",
+      "status_after": ""
+    },
+    {
+      "project": "autokitaec",
+      "path": "/Users/evgeny/Documents/autokitaec",
+      "exists": false,
+      "git": false,
+      "mode": "discovery/triage-only"
+    },
+    {
+      "project": "smartsql",
+      "path": "/Users/evgeny/Documents/projects/smartsql",
+      "exists": true,
+      "git": true,
+      "mode": "read-only-triage",
+      "head_before": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+      "head_after": "71e2c386bfc21adfae2d0101712fb42dae46e6e1",
+      "status_before": "M frontend/app/finance/operations/operations-shell.tsx\n M frontend/components/finance/finance-montage-deal-drawer.tsx\n M frontend/components/finance/finance-montage-deals-view.tsx\n M reports/agentops-daily/agent-run-ledger.jsonl\n M shared/src/finance-crm-event-display.ts\n?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/agent-factory/task-packets/ops-w-3253.md\n?? reports/agent-runs/run-883a1fbabc37/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/DATA-W-3181-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/MP-W-3082-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? reports/projectops/OPS-W-2960-R001.json\n?? reports/projectops/OPS-W-3219-R001.json\n?? reports/projectops/OPS-W-3253-R001.json\n?? reports/projectops/OPS-W-3270-R001.json\n?? reports/projectops/run-883a1fbabc37.json\n?? tmp/",
+      "status_after": "M frontend/app/finance/operations/operations-shell.tsx\n M frontend/components/finance/finance-montage-deal-drawer.tsx\n M frontend/components/finance/finance-montage-deals-view.tsx\n M reports/agentops-daily/agent-run-ledger.jsonl\n M shared/src/finance-crm-event-display.ts\n?? _experiments/\n?? output/\n?? reports/agent-factory/bindings/\n?? reports/agent-factory/task-packets/ops-w-3253.md\n?? reports/agent-runs/run-883a1fbabc37/\n?? reports/ai-club/\n?? reports/owner-context/moysklad-amocrm-proof-of-link-mvp-20260625.md\n?? reports/projectops/CRM-W-2645-R001.json\n?? reports/projectops/DATA-W-3181-R001.json\n?? reports/projectops/FIN-W-2315-R001.json\n?? reports/projectops/MP-W-3082-R001.json\n?? reports/projectops/OPS-W-2583-R001.json\n?? reports/projectops/OPS-W-2697-R001.json\n?? reports/projectops/OPS-W-2960-R001.json\n?? reports/projectops/OPS-W-3219-R001.json\n?? reports/projectops/OPS-W-3253-R001.json\n?? reports/projectops/OPS-W-3270-R001.json\n?? reports/projectops/run-883a1fbabc37.json\n?? tmp/"
+    }
+  ],
+  "open_runforge_prs": [
+    {
+      "project": "factory",
+      "reference": "PR #167: Reject malformed self-observability max-files values",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "recommended_owner_action": "review-and-merge",
+      "evidence": "https://github.com/deskbuilder/factory/pull/167"
+    },
+    {
+      "project": "factory",
+      "reference": "PR #166: Reject malformed task executor integer limits",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "recommended_owner_action": "review-and-merge",
+      "evidence": "https://github.com/deskbuilder/factory/pull/166"
+    },
+    {
+      "project": "factory",
+      "reference": "PR #165: Reject malformed Factory advice size values",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "recommended_owner_action": "review-and-merge",
+      "evidence": "https://github.com/deskbuilder/factory/pull/165"
+    },
+    {
+      "project": "factory",
+      "reference": "PR #164: Reject ambiguous artifact push paths",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "recommended_owner_action": "review-and-merge",
+      "evidence": "https://github.com/deskbuilder/factory/pull/164"
+    },
+    {
+      "project": "factory",
+      "reference": "PR #163: RunForge publication demo: document offline validation",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "recommended_owner_action": "review-and-merge",
+      "evidence": "https://github.com/deskbuilder/factory/pull/163"
+    },
+    {
+      "project": "upravdom",
+      "reference": "PR #14: fix: Declare decimal radix for parsed date components",
+      "status": "needs owner decision",
+      "ci_status": "no-checks",
+      "recommended_owner_action": "needs-owner-decision",
+      "evidence": "https://github.com/evg-zlg/upravdom/pull/14"
+    },
+    {
+      "project": "upravdom",
+      "reference": "PR #13: fix(date): declare decimal radix",
+      "status": "needs owner decision",
+      "ci_status": "no-checks",
+      "recommended_owner_action": "needs-owner-decision",
+      "evidence": "https://github.com/evg-zlg/upravdom/pull/13"
+    },
+    {
+      "project": "upravdom",
+      "reference": "PR #12: Reject invalid explicit task due times",
+      "status": "needs owner decision",
+      "ci_status": "no-checks",
+      "recommended_owner_action": "needs-owner-decision",
+      "evidence": "https://github.com/evg-zlg/upravdom/pull/12"
+    }
+  ],
+  "open_runforge_branches": [
+    {
+      "project": "factory",
+      "reference": "runforge/branch-pr-1-demo",
+      "status": "needs owner decision",
+      "ci_status": "not-applicable",
+      "recommended_owner_action": "needs-owner-decision",
+      "evidence": "/Users/evgeny/Documents/projects/factory#runforge/branch-pr-1-demo"
+    }
+  ],
+  "patch_packages": [],
+  "owner_decision_items": [
+    {
+      "project": "factory",
+      "reference": "runforge/branch-pr-1-demo",
+      "status": "needs owner decision",
+      "ci_status": "not-applicable",
+      "recommended_owner_action": "needs-owner-decision",
+      "evidence": "/Users/evgeny/Documents/projects/factory#runforge/branch-pr-1-demo"
+    },
+    {
+      "project": "upravdom",
+      "reference": "PR #14: fix: Declare decimal radix for parsed date components",
+      "status": "needs owner decision",
+      "ci_status": "no-checks",
+      "recommended_owner_action": "needs-owner-decision",
+      "evidence": "https://github.com/evg-zlg/upravdom/pull/14"
+    },
+    {
+      "project": "upravdom",
+      "reference": "PR #13: fix(date): declare decimal radix",
+      "status": "needs owner decision",
+      "ci_status": "no-checks",
+      "recommended_owner_action": "needs-owner-decision",
+      "evidence": "https://github.com/evg-zlg/upravdom/pull/13"
+    },
+    {
+      "project": "upravdom",
+      "reference": "PR #12: Reject invalid explicit task due times",
+      "status": "needs owner decision",
+      "ci_status": "no-checks",
+      "recommended_owner_action": "needs-owner-decision",
+      "evidence": "https://github.com/evg-zlg/upravdom/pull/12"
+    }
+  ],
+  "backlog_size": 8,
+  "backlog_high": true,
+  "recommended_next_run": "hold-new-target-work; process owner action queue"
+}

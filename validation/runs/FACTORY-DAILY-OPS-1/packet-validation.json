@@ -1,0 +1,26 @@
+{
+  "valid": true,
+  "required_top_level_artifacts": [
+    "summary.md",
+    "results.json",
+    "owner-inbox.md",
+    "ops-state.json",
+    "backlog-report.md",
+    "project-status-report.md",
+    "execution-log.md",
+    "packet-validation.json"
+  ],
+  "safety": {
+    "target_unchanged": true,
+    "target_prs_created": 0,
+    "target_main_mutation": false,
+    "provider_calls": false,
+    "db_prod_secrets_deploy_migrations": false
+  },
+  "missing_projects": [
+    {
+      "path": "/Users/evgeny/Documents/autokitaec",
+      "error": "path not found"
+    }
+  ]
+}

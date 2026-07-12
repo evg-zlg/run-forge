@@ -1,0 +1,81 @@
+{
+  "project": "factory",
+  "path": "/Users/evgeny/Documents/projects/factory",
+  "exists": true,
+  "git": true,
+  "mode": "read-only-triage",
+  "head_before": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+  "head_after": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+  "branch": "main",
+  "status_before": "",
+  "status_after": "",
+  "remote": "deskbuilder/factory",
+  "items": [
+    {
+      "project": "factory",
+      "kind": "pr",
+      "reference": "PR #167: Reject malformed self-observability max-files values",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "risk": "bounded",
+      "recommended_owner_action": "review-and-merge",
+      "why": "All reported checks are green.",
+      "evidence": "https://github.com/deskbuilder/factory/pull/167"
+    },
+    {
+      "project": "factory",
+      "kind": "pr",
+      "reference": "PR #166: Reject malformed task executor integer limits",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "risk": "bounded",
+      "recommended_owner_action": "review-and-merge",
+      "why": "All reported checks are green.",
+      "evidence": "https://github.com/deskbuilder/factory/pull/166"
+    },
+    {
+      "project": "factory",
+      "kind": "pr",
+      "reference": "PR #165: Reject malformed Factory advice size values",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "risk": "bounded",
+      "recommended_owner_action": "review-and-merge",
+      "why": "All reported checks are green.",
+      "evidence": "https://github.com/deskbuilder/factory/pull/165"
+    },
+    {
+      "project": "factory",
+      "kind": "pr",
+      "reference": "PR #164: Reject ambiguous artifact push paths",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "risk": "bounded",
+      "recommended_owner_action": "review-and-merge",
+      "why": "All reported checks are green.",
+      "evidence": "https://github.com/deskbuilder/factory/pull/164"
+    },
+    {
+      "project": "factory",
+      "kind": "pr",
+      "reference": "PR #163: RunForge publication demo: document offline validation",
+      "status": "green owner-ready",
+      "ci_status": "green",
+      "risk": "bounded",
+      "recommended_owner_action": "review-and-merge",
+      "why": "All reported checks are green.",
+      "evidence": "https://github.com/deskbuilder/factory/pull/163"
+    },
+    {
+      "project": "factory",
+      "kind": "branch",
+      "reference": "runforge/branch-pr-1-demo",
+      "status": "needs owner decision",
+      "ci_status": "not-applicable",
+      "risk": "unknown",
+      "recommended_owner_action": "needs-owner-decision",
+      "why": "RunForge branch has no matching open PR in the collected metadata.",
+      "evidence": "/Users/evgeny/Documents/projects/factory#runforge/branch-pr-1-demo"
+    }
+  ]
+}

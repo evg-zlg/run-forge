@@ -1,0 +1,48 @@
+{
+  "project": "upravdom",
+  "path": "/Users/evgeny/Documents/projects/upravdom",
+  "exists": true,
+  "git": true,
+  "mode": "read-only-triage",
+  "head_before": "2409eb40522a8b73ce22aa30a884dd777e4958e0",
+  "head_after": "2409eb40522a8b73ce22aa30a884dd777e4958e0",
+  "branch": "main",
+  "status_before": "",
+  "status_after": "",
+  "remote": "evg-zlg/upravdom",
+  "items": [
+    {
+      "project": "upravdom",
+      "kind": "pr",
+      "reference": "PR #14: fix: Declare decimal radix for parsed date components",
+      "status": "needs owner decision",
+      "ci_status": "no-checks",
+      "risk": "bounded",
+      "recommended_owner_action": "needs-owner-decision",
+      "why": "No CI checks were reported; owner must decide whether local evidence is sufficient.",
+      "evidence": "https://github.com/evg-zlg/upravdom/pull/14"
+    },
+    {
+      "project": "upravdom",
+      "kind": "pr",
+      "reference": "PR #13: fix(date): declare decimal radix",
+      "status": "needs owner decision",
+      "ci_status": "no-checks",
+      "risk": "bounded",
+      "recommended_owner_action": "needs-owner-decision",
+      "why": "No CI checks were reported; owner must decide whether local evidence is sufficient.",
+      "evidence": "https://github.com/evg-zlg/upravdom/pull/13"
+    },
+    {
+      "project": "upravdom",
+      "kind": "pr",
+      "reference": "PR #12: Reject invalid explicit task due times",
+      "status": "needs owner decision",
+      "ci_status": "no-checks",
+      "risk": "bounded",
+      "recommended_owner_action": "needs-owner-decision",
+      "why": "No CI checks were reported; owner must decide whether local evidence is sufficient.",
+      "evidence": "https://github.com/evg-zlg/upravdom/pull/12"
+    }
+  ]
+}
