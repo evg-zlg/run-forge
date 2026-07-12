@@ -17,3 +17,4 @@ Times are local (`Asia/Yekaterinburg`) on 2026-07-12.
 13. Created draft PR `https://github.com/evg-zlg/upravdom/pull/13`.
 14. Queried PR checks and branch workflow runs; none were configured or emitted. PR merge state was clean.
 15. Reconfirmed Управдом shared `main` remained clean and unchanged.
+16. Published this evidence packet as RunForge draft PR `https://github.com/evg-zlg/run-forge/pull/58`; CI run `29192344182` passed.

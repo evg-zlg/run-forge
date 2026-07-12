@@ -13,3 +13,5 @@
 - Actions runs for branch: none
 
 No push to `main`, merge, or deployment occurred.
+
+The RunForge evidence packet was pushed on `codex/ops-close-loop-1` and published as draft PR [evg-zlg/run-forge#58](https://github.com/evg-zlg/run-forge/pull/58). Its CI run `29192344182` passed all configured steps.

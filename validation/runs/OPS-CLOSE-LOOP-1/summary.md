@@ -10,9 +10,12 @@ The OPS-YIELD-1 patch package `add-decimal-radix-v2-src-lib-date-ts` was revalid
 - Commit: `4c98e96d33321f2ab194dc11d053fc6b86996a63`
 - Runtime network: denied for every validation command
 - Dependency preparation: offline npm cache only; network denied
-- CI: no checks or workflow runs were emitted
+- Управдом CI: no checks or workflow runs were emitted
+- RunForge evidence CI: passed (governance, structure, typecheck, tests, packet validation, build)
 - Merge/deploy/DB/prod/secrets/provider activity: none
 
 Owner next action: review draft PR #13 and, if satisfied, mark it ready and merge through the repository's normal owner-controlled process.
 
 This run closes the loop operationally with an owner-operated promotion path. It does not prove that normal unattended RunForge autopilot automatically publishes patch packages as PRs; no RunForge implementation was changed.
+
+The evidence packet is published in draft RunForge PR [evg-zlg/run-forge#58](https://github.com/evg-zlg/run-forge/pull/58).

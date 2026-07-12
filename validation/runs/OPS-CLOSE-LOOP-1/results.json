@@ -5,8 +5,13 @@
   "runforge": {
     "starting_sha": "e6639729c45aa0322a0ce43dd3e1facd5d96f0ff",
     "code_fix_needed": false,
-    "pr_url": null,
-    "merge_sha": null
+    "pr_url": "https://github.com/evg-zlg/run-forge/pull/58",
+    "merge_sha": null,
+    "evidence_ci": {
+      "status": "passed",
+      "run_id": 29192344182,
+      "url": "https://github.com/evg-zlg/run-forge/actions/runs/29192344182"
+    }
   },
   "upravdom": {
     "main_before": "2409eb40522a8b73ce22aa30a884dd777e4958e0",
@@ -35,7 +40,7 @@
     "registry_contact": false,
     "network_used": false
   },
-  "ci": {
+  "upravdom_ci": {
     "status": "not_configured_or_not_emitted",
     "checks": [],
     "workflow_runs": []
