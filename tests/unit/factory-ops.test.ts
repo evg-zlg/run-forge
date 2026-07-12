@@ -53,4 +53,15 @@ describe("factory ops", () => {
     expect(execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" })).toBe(before);
     expect(execFileSync("git", ["-C", repo, "status", "--porcelain"], { encoding: "utf8" })).toBe("");
   });
+
+  it("defaults a frontend repository with database indicators to read-only triage", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-smartsql-like-")); const repo = join(root, "app");
+    await mkdir(join(repo, "prisma"), { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "app", scripts: { test: "vitest run" }, dependencies: { react: "1", vite: "1" } }));
+    await writeFile(join(repo, "prisma", "schema.prisma"), "model User { id Int @id }\n");
+    execFileSync("git", ["init", "-q", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
+    const profiles = join(root, "profiles.json"); await writeFile(profiles, JSON.stringify({ "read-only-triage": { publication_permission: "none" } }));
+    const result = await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 1, out: join(root, "out"), profiles, cache: join(root, "cache"), registry: join(root, "missing.json"), autopilot: true });
+    expect(result).toMatchObject({ recommendedProfile: "read-only-triage", selectedProfile: "read-only-triage", executed: 0, targetUnchanged: true });
+  });
 });
