@@ -1,0 +1,73 @@
+{
+  "key": "cli-tooling-low-risk",
+  "discovered": {
+    "network": "disabled",
+    "setup": "owner_review_if_required",
+    "commands": {
+      "test": [
+        "npm run test"
+      ],
+      "build": [
+        "npm run build"
+      ],
+      "typecheck": [
+        "npm run typecheck"
+      ],
+      "lint": []
+    },
+    "forbidden_command_terms": [
+      "migrate",
+      "deploy",
+      "release",
+      "production",
+      "seed"
+    ]
+  },
+  "authority": {
+    "extends": "low-risk-code",
+    "allowed_actions": [
+      "inspect",
+      "validate",
+      "edit_non_main_worktree",
+      "create_draft_pr",
+      "monitor_ci",
+      "create_patch_package"
+    ],
+    "forbidden_actions": [
+      "push_to_main",
+      "force_push",
+      "merge_target_pr",
+      "deploy",
+      "db_access",
+      "production_access",
+      "secret_access",
+      "provider_calls",
+      "runtime_network_during_validation",
+      "run_migrations"
+    ],
+    "allowed_file_patterns": [
+      "src/**",
+      "tests/**",
+      "test/**",
+      "docs/**",
+      "*.md",
+      "package.json"
+    ],
+    "forbidden_file_patterns": [
+      "**/.env*",
+      "**/secrets/**",
+      "**/migrations/**",
+      "**/deploy/**",
+      "**/infra/**"
+    ],
+    "publication_permission": "draft_pr",
+    "validation_policy": "discovered CLI tests, typecheck, lint, and build with network disabled",
+    "ci_policy": "monitor created draft PR; never bypass required checks",
+    "stop_conditions": [
+      "CLI compatibility uncertainty",
+      "source HEAD changes",
+      "forbidden file",
+      "validation failure"
+    ]
+  }
+}

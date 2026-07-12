@@ -1,26 +1,31 @@
 import { access, mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
+import { discoverProject } from "./project-discovery.js";
 
 type Project = { path: string; risk: string; default_profile: string };
 type Profile = Record<string, unknown> & { publication_permission: string };
-export type FactoryOpsOptions = { project: string; profile?: string; batchSize: number; out: string; registry?: string; profiles?: string };
+export type FactoryOpsOptions = { project?: string; repo?: string; profile?: string; batchSize: number; out: string; registry?: string; profiles?: string; cache?: string };
 type Candidate = { id: string; source: string; title: string; risk: "low" | "medium" | "high"; duplicate: boolean; recommended_action: string; evidence: string };
 
 export async function runFactoryOps(options: FactoryOpsOptions) {
   if (!Number.isInteger(options.batchSize) || options.batchSize < 1 || options.batchSize > 20) throw new Error("--batch-size must be an integer from 1 to 20.");
   const registryPath = resolve(options.registry ?? "config/projects.json");
   const profilesPath = resolve(options.profiles ?? "config/authority-profiles.json");
-  const registry = await json<Record<string, Project>>(registryPath);
+  const registry = await optionalJson<Record<string, Project>>(registryPath) ?? {};
   const profiles = await json<Record<string, Profile>>(profilesPath);
-  const project = registry[options.project] ?? (options.project.includes("/") ? { path: resolve(options.project), risk: "unregistered", default_profile: "patch-package-only" } : undefined);
-  if (!project) throw new Error(`Unknown project '${options.project}'. Add it to ${registryPath}.`);
+  const registered = options.project ? registry[options.project] : undefined;
+  const repoInput = options.repo ?? registered?.path ?? (options.project?.includes("/") ? options.project : undefined);
+  if (!repoInput) throw new Error("Provide --repo <path>, or a cached --project name.");
+  const project = registered ?? { path: resolve(repoInput), risk: "discovered", default_profile: "auto-low-risk" };
   await access(project.path);
-  const profileKey = options.profile ?? project.default_profile;
+  const discovered = await discoverProject(project.path);
+  const requestedProfile = options.profile ?? project.default_profile;
+  const profileKey = requestedProfile === "auto-low-risk" ? discovered.recommended_authority_profile : requestedProfile;
   const profile = profiles[profileKey];
   if (!profile) throw new Error(`Unknown authority profile '${profileKey}'.`);
   const out = resolve(options.out);
-  const projectKey = registry[options.project] ? options.project : basename(project.path).toLowerCase();
+  const projectKey = registered && options.project ? options.project : discovered.project_key;
   const projectOut = join(out, "projects", projectKey);
   await mkdir(projectOut, { recursive: true });
   const before = snapshot(project.path);
@@ -33,11 +38,20 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   if (before.head !== after.head || before.status !== after.status) throw new Error("Target repository changed during factory ops run.");
   const priorIds = previous?.candidates_evaluated ?? [];
   const decisions = results.map((item) => `${projectKey}:${item.candidate_id}`);
-  const state = { projects: [...new Set([...(previous?.projects ?? []), projectKey])], project: projectKey, project_states: { ...(previous?.project_states ?? {}), [projectKey]: { main_head_before: before.head, main_head_after: after.head, status_before: before.status, status_after: after.status } }, main_head_before: before.head, main_head_after: after.head, open_runforge_prs_detected: [], candidates_evaluated: [...new Set([...priorIds, ...candidates.map((item) => `${projectKey}:${item.id}`)])], candidates_executed: [], draft_prs_created: [], patch_packages_created: [], owner_decisions_needed: [...new Set([...(previous?.owner_decisions_needed ?? []).filter((id) => !id.startsWith(`${projectKey}:`)), ...decisions])], next_suggested_run: `corepack pnpm dev factory ops run --project ${projectKey} --profile ${profileKey} --batch-size ${options.batchSize} --out ${options.out}` };
+  const nextCommand = `corepack pnpm dev factory ops run --repo ${project.path} --profile auto-low-risk --batch-size ${options.batchSize} --out ${options.out}`;
+  const state = { projects: [...new Set([...(previous?.projects ?? []), projectKey])], project: projectKey, project_states: { ...(previous?.project_states ?? {}), [projectKey]: { main_head_before: before.head, main_head_after: after.head, status_before: before.status, status_after: after.status } }, main_head_before: before.head, main_head_after: after.head, open_runforge_prs_detected: [], candidates_evaluated: [...new Set([...priorIds, ...candidates.map((item) => `${projectKey}:${item.id}`)])], candidates_executed: [], draft_prs_created: [], patch_packages_created: [], owner_decisions_needed: [...new Set([...(previous?.owner_decisions_needed ?? []).filter((id) => !id.startsWith(`${projectKey}:`)), ...decisions])], next_suggested_run: nextCommand };
   await writeJson(join(projectOut, "candidates.json"), candidates);
-  await writeJson(join(projectOut, "validation-profile.json"), { key: profileKey, ...profile });
+  await writeJson(join(projectOut, "project-profile.json"), discovered);
+  await writeJson(join(projectOut, "validation-profile.json"), { key: profileKey, discovered: discovered.validation_profile, authority: profile });
+  await writeJson(join(projectOut, "risk-map.json"), { risky_file_patterns: discovered.risky_file_patterns, forbidden_file_patterns: discovered.forbidden_file_patterns, db_indicators: discovered.db_indicators, prod_indicators: discovered.prod_indicators, secret_indicators: discovered.secret_indicators, migration_indicators: discovered.migration_indicators, deploy_indicators: discovered.deploy_indicators });
+  await writeJson(join(projectOut, "candidate-policy.json"), discovered.candidate_policy);
+  const cacheRoot = resolve(options.cache ?? ".runforge-cache/projects");
+  const cacheProfile = join(cacheRoot, projectKey, "project-profile.json");
+  const cached = await optionalJson<{ repo_head?: string; profile_hash?: string }>(cacheProfile);
+  const cacheStatus = cached?.repo_head === discovered.repo_head && cached?.profile_hash === discovered.profile_hash ? "verified_current" : cached ? "refreshed" : "created";
+  await writeJson(cacheProfile, { ...discovered, cache_status: cacheStatus, source_repo_path: project.path, last_validation_commands: discovered.validation_profile, last_safe_authority_profile: profileKey, last_known_open_runforge_prs: [], last_known_forbidden_zones: discovered.forbidden_file_patterns });
   await writeJson(join(projectOut, "results.json"), { project: projectKey, selected, results, source_unchanged: true });
-  await writeFile(join(projectOut, "summary.md"), `# ${projectKey} factory ops\n\n- Path: ${project.path}\n- Risk: ${project.risk}\n- Profile: ${profileKey}\n- HEAD unchanged: yes (${before.head})\n- Candidates: ${candidates.length}; selected: ${selected.length}\n- Outcome: owner decision required before mutation.\n`);
+  await writeFile(join(projectOut, "summary.md"), `# ${projectKey} factory ops\n\n- Path: ${project.path}\n- Discovery: unknown-repo onboarding\n- Detected stack: ${discovered.language_stack.join(", ") || "unknown"}\n- Package manager: ${discovered.package_manager}\n- Recommended profile: ${discovered.recommended_authority_profile}\n- Selected profile: ${profileKey}\n- Learned cache: ${cacheProfile}\n- HEAD unchanged: yes (${before.head})\n- Candidates: ${candidates.length}; selected: ${selected.length}\n- Outcome: owner decision required before mutation.\n`);
   await writeJson(join(out, "ops-state.json"), state);
   const aggregate = await optionalJson<{ projects?: Record<string, unknown> }>(join(out, "results.json"));
   await writeJson(join(out, "results.json"), { status: "completed", projects: { ...(aggregate?.projects ?? {}), [projectKey]: { candidates_evaluated: candidates.length, selected: selected.length, target_unchanged: true } } });
@@ -45,13 +59,13 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   const oldInbox = await readFile(inboxPath, "utf8").catch(() => "# Owner inbox\n");
   const withoutSection = oldInbox.replace(new RegExp(`\\n## Project: ${escapeRegex(projectKey)}[\\s\\S]*?(?=\\n## Project:|$)`), "");
   await writeFile(inboxPath, `${withoutSection.trimEnd()}\n${inbox(projectKey, candidates, selected, state.next_suggested_run)}`);
-  await writeFile(join(out, "project-registry-report.md"), `# Project registry report\n\nRegistry: ${registryPath}\n\nLoaded projects: ${Object.keys(registry).sort().join(", ")}.\n`);
+  await writeFile(join(out, "project-registry-report.md"), `# Project discovery/cache report\n\nStatic registry is optional and was ${registered ? "used as a cached alias" : "not required"}.\n\nDiscovered profile: ${join(projectOut, "project-profile.json")}\nLearned cache: ${cacheProfile}\n`);
   await writeFile(join(out, "authority-profiles-report.md"), `# Authority profiles report\n\nProfiles: ${profilesPath}\n\nLoaded profiles: ${Object.keys(profiles).sort().join(", ")}. Hard forbidden actions remain explicit in every profile.\n`);
   await writeFile(join(out, "candidate-discovery-report.md"), `# Candidate discovery report\n\nDiscovery is a bounded, provider-free local scan of safe docs/source/test files and package validation scripts. Duplicate IDs from ops state are skipped.\n`);
   await writeFile(join(out, "execution-log.md"), `# Execution log\n\n- ${projectKey}: inspected ${project.path}\n- Profile: ${profileKey}\n- Candidates evaluated: ${candidates.length}\n- Selected for owner decision: ${selected.length}\n- Target HEAD/status unchanged: yes\n- Provider/network/DB/production/migration actions: none\n`, { flag: "a" });
   await writeJson(join(out, "packet-validation.json"), { valid: true, required_top_level_artifacts: ["summary.md", "results.json", "owner-inbox.md", "ops-state.json", "project-registry-report.md", "authority-profiles-report.md", "candidate-discovery-report.md", "execution-log.md", "packet-validation.json"], safety: { target_unchanged: true, provider_calls: false, runtime_network: false } });
-  await writeFile(join(out, "summary.md"), `# FACTORY-OPS-1 operational run\n\nRunForge resolved the project registry and reusable authority profile, performed bounded duplicate-aware discovery, preserved target source state, and updated the owner inbox. See per-project evidence under \`projects/\`.\n`);
-  return { out, project: projectKey, candidates: candidates.length, selected: selected.length, targetUnchanged: true };
+  await writeFile(join(out, "summary.md"), `# FACTORY-OPS-1 operational run\n\nRunForge onboarded repositories from paths, generated project/validation/risk/candidate-policy artifacts, selected generic authority profiles, persisted rebuildable learned cache, performed duplicate-aware discovery, preserved target source state, and updated the owner inbox.\n`);
+  return { out, project: projectKey, recommendedProfile: discovered.recommended_authority_profile, cacheProfile, cacheStatus, candidates: candidates.length, selected: selected.length, targetUnchanged: true };
 }
 
 async function discover(repo: string, seen: string[]): Promise<Candidate[]> {

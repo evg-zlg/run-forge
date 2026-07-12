@@ -1,0 +1,19 @@
+{
+  "valid": true,
+  "required_top_level_artifacts": [
+    "summary.md",
+    "results.json",
+    "owner-inbox.md",
+    "ops-state.json",
+    "project-registry-report.md",
+    "authority-profiles-report.md",
+    "candidate-discovery-report.md",
+    "execution-log.md",
+    "packet-validation.json"
+  ],
+  "safety": {
+    "target_unchanged": true,
+    "provider_calls": false,
+    "runtime_network": false
+  }
+}

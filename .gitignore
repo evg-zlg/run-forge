@@ -1,4 +1,5 @@
 node_modules/
+.runforge-cache/
 dist/
 .runforge/
 runforge-artifacts/
@@ -147,6 +148,8 @@ validation/runs/EXTERNAL-EXECUTION-1/validation/**
 !validation/runs/PACKET-VALIDATION/results.json
 !validation/runs/FACTORY-OPS-1/
 !validation/runs/FACTORY-OPS-1/**
+!validation/runs/FACTORY-OPS-1-UNIVERSAL/
+!validation/runs/FACTORY-OPS-1-UNIVERSAL/**
 .DS_Store
 *.log.local
 *.zip

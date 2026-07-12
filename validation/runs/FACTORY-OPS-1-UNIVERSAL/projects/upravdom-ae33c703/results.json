@@ -1,0 +1,22 @@
+{
+  "project": "upravdom-ae33c703",
+  "selected": [
+    {
+      "id": "validation-typecheck-gap",
+      "source": "package_script_gap",
+      "title": "No typecheck script declared",
+      "risk": "medium",
+      "duplicate": false,
+      "recommended_action": "owner_review",
+      "evidence": "bounded local repository scan"
+    }
+  ],
+  "results": [
+    {
+      "candidate_id": "validation-typecheck-gap",
+      "outcome": "owner_decision",
+      "reason": "Discovery is deterministic; code mutation requires a bounded executor plan in a non-main worktree."
+    }
+  ],
+  "source_unchanged": true
+}
