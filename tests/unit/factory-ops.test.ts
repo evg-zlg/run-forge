@@ -49,7 +49,7 @@ describe("factory ops", () => {
     expect(result).toMatchObject({ selectedProfile: "cli-tooling-low-risk", executed: 1, patchPackages: 1, targetUnchanged: true });
     const candidate = join(out, "projects", result.project, "candidates", "trim-docs-guide-md");
     expect(await readFile(join(candidate, "patch-package", "patch.diff"), "utf8")).toContain("-# Guide  ");
-    expect(await readFile(join(candidate, "classification.json"), "utf8")).toContain("patch_package_created");
+    expect(await readFile(join(candidate, "classification.json"), "utf8")).toContain("patch-package-ready");
     expect(await readFile(join(candidate, "patch-package", "risk-assessment.md"), "utf8")).toContain("deterministic patch");
     expect(await readFile(join(candidate, "patch-package", "owner-next-action.md"), "utf8")).toContain("non-main worktree");
     execFileSync("git", ["-C", repo, "apply", "--check", join(candidate, "patch-package", "patch.diff")]);
