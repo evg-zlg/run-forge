@@ -13,8 +13,9 @@ export function factoryCommand(): Command {
     .option("--registry <file>")
     .option("--profiles <file>")
     .option("--cache <directory>", "rebuildable learned project cache")
+    .option("--autopilot", "execute authority-covered low-risk candidates without owner prompts", false)
     .action(async (opts) => {
-      try { console.log(JSON.stringify(await runFactoryOps({ repo: opts.repo, project: opts.project, profile: opts.profile, batchSize: opts.batchSize, out: opts.out, registry: opts.registry, profiles: opts.profiles, cache: opts.cache }), null, 2)); }
+      try { console.log(JSON.stringify(await runFactoryOps({ repo: opts.repo, project: opts.project, profile: opts.profile, batchSize: opts.batchSize, out: opts.out, registry: opts.registry, profiles: opts.profiles, cache: opts.cache, autopilot: opts.autopilot }), null, 2)); }
       catch (error) { throw new InvalidArgumentError(error instanceof Error ? error.message : String(error)); }
     }));
   factory.addCommand(ops);

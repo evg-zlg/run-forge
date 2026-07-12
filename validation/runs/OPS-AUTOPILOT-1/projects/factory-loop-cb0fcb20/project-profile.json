@@ -1,0 +1,135 @@
+{
+  "project_name": "factory-loop",
+  "project_key": "factory-loop-cb0fcb20",
+  "repo_path": "/Users/evgeny/Documents/projects/factory",
+  "repo_head": "d65ab9a9c8130f5d2c9214e8fdde2a278578afed",
+  "package_manager": "npm",
+  "language_stack": [
+    "typescript",
+    "javascript"
+  ],
+  "frameworks": [
+    "fastify",
+    "vitest",
+    "docker"
+  ],
+  "test_commands": [
+    "npm run test"
+  ],
+  "build_commands": [
+    "npm run build"
+  ],
+  "typecheck_commands": [
+    "npm run typecheck"
+  ],
+  "lint_commands": [],
+  "known_ci": [
+    "github-actions",
+    "buildkite"
+  ],
+  "default_branch": "codex/bootstrap-orchestrator",
+  "remote_info": {
+    "host": "github-factory",
+    "repository": "deskbuilder/factory"
+  },
+  "safe_file_patterns": [
+    "src/**",
+    "tests/**",
+    "test/**",
+    "docs/**",
+    "*.md"
+  ],
+  "risky_file_patterns": [
+    "config/**",
+    "scripts/**",
+    "infra/**",
+    "Dockerfile*",
+    ".github/workflows/**"
+  ],
+  "forbidden_file_patterns": [
+    "**/.env*",
+    "**/secrets/**",
+    "**/migrations/**",
+    "**/deploy/**",
+    "**/infra/**"
+  ],
+  "db_indicators": [
+    "prisma/migrations/20250609000000_init/migration.sql",
+    "prisma/migrations/20260610000001_add_repo_worker_executor_kind/migration.sql",
+    "prisma/migrations/20260615000000_add_gateway_usage/migration.sql",
+    "prisma/migrations/migration_lock.toml",
+    "prisma/schema.prisma"
+  ],
+  "prod_indicators": [
+    "docs/PRODUCT_PRINCIPLES.md"
+  ],
+  "secret_indicators": [
+    ".env.example",
+    "src/runner/secret-scan.test.ts",
+    "src/runner/secret-scan.ts"
+  ],
+  "migration_indicators": [
+    "prisma/migrations/20250609000000_init/migration.sql",
+    "prisma/migrations/20260610000001_add_repo_worker_executor_kind/migration.sql",
+    "prisma/migrations/20260615000000_add_gateway_usage/migration.sql",
+    "prisma/migrations/migration_lock.toml"
+  ],
+  "deploy_indicators": [
+    "deploy/Dockerfile",
+    "deploy/README.md",
+    "deploy/docker-compose.staging.test.ts",
+    "deploy/docker-compose.staging.yml",
+    "deploy/env.example"
+  ],
+  "validation_profile": {
+    "network": "disabled",
+    "setup": "owner_review_if_required",
+    "commands": {
+      "test": [
+        "npm run test"
+      ],
+      "build": [
+        "npm run build"
+      ],
+      "typecheck": [
+        "npm run typecheck"
+      ],
+      "lint": []
+    },
+    "forbidden_command_terms": [
+      "migrate",
+      "deploy",
+      "release",
+      "production",
+      "seed"
+    ]
+  },
+  "recommended_authority_profile": "cli-tooling-low-risk",
+  "candidate_policy": {
+    "sources": [
+      "safe_todo",
+      "validation_script_gap",
+      "docs_test_mismatch",
+      "small_input_validation"
+    ],
+    "max_files": 5,
+    "exclude_risk_zones": true,
+    "duplicate_key": "candidate-id+repo-head",
+    "require_non_main_workspace_for_edits": true
+  },
+  "last_discovered_at": "2026-07-12T09:28:55.061Z",
+  "confidence": 0.95,
+  "open_questions": [],
+  "evidence_files": [
+    ".buildkite/pipeline.yml",
+    ".github/workflows/ci.yml",
+    ".github/workflows/verify.yml",
+    "README.md",
+    "deploy/Dockerfile",
+    "deploy/README.md",
+    "docs/prompts/README.md",
+    "package-lock.json",
+    "package.json"
+  ],
+  "profile_hash": "a61a4b8b4869a9b6d29ddd8a05a0453a0e2ffe1b6af471f68261f42d4f9c1ac3"
+}

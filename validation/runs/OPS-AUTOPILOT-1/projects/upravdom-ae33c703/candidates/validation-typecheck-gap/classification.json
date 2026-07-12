@@ -1,0 +1,18 @@
+{
+  "candidate": {
+    "id": "validation-typecheck-gap",
+    "source": "package_script_gap",
+    "title": "No typecheck script declared",
+    "risk": "medium",
+    "file": "package.json",
+    "line": 1,
+    "duplicate": false,
+    "recommended_action": "owner_review",
+    "evidence": "package.json:1"
+  },
+  "outcome": {
+    "candidate_id": "validation-typecheck-gap",
+    "outcome": "owner_decision_needed",
+    "reason": "The candidate requires product judgment or authority expansion."
+  }
+}

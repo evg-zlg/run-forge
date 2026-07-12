@@ -1,0 +1,19 @@
+{
+  "status": "completed",
+  "projects": {
+    "factory-loop-cb0fcb20": {
+      "candidates_evaluated": 1,
+      "candidates_executed": 0,
+      "patch_packages": 0,
+      "owner_decisions": 0,
+      "target_unchanged": true
+    },
+    "upravdom-ae33c703": {
+      "candidates_evaluated": 1,
+      "candidates_executed": 0,
+      "patch_packages": 0,
+      "owner_decisions": 1,
+      "target_unchanged": true
+    }
+  }
+}

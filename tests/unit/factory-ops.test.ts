@@ -35,4 +35,33 @@ describe("factory ops", () => {
     expect(profile).toMatchObject({ package_manager: "pnpm", frameworks: expect.arrayContaining(["react", "vite"]) });
     expect(await readFile(result.cacheProfile, "utf8")).toContain('"source_repo_path"');
   });
+
+  it("autopilot executes a deterministic low-risk candidate into a patch package", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-autopilot-"));
+    const repo = join(root, "cli"); await mkdir(join(repo, "docs"), { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "cli", bin: { cli: "index.js" }, scripts: { test: "node --test", typecheck: "tsc --noEmit" }, dependencies: { commander: "1" } }));
+    await writeFile(join(repo, "docs", "guide.md"), "# Guide  \n\nSafe text.\n");
+    execFileSync("git", ["init", "-q", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
+    const profiles = join(root, "profiles.json"); const out = join(root, "out");
+    await writeFile(profiles, JSON.stringify({ "cli-tooling-low-risk": { publication_permission: "draft_pr", allowed_actions: ["create_patch_package"], allowed_file_patterns: ["docs/**"] } }));
+    const before = execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" });
+    const result = await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 3, out, profiles, cache: join(root, "cache"), registry: join(root, "missing.json"), autopilot: true });
+    expect(result).toMatchObject({ selectedProfile: "cli-tooling-low-risk", executed: 1, patchPackages: 1, targetUnchanged: true });
+    const candidate = join(out, "projects", result.project, "candidates", "trim-docs-guide-md");
+    expect(await readFile(join(candidate, "patch-package", "patch.diff"), "utf8")).toContain("-# Guide  ");
+    expect(await readFile(join(candidate, "classification.json"), "utf8")).toContain("patch_package_created");
+    expect(execFileSync("git", ["-C", repo, "rev-parse", "HEAD"], { encoding: "utf8" })).toBe(before);
+    expect(execFileSync("git", ["-C", repo, "status", "--porcelain"], { encoding: "utf8" })).toBe("");
+  });
+
+  it("defaults a frontend repository with database indicators to read-only triage", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-smartsql-like-")); const repo = join(root, "app");
+    await mkdir(join(repo, "prisma"), { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "app", scripts: { test: "vitest run" }, dependencies: { react: "1", vite: "1" } }));
+    await writeFile(join(repo, "prisma", "schema.prisma"), "model User { id Int @id }\n");
+    execFileSync("git", ["init", "-q", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
+    const profiles = join(root, "profiles.json"); await writeFile(profiles, JSON.stringify({ "read-only-triage": { publication_permission: "none" } }));
+    const result = await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 1, out: join(root, "out"), profiles, cache: join(root, "cache"), registry: join(root, "missing.json"), autopilot: true });
+    expect(result).toMatchObject({ recommendedProfile: "read-only-triage", selectedProfile: "read-only-triage", executed: 0, targetUnchanged: true });
+  });
 });

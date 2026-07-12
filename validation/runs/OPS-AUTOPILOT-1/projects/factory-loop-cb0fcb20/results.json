@@ -1,0 +1,25 @@
+{
+  "project": "factory-loop-cb0fcb20",
+  "candidates": [
+    {
+      "id": "no-obvious-safe-candidate",
+      "source": "bounded_scan",
+      "title": "No obvious safe candidate in bounded local scan",
+      "risk": "high",
+      "duplicate": false,
+      "recommended_action": "reject_with_evidence",
+      "evidence": "bounded local repository scan"
+    }
+  ],
+  "selected": [
+    "no-obvious-safe-candidate"
+  ],
+  "outcomes": [
+    {
+      "candidate_id": "no-obvious-safe-candidate",
+      "outcome": "rejected_with_evidence",
+      "reason": "Candidate is outside the low-risk authority boundary."
+    }
+  ],
+  "source_unchanged": true
+}
