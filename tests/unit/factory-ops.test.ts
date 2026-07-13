@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, expect, it } from "vitest";
-import { runFactoryOps } from "../../src/run/factory-ops.js";
+import { recordFactoryCandidateVerdict, runFactoryOps } from "../../src/run/factory-ops.js";
 
 describe("factory ops", () => {
   it("discovers bounded candidates and preserves the target", async () => {
@@ -34,6 +34,23 @@ describe("factory ops", () => {
     const profile = JSON.parse(await readFile(join(out, "projects", result.project, "project-profile.json"), "utf8"));
     expect(profile).toMatchObject({ package_manager: "pnpm", frameworks: expect.arrayContaining(["react", "vite"]) });
     expect(await readFile(result.cacheProfile, "utf8")).toContain('"source_repo_path"');
+  });
+
+  it("suppresses only an owner-reviewed candidate fingerprint and permits explicit reopening", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-verdict-")); const repo = join(root, "cli"); await mkdir(join(repo, "scripts"), { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "cli", bin: "scripts/tool.mjs", scripts: { test: "node --test", typecheck: "tsc --noEmit" } }));
+    await writeFile(join(repo, "scripts", "tool.mjs"), "export function run(argv = process.argv.slice(2)) { return argv; }\n");
+    execFileSync("git", ["init", "-q", "-b", "main", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
+    const profiles = join(root, "profiles.json"); const cache = join(root, "cache"); const firstOut = join(root, "batch-2");
+    await writeFile(profiles, JSON.stringify({ "cli-tooling-low-risk": { publication_permission: "draft_pr", allowed_actions: ["create_patch_package"], allowed_file_patterns: ["scripts/tool.mjs"] } }));
+    const candidate = "cli-argument-handling-scripts-tool-mjs";
+    const verdict = await recordFactoryCandidateVerdict({ repo, candidate, verdict: "reviewed_no_change", classification: "false_positive", reason: "Existing behavior matches the owner contract.", checks: ["targeted tests passed"], out: firstOut, cache });
+    expect(verdict).toMatchObject({ candidate, targetUnchanged: true });
+    const suppressed = await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 1, out: join(root, "batch-3"), profiles, cache, registry: join(root, "missing.json"), autopilot: true });
+    expect(suppressed).toMatchObject({ selected: 0, ownerDecisions: 0 });
+    expect(await readFile(join(root, "batch-3", "promotion-report.md"), "utf8")).toContain("reviewed-no-change");
+    const reopened = await runFactoryOps({ repo, profile: "auto-low-risk", batchSize: 1, out: join(root, "reopened"), profiles, cache, registry: join(root, "missing.json"), autopilot: true, reopenCandidates: [candidate] });
+    expect(reopened).toMatchObject({ selected: 1, ownerDecisions: 1 });
   });
 
   it("autopilot executes a deterministic low-risk candidate into a patch package", async () => {
