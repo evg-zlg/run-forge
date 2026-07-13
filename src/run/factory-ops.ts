@@ -4,13 +4,15 @@ import { basename, dirname, join, resolve } from "node:path";
 import { execFileSync } from "node:child_process";
 import { discoverProject } from "./project-discovery.js";
 import { decideCandidateAuthority, patternMatches, type CandidateDecision, type CandidateRisk } from "./candidate-authority.js";
+import { candidateFingerprint, readCandidateHistory, saveCandidateVerdict, type CandidateVerdict } from "./factory-candidate-history.js";
 
 type Project = { path: string; risk: string; default_profile: string };
 type Profile = { publication_permission: string; allowed_actions?: string[]; allowed_file_patterns?: string[]; forbidden_file_patterns?: string[] };
-export type FactoryOpsOptions = { project?: string; repo?: string; profile?: string; batchSize: number; out: string; registry?: string; profiles?: string; cache?: string; autopilot?: boolean };
-type Candidate = { id: string; source: string; title: string; risk: "low" | "medium" | "high"; file?: string; line?: number; duplicate: boolean; recommended_action: string; evidence: string; candidate_risk?: CandidateRisk; action_decision?: CandidateDecision; decision_reason?: string };
-type Outcome = { candidate_id: string; outcome: "draft-pr-created" | "patch-package-ready" | "duplicate-existing" | "needs-owner-decision" | "rejected-risk" | "rejected-policy" | "validation-failed" | "unsafe/not-runnable"; reason: string; patch_package?: string; branch?: string; commit_sha?: string; pr_url?: string };
-type OpsState = { projects?: string[]; project_states?: Record<string, unknown>; candidates_evaluated?: string[]; candidates_executed?: string[]; draft_prs_created?: string[]; patch_packages_created?: string[]; owner_decisions_needed?: string[] };
+export type FactoryOpsOptions = { project?: string; repo?: string; profile?: string; batchSize: number; out: string; registry?: string; profiles?: string; cache?: string; autopilot?: boolean; reopenCandidates?: string[] };
+export type FactoryCandidateVerdictOptions = { repo: string; candidate: string; verdict: "reviewed_no_change"; classification: "false_positive"; reason: string; checks: string[]; out: string; cache?: string };
+type Candidate = { id: string; source: string; title: string; risk: "low" | "medium" | "high"; file?: string; line?: number; duplicate: boolean; recommended_action: string; evidence: string; candidate_risk?: CandidateRisk; action_decision?: CandidateDecision; decision_reason?: string; learned_verdict?: CandidateVerdict };
+type Outcome = { candidate_id: string; outcome: "draft-pr-created" | "patch-package-ready" | "duplicate-existing" | "reviewed-no-change" | "needs-owner-decision" | "rejected-risk" | "rejected-policy" | "validation-failed" | "unsafe/not-runnable"; reason: string; patch_package?: string; branch?: string; commit_sha?: string; pr_url?: string };
+type OpsState = { projects?: string[]; project_states?: Record<string, unknown>; candidates_evaluated?: string[]; candidates_executed?: string[]; candidates_reviewed_no_change?: string[]; draft_prs_created?: string[]; patch_packages_created?: string[]; owner_decisions_needed?: string[] };
 
 export async function runFactoryOps(options: FactoryOpsOptions) {
   if (!Number.isInteger(options.batchSize) || options.batchSize < 1 || options.batchSize > 20) throw new Error("--batch-size must be an integer from 1 to 20.");
@@ -33,6 +35,7 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   const out = resolve(options.out);
   const projectKey = registered && options.project ? options.project : discovered.project_key;
   const projectOut = join(out, "projects", projectKey);
+  const cacheRoot = resolve(options.cache ?? ".runforge-cache/projects");
   await mkdir(projectOut, { recursive: true });
   const previous = await optionalJson<OpsState>(join(out, "ops-state.json")) ?? {};
   const handledIds = [...(previous.candidates_executed ?? []), ...(previous.owner_decisions_needed ?? [])];
@@ -40,6 +43,13 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   const packaged = await existingPackages(projectOut);
   const branchRefs = git(project.path, ["branch", "--all", "--format=%(refname:short)"]).split("\n").filter((x) => /runforge|codex\//i.test(x));
   const candidates = await discover(project.path, seen, packaged);
+  const history = await readCandidateHistory(cacheRoot, projectKey);
+  for (const item of candidates) {
+    if (options.reopenCandidates?.includes(item.id)) continue;
+    const fingerprint = await candidateFingerprint(project.path, item);
+    const verdict = history.find((entry) => entry.candidate_id === item.id && entry.fingerprint === fingerprint && entry.verdict === "reviewed_no_change");
+    if (verdict) { item.duplicate = true; item.learned_verdict = verdict; }
+  }
   const validationConfidence = [...discovered.test_commands, ...discovered.build_commands, ...discovered.typecheck_commands, ...discovered.lint_commands].length > 0 ? "high" as const : "low" as const;
   const publicationActionsCovered = ["promote_patch_package_to_branch", "commit_to_non_main_branch", "push_non_main_branch", "create_draft_pr"].every((action) => profile.allowed_actions?.includes(action));
   for (const item of candidates) {
@@ -48,7 +58,9 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   }
   const selected = candidates.filter((item) => !item.duplicate).sort(candidateRank).slice(0, options.batchSize);
   const outcomes: Outcome[] = [];
-  for (const item of candidates.filter((candidate) => candidate.duplicate)) outcomes.push({ candidate_id: item.id, outcome: "duplicate-existing", reason: "Candidate is present in prior ops state or an existing patch package." });
+  for (const item of candidates.filter((candidate) => candidate.duplicate)) outcomes.push(item.learned_verdict
+    ? { candidate_id: item.id, outcome: "reviewed-no-change", reason: `Stable fingerprint matches owner-reviewed false positive: ${item.learned_verdict.reason}` }
+    : { candidate_id: item.id, outcome: "duplicate-existing", reason: "Candidate is present in prior ops state or an existing patch package." });
   for (const item of selected) outcomes.push(await executeCandidate(project.path, projectOut, item, profile, Boolean(options.autopilot), before, discovered.default_branch));
   for (const item of candidates.filter((candidate) => !candidate.duplicate && !selected.some((selectedItem) => selectedItem.id === candidate.id) && candidate.source === "package_script_gap")) outcomes.push({ candidate_id: item.id, outcome: "needs-owner-decision", reason: "Validation policy is incomplete; available safe checks may continue, but the owner should decide whether this script is required." });
   const after = snapshot(project.path);
@@ -57,6 +69,7 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   const ids = candidates.map((item) => `${projectKey}:${item.id}`);
   const executed = outcomes.filter((x) => ["draft-pr-created", "patch-package-ready"].includes(x.outcome)).map((x) => `${projectKey}:${x.candidate_id}`);
   const decisions = outcomes.filter((x) => x.outcome === "needs-owner-decision").map((x) => `${projectKey}:${x.candidate_id}`);
+  const reviewed = outcomes.filter((x) => x.outcome === "reviewed-no-change").map((x) => `${projectKey}:${x.candidate_id}`);
   const packages = outcomes.flatMap((x) => x.patch_package ? [x.patch_package] : []);
   const nextCommand = `corepack pnpm dev factory ops run --repo ${shellDisplay(project.path)} --profile auto-low-risk --batch-size ${options.batchSize} --autopilot --out ${shellDisplay(options.out)}`;
   const state = {
@@ -64,6 +77,7 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
     project_states: { ...(previous.project_states ?? {}), [projectKey]: { main_head_before: before.head, main_head_after: after.head, status_before: before.status, status_after: after.status, runforge_branch_refs_detected: branchRefs } },
     candidates_evaluated: [...new Set([...(previous.candidates_evaluated ?? []), ...ids])],
     candidates_executed: [...new Set([...(previous.candidates_executed ?? []), ...executed])], draft_prs_created: [...new Set([...(previous.draft_prs_created ?? []), ...outcomes.flatMap((x) => x.pr_url ? [x.pr_url] : [])])],
+    candidates_reviewed_no_change: [...new Set([...(previous.candidates_reviewed_no_change ?? []), ...reviewed])],
     patch_packages_created: [...new Set([...(previous.patch_packages_created ?? []), ...packages])],
     owner_decisions_needed: [...new Set([...(previous.owner_decisions_needed ?? []).filter((id) => !id.startsWith(`${projectKey}:`)), ...decisions])], next_suggested_run: nextCommand
   };
@@ -75,7 +89,6 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   await writeJson(join(projectOut, "authority.json"), { requested_profile: requestedProfile, selected_profile: profileKey, recommendation: discovered.recommended_authority_profile, profile, autopilot: Boolean(options.autopilot) });
   await writeJson(join(projectOut, "results.json"), { project: projectKey, candidates, selected: selected.map((x) => x.id), outcomes, source_unchanged: true });
   await writeFile(join(projectOut, "candidate-selection-report.md"), selectionReport(candidates, selected, outcomes));
-  const cacheRoot = resolve(options.cache ?? ".runforge-cache/projects");
   const cacheProfile = join(cacheRoot, projectKey, "project-profile.json");
   const cached = await optionalJson<{ repo_head?: string; profile_hash?: string }>(cacheProfile);
   const cacheStatus = cached?.repo_head === discovered.repo_head && cached?.profile_hash === discovered.profile_hash ? "verified_current" : cached ? "refreshed" : "created";
@@ -93,6 +106,22 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   await writeFile(join(out, "profile-calibration-report.md"), `# Profile calibration report\n\n- Project: \`${projectKey}\`\n- Project kind: \`${discovered.project_kind}\`\n- Recommended/selected profile: \`${discovered.recommended_authority_profile}\` / \`${profileKey}\`\n- Risk zones remain project-scoped; candidate authority is decided from files, forbidden zones, validation confidence, duplicates, and publication coverage.\n- Draft PR allowed candidates: ${candidates.filter((candidate) => candidate.action_decision === "draft-pr-allowed").length}\n- Rejected or owner-decision candidates: ${candidates.filter((candidate) => ["rejected-risk", "read-only-triage", "needs-owner-decision"].includes(candidate.action_decision ?? "")).length}\n`);
   await writeJson(join(out, "packet-validation.json"), { valid: true, required_top_level_artifacts: ["summary.md", "results.json", "profile-calibration-report.md", "owner-inbox.md", "autopilot-report.md", "ops-state.json", "execution-log.md", "packet-validation.json"], safety: { target_unchanged: true, provider_calls: false, runtime_network: false, target_main_mutation: false } });
   return { out, project: projectKey, recommendedProfile: discovered.recommended_authority_profile, selectedProfile: profileKey, cacheProfile, cacheStatus, candidates: candidates.length, selected: selected.length, executed: executed.length, patchPackages: packages.length, promotions: outcomes.filter((x) => x.outcome === "draft-pr-created").length, draftPrs: outcomes.flatMap((x) => x.pr_url ? [x.pr_url] : []), ownerDecisions: decisions.length, targetUnchanged: true };
+}
+
+export async function recordFactoryCandidateVerdict(options: FactoryCandidateVerdictOptions) {
+  if (!options.reason.trim()) throw new Error("Candidate verdict requires a reason.");
+  if (!options.checks.length) throw new Error("Candidate verdict requires validation evidence.");
+  const repo = resolve(options.repo); await access(repo); const before = snapshot(repo); if (before.status) throw new Error("Target repository must be clean before recording a candidate verdict.");
+  const discovered = await discoverProject(repo); const projectKey = discovered.project_key; const candidate = (await discover(repo, [], [])).find((item) => item.id === options.candidate);
+  if (!candidate) throw new Error(`Candidate '${options.candidate}' is absent from current detector evidence.`);
+  const fingerprint = await candidateFingerprint(repo, candidate); const cacheRoot = resolve(options.cache ?? ".runforge-cache/projects"); const verdict: CandidateVerdict = { candidate_id: candidate.id, fingerprint, verdict: options.verdict, classification: options.classification, reason: options.reason, source_head: before.head, detector_evidence: candidate.evidence, file: candidate.file ?? null, checks: options.checks, recorded_at: new Date().toISOString() };
+  const historyPath = await saveCandidateVerdict(cacheRoot, projectKey, verdict); const out = resolve(options.out); const candidateOut = join(out, "projects", projectKey, "candidates", candidate.id); await mkdir(candidateOut, { recursive: true });
+  await writeJson(join(candidateOut, "owner-verdict.json"), verdict);
+  await writeFile(join(candidateOut, "reviewed-no-change.md"), `# Reviewed no change\n\n- Candidate: \`${candidate.id}\`\n- Verdict: **reviewed_no_change / false_positive**\n- Fingerprint: \`${fingerprint}\`\n- Source HEAD: \`${before.head}\`\n- Detector evidence: \`${candidate.evidence}\`\n- Reason: ${options.reason}\n\n## Checks\n\n${options.checks.map((check) => `- ${check}`).join("\n")}\n\nThe verdict suppresses only this exact fingerprint. File or detector-evidence changes produce a new fingerprint; \`--reopen-candidate ${candidate.id}\` explicitly reopens it. No patch package, branch, commit, push, or PR was created.\n`);
+  const statePath = join(out, "ops-state.json"); const previous = await optionalJson<OpsState>(statePath) ?? {}; const stableId = `${projectKey}:${candidate.id}`;
+  await writeJson(statePath, { ...previous, candidates_reviewed_no_change: [...new Set([...(previous.candidates_reviewed_no_change ?? []), stableId])], owner_decisions_needed: (previous.owner_decisions_needed ?? []).filter((id) => id !== stableId) });
+  const after = snapshot(repo); if (before.head !== after.head || before.status !== after.status) throw new Error("Target repository changed while recording candidate verdict.");
+  return { project: projectKey, candidate: candidate.id, verdict: verdict.verdict, classification: verdict.classification, fingerprint, historyPath, targetUnchanged: true };
 }
 
 async function executeCandidate(repo: string, projectOut: string, item: Candidate, profile: Profile, autopilot: boolean, baseline: { head: string; status: string }, defaultBranch: string): Promise<Outcome> {
