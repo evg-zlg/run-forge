@@ -5,6 +5,7 @@ import { basename, join, resolve } from "node:path";
 export type FactoryOpsInboxOptions = { repos?: string[]; projectSet?: string; out: string; staleDays?: number; now?: Date };
 type Check = { __typename?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string };
 type Pull = { number: number; title: string; url: string; isDraft: boolean; headRefName: string; updatedAt: string; mergeStateStatus: string; state: "OPEN" | "CLOSED" | "MERGED"; statusCheckRollup?: Check[] };
+type PullHistory = Pick<Pull, "headRefName" | "state">;
 type Item = { project: string; kind: "pr" | "branch" | "patch-package"; reference: string; status: string; ci_status: string; risk: string; recommended_owner_action: string; why: string; evidence: string };
 type ProjectResult = { project: string; path: string; exists: boolean; git: boolean; mode: string; head_before?: string; head_after?: string; branch?: string; status_before?: string; status_after?: string; remote?: string; error?: string; items: Item[] };
 
@@ -50,12 +51,17 @@ async function inspectProject(path: string, out: string, now: Date, staleDays: n
     await writeFile(join(dir, "status.md"), `# ${project}\n\n- Path: \`${path}\`\n- Status: ${result.error}\n- Mode: ${mode}\n`); await writeJson(join(dir, "results.json"), result); return result;
   }
   const before = snapshot(path); const remoteUrl = safeGit(path, ["remote", "get-url", "origin"]); const remote = normalizeRemote(remoteUrl);
-  let pulls: Pull[] = []; let error: string | undefined;
-  if (remote) try { pulls = JSON.parse(execFileSync("gh", ["pr", "list", "--repo", remote, "--state", "all", "--limit", "1000", "--json", "number,title,url,isDraft,headRefName,updatedAt,mergeStateStatus,state,statusCheckRollup"], { encoding: "utf8", timeout: 30_000 })); } catch (caught) { error = `GitHub metadata unavailable: ${message(caught)}`; }
+  let pulls: Pull[] = []; let history: PullHistory[] = []; let historyAvailable = !remote; let error: string | undefined;
+  if (remote) {
+    try { history = JSON.parse(execFileSync("gh", ["pr", "list", "--repo", remote, "--state", "all", "--limit", "1000", "--json", "headRefName,state"], { encoding: "utf8", timeout: 30_000 })); historyAvailable = true; }
+    catch (caught) { error = `GitHub PR history unavailable: ${message(caught)}`; }
+    try { pulls = JSON.parse(execFileSync("gh", ["pr", "list", "--repo", remote, "--state", "open", "--limit", "100", "--json", "number,title,url,isDraft,headRefName,updatedAt,mergeStateStatus,state,statusCheckRollup"], { encoding: "utf8", timeout: 30_000 })); }
+    catch (caught) { error = [error, `GitHub open-PR metadata unavailable: ${message(caught)}`].filter(Boolean).join("; "); }
+  }
   const runforgePulls = pulls.filter((pull) => RUNFORGE_REF.test(pull.headRefName));
-  const prBranches = new Set(runforgePulls.map((pull) => pull.headRefName));
+  const prBranches = new Set((historyAvailable ? history : runforgePulls).filter((pull) => RUNFORGE_REF.test(pull.headRefName)).map((pull) => pull.headRefName));
   const items = runforgePulls.filter((pull) => pull.state === "OPEN").map((pull) => classifyPull(project, pull, now, staleDays));
-  const branchNames = liveRunforgeBranches(path).filter((branch) => !prBranches.has(branch));
+  const branchNames = historyAvailable ? liveRunforgeBranches(path).filter((branch) => !prBranches.has(branch)) : [];
   for (const branch of [...new Set(branchNames)]) items.push({ project, kind: "branch", reference: branch, status: "needs owner decision", ci_status: "not-applicable", risk: "unknown", recommended_owner_action: "needs-owner-decision", why: "RunForge branch has no matching PR in the collected GitHub history.", evidence: `${path}#${branch}` });
   for (const packagePath of await findPatchPackages(path)) items.push({ project, kind: "patch-package", reference: packagePath, status: "patch-package-only", ci_status: "not-applicable", risk: "review-required", recommended_owner_action: "needs-owner-decision", why: "Patch package exists without an open RunForge PR association.", evidence: packagePath });
   const after = snapshot(path); const result: ProjectResult = { project, path, exists: true, git: true, mode, head_before: before.head, head_after: after.head, branch: before.branch, status_before: before.status, status_after: after.status, remote, error, items };
