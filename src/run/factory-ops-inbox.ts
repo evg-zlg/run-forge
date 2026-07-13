@@ -4,7 +4,7 @@ import { basename, join, resolve } from "node:path";
 
 export type FactoryOpsInboxOptions = { repos?: string[]; projectSet?: string; out: string; staleDays?: number; now?: Date };
 type Check = { __typename?: string; status?: string; conclusion?: string; state?: string; detailsUrl?: string; targetUrl?: string };
-type Pull = { number: number; title: string; url: string; isDraft: boolean; headRefName: string; updatedAt: string; mergeStateStatus: string; statusCheckRollup?: Check[] };
+type Pull = { number: number; title: string; url: string; isDraft: boolean; headRefName: string; updatedAt: string; mergeStateStatus: string; state: "OPEN" | "CLOSED" | "MERGED"; statusCheckRollup?: Check[] };
 type Item = { project: string; kind: "pr" | "branch" | "patch-package"; reference: string; status: string; ci_status: string; risk: string; recommended_owner_action: string; why: string; evidence: string };
 type ProjectResult = { project: string; path: string; exists: boolean; git: boolean; mode: string; head_before?: string; head_after?: string; branch?: string; status_before?: string; status_after?: string; remote?: string; error?: string; items: Item[] };
 
@@ -51,12 +51,12 @@ async function inspectProject(path: string, out: string, now: Date, staleDays: n
   }
   const before = snapshot(path); const remoteUrl = safeGit(path, ["remote", "get-url", "origin"]); const remote = normalizeRemote(remoteUrl);
   let pulls: Pull[] = []; let error: string | undefined;
-  if (remote) try { pulls = JSON.parse(execFileSync("gh", ["pr", "list", "--repo", remote, "--state", "open", "--limit", "100", "--json", "number,title,url,isDraft,headRefName,updatedAt,mergeStateStatus,statusCheckRollup"], { encoding: "utf8", timeout: 30_000 })); } catch (caught) { error = `GitHub metadata unavailable: ${message(caught)}`; }
+  if (remote) try { pulls = JSON.parse(execFileSync("gh", ["pr", "list", "--repo", remote, "--state", "all", "--limit", "1000", "--json", "number,title,url,isDraft,headRefName,updatedAt,mergeStateStatus,state,statusCheckRollup"], { encoding: "utf8", timeout: 30_000 })); } catch (caught) { error = `GitHub metadata unavailable: ${message(caught)}`; }
   const runforgePulls = pulls.filter((pull) => RUNFORGE_REF.test(pull.headRefName));
   const prBranches = new Set(runforgePulls.map((pull) => pull.headRefName));
-  const items = runforgePulls.map((pull) => classifyPull(project, pull, now, staleDays));
-  const branchNames = safeGit(path, ["branch", "--all", "--format=%(refname:short)"]).split("\n").map((x) => x.replace(/^origin\//, "")).filter((x) => RUNFORGE_REF.test(x) && !prBranches.has(x));
-  for (const branch of [...new Set(branchNames)]) items.push({ project, kind: "branch", reference: branch, status: "needs owner decision", ci_status: "not-applicable", risk: "unknown", recommended_owner_action: "needs-owner-decision", why: "RunForge branch has no matching open PR in the collected metadata.", evidence: `${path}#${branch}` });
+  const items = runforgePulls.filter((pull) => pull.state === "OPEN").map((pull) => classifyPull(project, pull, now, staleDays));
+  const branchNames = liveRunforgeBranches(path).filter((branch) => !prBranches.has(branch));
+  for (const branch of [...new Set(branchNames)]) items.push({ project, kind: "branch", reference: branch, status: "needs owner decision", ci_status: "not-applicable", risk: "unknown", recommended_owner_action: "needs-owner-decision", why: "RunForge branch has no matching PR in the collected GitHub history.", evidence: `${path}#${branch}` });
   for (const packagePath of await findPatchPackages(path)) items.push({ project, kind: "patch-package", reference: packagePath, status: "patch-package-only", ci_status: "not-applicable", risk: "review-required", recommended_owner_action: "needs-owner-decision", why: "Patch package exists without an open RunForge PR association.", evidence: packagePath });
   const after = snapshot(path); const result: ProjectResult = { project, path, exists: true, git: true, mode, head_before: before.head, head_after: after.head, branch: before.branch, status_before: before.status, status_after: after.status, remote, error, items };
   await writeFile(join(dir, "status.md"), renderProject(result)); await writeJson(join(dir, "results.json"), result); return result;
@@ -82,7 +82,13 @@ async function findPatchPackages(repo: string): Promise<string[]> {
 }
 
 function snapshot(repo: string) { return { head: safeGit(repo, ["rev-parse", "HEAD"]), branch: safeGit(repo, ["branch", "--show-current"]) || "DETACHED", status: safeGit(repo, ["status", "--porcelain=v1"]) }; }
-function safeGit(repo: string, args: string[]) { try { return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", timeout: 10_000 }).trim(); } catch { return ""; } }
+function liveRunforgeBranches(repo: string): string[] {
+  const local = safeGit(repo, ["for-each-ref", "--format=%(refname:short)", "refs/heads"]);
+  const remote = safeGit(repo, ["ls-remote", "--heads", "origin", "refs/heads/runforge/*", "refs/heads/codex/runforge*", "refs/heads/runforge-*"])
+    .split("\n").map((line) => line.split(/\s+/)[1]?.replace(/^refs\/heads\//, "") ?? "").join("\n");
+  return [...new Set(`${local}\n${remote}`.split("\n").filter((branch) => RUNFORGE_REF.test(branch)))];
+}
+function safeGit(repo: string, args: string[]) { try { return execFileSync("git", ["-C", repo, ...args], { encoding: "utf8", timeout: 10_000, stdio: ["ignore", "pipe", "pipe"] }).trim(); } catch { return ""; } }
 function normalizeRemote(value: string) { const match = value.match(/(?:github(?:-[^:/]+)?(?:\.com)?)[:/]([^/]+\/[^/.]+)(?:\.git)?$/i); return match?.[1]; }
 function keyFor(path: string) { return basename(path).toLowerCase().replace(/[^a-z0-9-]+/g, "-") || "project"; }
 function compact(item: Item) { return { project: item.project, reference: item.reference, status: item.status, ci_status: item.ci_status, recommended_owner_action: item.recommended_owner_action, evidence: item.evidence }; }
