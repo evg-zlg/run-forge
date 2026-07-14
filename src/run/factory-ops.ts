@@ -33,7 +33,10 @@ export async function runFactoryOps(options: FactoryOpsOptions) {
   const profile = profiles[profileKey];
   if (!profile) throw new Error(`Unknown authority profile '${profileKey}'.`);
   const out = resolve(options.out);
-  const projectKey = registered && options.project ? options.project : discovered.project_key;
+  // Evidence, learned verdicts, and duplicate suppression must use the same
+  // repository-derived identity regardless of whether the caller used a
+  // registry alias or an explicit path.
+  const projectKey = discovered.project_key;
   const projectOut = join(out, "projects", projectKey);
   const cacheRoot = resolve(options.cache ?? ".runforge-cache/projects");
   await mkdir(projectOut, { recursive: true });
