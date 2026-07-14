@@ -62,7 +62,17 @@ function recommendAuthority(kind: ProjectKind) { if (kind === "db-sensitive") re
 function riskZones(risk: ReturnType<typeof riskIndicators>) { const zones = [{ pattern: "auth/**", risk: "auth-sensitive" }, { pattern: "**/auth/**", risk: "auth-sensitive" }, { pattern: "db/**", risk: "db-sensitive" }, { pattern: "**/db/**", risk: "db-sensitive" }, { pattern: "**/prisma/**", risk: "db-sensitive" }, { pattern: "**/migrations/**", risk: "migration-sensitive" }, { pattern: "infra/**", risk: "prod-sensitive" }, { pattern: "deploy/**", risk: "prod-sensitive" }, { pattern: "**/.env*", risk: "prod-sensitive" }, { pattern: "**/secrets/**", risk: "prod-sensitive" }]; return zones.filter((zone) => zone.risk === "auth-sensitive" || Object.values(risk).flat().length > 0); }
 function scriptCommands(packageManager: string, scripts: Record<string, string>, pattern: RegExp) { const runner = packageManager === "unknown" ? "package-manager" : packageManager.replace(/-compatible-unknown$/, ""); return Object.keys(scripts).filter((name) => pattern.test(name)).slice(0, 8).map((name) => `${runner} run ${name}`); }
 function knownCi(files: string[]) { const ci = new Set<string>(); if (files.some((x) => x.startsWith(".github/workflows/"))) ci.add("github-actions"); if (files.some((x) => /(^|\/)\.buildkite(\/|$)|buildkite/i.test(x))) ci.add("buildkite"); if (files.includes(".gitlab-ci.yml")) ci.add("gitlab-ci"); return [...ci]; }
-function defaultBranch(repo: string) { const symbolic = gitOptional(repo, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"]); return symbolic?.replace(/^origin\//, "") ?? "unknown"; }
+function defaultBranch(repo: string) {
+  const current = gitOptional(repo, ["branch", "--show-current"]);
+  if (current && ["main", "master"].includes(current) && branchExists(repo, current)) return current;
+  const symbolic = gitOptional(repo, ["symbolic-ref", "--short", "refs/remotes/origin/HEAD"])?.replace(/^origin\//, "");
+  if (symbolic && branchExists(repo, symbolic)) return symbolic;
+  for (const candidate of ["main", "master"]) if (branchExists(repo, candidate)) return candidate;
+  return current || "unknown";
+}
+function branchExists(repo: string, branch: string) {
+  return Boolean(gitOptional(repo, ["rev-parse", "--verify", `refs/heads/${branch}`]) || gitOptional(repo, ["rev-parse", "--verify", `refs/remotes/origin/${branch}`]));
+}
 function remoteInfo(repo: string) { const url = gitOptional(repo, ["remote", "get-url", "origin"]); if (!url) return null; const clean = url.replace(/^.*@/, "").replace(/^https?:\/\/[^/]+@/, "https://"); const match = clean.match(/^(?:https?:\/\/)?([^/:]+)[:/]([^/]+\/[^/]+?)(?:\.git)?$/); return match ? { host: match[1], repository: match[2] } : null; }
 function confidence(pkg: PackageJson | null, files: string[], commands: Record<string, string[]>) { let score = pkg ? 0.45 : 0.2; if (files.some((x) => /lock/.test(x))) score += 0.15; if (commands.test.length) score += 0.15; if (files.some((x) => /README/i.test(x))) score += 0.1; if (knownCi(files).length) score += 0.1; return Math.min(1, score); }
 function isDiscoveryEvidence(file: string) { return /(^|\/)(package\.json|README[^/]*|CONTRIBUTING[^/]*|Dockerfile[^/]*|pnpm-lock\.yaml|package-lock\.json|yarn\.lock|bun\.lockb?|\.github\/workflows\/[^/]+|\.buildkite\/[^/]+)$/i.test(file); }

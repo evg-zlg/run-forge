@@ -53,6 +53,22 @@ describe("factory ops", () => {
     expect(reopened).toMatchObject({ selected: 1, ownerDecisions: 1 });
   });
 
+  it("uses the canonical project key when a registry alias is supplied", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-alias-verdict-")); const repo = join(root, "cli"); await mkdir(join(repo, "scripts"), { recursive: true });
+    await writeFile(join(repo, "package.json"), JSON.stringify({ name: "stable-cli", bin: "scripts/tool.mjs", scripts: { test: "node --test", typecheck: "tsc --noEmit" } }));
+    await writeFile(join(repo, "scripts", "tool.mjs"), "export function run(argv = process.argv.slice(2)) { return argv; }\n");
+    execFileSync("git", ["init", "-q", "-b", "main", repo]); execFileSync("git", ["-C", repo, "add", "."]); execFileSync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-qm", "init"]);
+    const profiles = join(root, "profiles.json"); const cache = join(root, "cache"); const registry = join(root, "projects.json");
+    await writeFile(profiles, JSON.stringify({ "cli-tooling-low-risk": { publication_permission: "draft_pr", allowed_actions: ["create_patch_package"], allowed_file_patterns: ["scripts/tool.mjs"] } }));
+    await writeFile(registry, JSON.stringify({ friendly: { path: repo, risk: "test", default_profile: "cli-tooling-low-risk" } }));
+    const candidate = "cli-argument-handling-scripts-tool-mjs";
+    const verdict = await recordFactoryCandidateVerdict({ repo, candidate, verdict: "reviewed_no_change", classification: "false_positive", reason: "Existing behavior is intentional.", checks: ["targeted tests passed"], out: join(root, "verdict"), cache });
+    const result = await runFactoryOps({ project: "friendly", batchSize: 1, out: join(root, "run"), profiles, cache, registry, autopilot: true });
+    expect(result).toMatchObject({ project: expect.stringMatching(/^stable-cli-/), selected: 0, ownerDecisions: 0 });
+    expect(result.project).not.toBe("friendly");
+    expect(verdict.project).toBe(result.project);
+  });
+
   it("autopilot executes a deterministic low-risk candidate into a patch package", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-autopilot-"));
     const repo = join(root, "cli"); await mkdir(join(repo, "docs"), { recursive: true }); await mkdir(join(repo, "prisma", "migrations", "001"), { recursive: true });
