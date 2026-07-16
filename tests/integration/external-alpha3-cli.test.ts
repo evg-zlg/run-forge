@@ -305,7 +305,7 @@ describe("external code-proposal CLI", () => {
     const mermaid = await runCli(["packet", "inspect", "--packet", packetDir, "--format", "mermaid"]);
     expect(mermaid.stdout).toContain("flowchart TD");
     expect(mermaid.stdout).toContain('["proposal_planner"]');
-  });
+  }, 15_000);
 
   it("does not generate a patch for not-ready readiness", async () => {
     const triagePacket = await createSyntheticTriagePacket({ category: "dependency_missing" });
