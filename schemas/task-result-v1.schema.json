@@ -1,0 +1,19 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runforge.local/schemas/task-result-v1.schema.json",
+  "title": "RunForge normalized task result v1",
+  "type": "object",
+  "required": ["schemaVersion", "contract", "taskId", "status", "targetRepository", "completedWork", "validation", "artifacts", "ownerGate", "nextAction", "safetyAssertions", "errors", "limitations"],
+  "properties": {
+    "schemaVersion": { "const": 1 }, "contract": { "const": "runforge-task-result" }, "taskId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["completed", "failed", "awaiting_owner_decision", "blocked"] },
+    "targetRepository": { "type": "object", "required": ["path", "initialSha", "finalSha", "changed"], "properties": { "path": { "type": ["string", "null"] }, "initialSha": { "type": ["string", "null"] }, "finalSha": { "type": ["string", "null"] }, "changed": { "type": "boolean" } } },
+    "completedWork": { "type": "array", "items": { "type": "object" } }, "validation": { "type": "array", "items": { "type": "object", "required": ["command"], "properties": { "command": { "type": "string", "minLength": 1 } } } },
+    "artifacts": { "type": "object", "required": ["summary", "results"], "properties": { "summary": { "type": "string", "minLength": 1 }, "results": { "type": "string", "minLength": 1 } } },
+    "git": { "type": "object" },
+    "ownerGate": { "type": "object", "required": ["required", "status"], "properties": { "required": { "type": "boolean" }, "status": { "type": "string", "minLength": 1 } } },
+    "nextAction": { "type": "object", "required": ["recommendation"], "properties": { "recommendation": { "type": "string", "minLength": 1 } } },
+    "safetyAssertions": { "type": "object", "required": ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess", "providerCalls"], "properties": { "targetMainMutation": { "const": false }, "targetMainPush": { "const": false }, "targetPrMerge": { "const": false }, "deploy": { "const": false }, "databaseAccess": { "const": false }, "productionAccess": { "const": false }, "secretAccess": { "const": false }, "providerCalls": { "type": "boolean" } } },
+    "errors": { "type": "array" }, "limitations": { "type": "array" }
+  }
+}

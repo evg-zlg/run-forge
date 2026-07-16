@@ -1,6 +1,7 @@
 import { Command, InvalidArgumentError } from "commander";
 import { renderTaskRunCliSummary, runTaskRunHarness } from "../../run/task-run-harness.js";
 import { continueExternalExecution, recordOwnerDecision, renderExternalExecutionCliSummary, runExternalExecution } from "../../run/external-execution.js";
+import { runTaskSpecFile } from "../../product/task-spec-runner.js";
 
 export function taskRunCommand(): Command {
   const taskRun = new Command("task-run").description("Run a narrow repeatable Agent OS task-run harness.");
@@ -13,8 +14,9 @@ export function taskRunCommand(): Command {
 function startCommand(): Command {
   return new Command("start")
     .description("Create plan, isolated subtask snapshots, reports, checks, summary, and results for one task run.")
-    .requiredOption("--task <text>", "task input accepted by the harness")
-    .requiredOption("--out <path>", "artifact output root, for example validation/runs/TASK-RUN-2")
+    .option("--spec <path>", "TaskSpec v2 JSON; cannot be combined with legacy task/out flags")
+    .option("--task <text>", "legacy task input accepted by the harness")
+    .option("--out <path>", "legacy artifact output root, for example validation/runs/TASK-RUN-2")
     .option("--repo <path>", "external repository to snapshot without mutating the original")
     .option("--command <command>", "external validation command; repeatable", collect, [])
     .option("--tmp-root <path>", "tmp workspace root")
@@ -32,8 +34,17 @@ function startCommand(): Command {
     .option("--target-branch <branch>", "explicit local non-main branch for local branch apply")
     .option("--publication-mode <mode>", "owner-authorized publication; supported: 'draft-pr'", "none")
     .option("--timeout-ms <ms>", "per-command timeout in milliseconds", parsePositiveInteger, 300_000)
-    .action(async (opts) => {
+    .action(async (opts, command: Command) => {
       try {
+        if (opts.spec !== undefined) {
+          const conflicts = command.options.filter((option) => option.attributeName() !== "spec" && command.getOptionValueSource(option.attributeName()) === "cli").map((option) => option.flags);
+          if (conflicts.length) throw new Error(`--spec cannot be combined with legacy options: ${conflicts.join(", ")}. Put execution policy in TaskSpec v2.`);
+          const execution = await runTaskSpecFile(opts.spec as string);
+          console.log(execution.summary);
+          if (!execution.success) process.exitCode = 1;
+          return;
+        }
+        if (opts.task === undefined || opts.out === undefined) throw new Error("Use --spec <path>, or provide both legacy --task and --out.");
         if (opts.repairMode !== undefined) {
           const result = await runExternalExecution({
             task: opts.task as string,

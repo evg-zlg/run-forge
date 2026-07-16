@@ -25,7 +25,7 @@ export function getRunForgeVersionInfo(cwd = runForgeRoot()): RunForgeVersionInf
   };
 }
 
-function runForgeRoot(): string {
+export function runForgeRoot(): string {
   let current = dirname(fileURLToPath(import.meta.url));
   while (dirname(current) !== current) {
     if (existsSync(join(current, "package.json")) && (existsSync(join(current, "src")) || existsSync(join(current, "dist")))) {

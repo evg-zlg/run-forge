@@ -70,6 +70,23 @@ describe("task-run summary renderer", () => {
       safety: { sourceMutationDetected: true, blockingFailures: ["Blocking safety failure: external source mutation detected."] }
     });
   });
+
+  it("exposes the normalized result contract alongside legacy detail", () => {
+    const result = taskRunResult({ runId: "TASK-RESULT-1", task: "Validate safely", outDir: "validation/runs/TASK-RESULT-1" });
+    expect(toJsonResult(result, "STABLE-TASK-ID")).toMatchObject({
+      schemaVersion: 1,
+      contract: "runforge-task-result",
+      taskId: "STABLE-TASK-ID",
+      status: "completed",
+      targetRepository: { changed: false },
+      ownerGate: { required: true, status: "awaiting_owner_decision" },
+      safetyAssertions: { targetMainPush: false, targetPrMerge: false, deploy: false },
+      errors: []
+    });
+    const json = toJsonResult(result, "STABLE-TASK-ID") as { validation: Array<{ command: string; kind: string }> };
+    expect(json.validation.some((item) => item.kind === "task-validation")).toBe(true);
+    expect(json.validation.some((item) => item.kind === "safety-check")).toBe(true);
+  });
 });
 
 describe("task-run review lane", () => {

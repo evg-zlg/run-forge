@@ -1,0 +1,3 @@
+# Doctor JSON v1
+
+`runforge doctor --repo /path --format json` is read-only and returns `ready`, `ready_with_warnings`, or `blocked`. Dirty and detached worktrees are warnings; missing targets, non-Git or unborn targets, unsupported dependency preparation, missing required runtime tools, and unsafe artifact placement are blockers. Docker is required only for `--runtime docker`; when requested, doctor verifies the daemon and selected local image (`runforge:local` by default). GitHub is checked only for `--publication draft-pr`. DB, production, and secrets are never required for basic operation.

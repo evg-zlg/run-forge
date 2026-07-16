@@ -8,11 +8,21 @@ export async function copyTaskRunWorkspace(repoRoot: string, workspace: string, 
     filter: (source) => {
       const path = relative(repoRoot, source);
       if (!path) return true;
+      if (isSensitiveWorkspacePath(path)) return false;
       if (outPath && (path === outPath || path.startsWith(`${outPath}/`))) return false;
       const first = path.split("/")[0];
       return !["node_modules", "dist", ".git", ".runforge", "artifacts", "runforge-artifacts"].includes(first!);
     }
   });
+}
+
+export function isSensitiveWorkspacePath(path: string): boolean {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  const name = parts.at(-1) ?? "";
+  if (parts.some((part) => [".ssh", ".gnupg", ".kube", ".azure"].includes(part))) return true;
+  if (parts.includes(".aws") && name === "credentials") return true;
+  if (name === ".env" || (name.startsWith(".env.") && name !== ".env.example")) return true;
+  return [".npmrc", ".pypirc", ".netrc", ".git-credentials", "id_rsa", "id_ed25519"].includes(name);
 }
 
 export async function prepareUnpreparedExternalWorkspace(sourceRepo: string, workspace: string): Promise<void> {

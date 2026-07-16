@@ -83,6 +83,7 @@ function blockedExternalCommandReason(command: string): string | undefined {
   if (/\bgit\s+push\b/.test(command)) return "Blocked external check command: git push is not allowed.";
   if (/\bgit\s+merge\b/.test(command)) return "Blocked external check command: git merge is not allowed.";
   if (/\bdeploy\b/.test(command)) return "Blocked external check command: deploy commands are not allowed.";
+  if (/\bprintenv\b|\$(?:\{|)[A-Za-z_]*(?:TOKEN|SECRET|PASSWORD|CREDENTIAL|PRIVATE_KEY|API_KEY)/i.test(command)) return "Blocked external check command: environment credentials must not be read.";
   return undefined;
 }
 

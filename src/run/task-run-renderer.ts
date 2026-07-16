@@ -1,6 +1,7 @@
 import type { Subtask, TaskRunResult, TaskRunRuntime } from "./task-run-harness.js";
 import type { PlannedSubtask, TaskRunPlan } from "./task-run-planner.js";
 import { reviewSafety } from "./task-run-review-safety.js";
+import { taskRunResultContract } from "../product/task-result-contract.js";
 
 export function renderPlan(
   runId: string,
@@ -256,8 +257,9 @@ function taskRunCommand(result: TaskRunResult): string {
   return `corepack pnpm dev task-run start --task "${result.task}" --out ${result.outDir}${repo}${runtime}${preparation}${commands}${check}${delegated}`;
 }
 
-export function toJsonResult(result: TaskRunResult): unknown {
+export function toJsonResult(result: TaskRunResult, taskId = result.runId): unknown {
   return {
+    ...taskRunResultContract(result, taskId),
     runId: result.runId,
     date: new Date().toISOString().slice(0, 10),
     taskAccepted: result.task,

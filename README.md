@@ -1,10 +1,28 @@
 # RunForge
 
-RunForge is a local agentic engineering harness for turning an engineering task into a reviewable artifact packet. The current MVP demonstrates one safe loop: collect task context, capture deterministic check evidence, generate a proposal-only patch, record safety decisions, and hand the result to a human reviewer.
+RunForge is a local CLI and artifact-first engineering harness for turning an engineering task into a reviewable result. It is not a remote service. Its official external workflow is `onboarding` → project-aware `doctor` → TaskSpec v2 → `task-run start` → `results.json` and `summary.md` → an explicit owner gate when needed.
 
 It solves the "what did the agent see, do, and propose?" problem for local code work. Instead of hiding work inside an autonomous run, RunForge writes the task, context, command evidence, trajectory, safety report, patch proposal, and human review packet to disk so a person can inspect the decision trail before anything is applied.
 
-RunForge is not a SaaS product, dashboard, remote compute system, queue, provider platform, LLM coding agent, auto-PR tool, auto-merge tool, or automatic patch applier. The MVP is local, deterministic, proposal-only, and human-gated.
+RunForge is not a public HTTP API, remote daemon, MCP server, watched queue, SaaS service, automatic merge system, or deploy service. Legacy `run`, `external`, and flag-based `task-run` surfaces remain compatible, but TaskSpec v2 is the recommended new-session intake.
+
+## Quick start for a new session
+
+With the installed CLI, run:
+
+```bash
+runforge onboarding --format json
+runforge onboarding --repo /absolute/path/to/project --format json
+runforge doctor --repo /absolute/path/to/project --runtime docker --format json
+runforge task-run start --spec /absolute/path/to/task.runforge.json
+```
+
+From this checkout, replace `runforge` with `corepack pnpm dev`. Start with [docs/GETTING_STARTED_FOR_AGENTS.md](docs/GETTING_STARTED_FOR_AGENTS.md); the TaskSpec schema is [schemas/task-spec-v2.schema.json](schemas/task-spec-v2.schema.json). Every TaskSpec run has two official entry artifacts at its configured artifact root:
+
+- `results.json` — normalized, machine-readable task result v1;
+- `summary.md` — concise human result and next action.
+
+Onboarding and doctor are read-only. `runforge onboarding --repo /path --write-project-file` is the explicit exception: it creates an uncommitted `RUNFORGE.md`, refuses to overwrite one, and does not change Git history.
 
 ## Alpha Trial
 
@@ -311,6 +329,9 @@ It does not prove hosted execution or autonomous delivery. There is no LLM/API c
 
 ````bash
 pnpm dev doctor
+pnpm dev onboarding --format json
+pnpm dev doctor --repo /absolute/path/to/project --runtime docker --format json
+pnpm dev task-run start --spec /absolute/path/to/task.runforge.json
 pnpm dev init --safe
 pnpm dev run --task context-pack --repo ./fixtures/repos/sample-js --goal "Prepare local context" --out ./artifacts/rails-context
 pnpm dev external docs-proposal --repo ./tests/fixtures/external-docs-repo --target README.md --evidence README.md --evidence package.json --anchor "npm run dev\n```" --insert "\n\nFor the stable frontend dev path, use the existing root command:\n\n```bash\nnpm run dev:stable\n```" --out ./artifacts/runs/external-docs-cli-demo
@@ -322,7 +343,7 @@ pnpm dogfood
 ````
 
 The default provider is deterministic and local. `openai-compatible` is only a skeleton and is never required for tests.
-RunSpec files are documented in [docs/runspec.md](docs/runspec.md), with examples in [examples/runspecs](examples/runspecs).
+TaskSpec v2 is the recommended external intake and is documented in [docs/GETTING_STARTED_FOR_AGENTS.md](docs/GETTING_STARTED_FOR_AGENTS.md), with its schema in [schemas/task-spec-v2.schema.json](schemas/task-spec-v2.schema.json). RunSpec v1 is a supported legacy surface documented in [docs/runspec.md](docs/runspec.md).
 
 ## Safety
 

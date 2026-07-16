@@ -220,7 +220,7 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "--mount",
     `type=bind,src=${request.cwd},dst=/workspace${writableWorkspace ? "" : ",readonly"}`,
     ...(writableWorkspace ? ["--mount", `type=bind,src=${request.cwd}/.runforge-tmp,dst=/runforge-tmp`] : []),
-    ...(readonlySource ? ["--mount", `type=bind,src=${readonlySource},dst=/source,readonly`] : []),
+    ...(readonlySource ? ["--mount", `type=bind,src=${readonlySource},dst=/source/node_modules,readonly`] : []),
     "--workdir",
     "/workspace",
     "--entrypoint",
