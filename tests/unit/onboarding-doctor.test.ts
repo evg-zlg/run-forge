@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { buildDoctorReport } from "../../src/product/doctor.js";
@@ -16,7 +16,10 @@ describe("onboarding and doctor contracts", () => {
     const report = await buildOnboardingReport({});
     expect(report).toMatchObject({ schemaVersion: 1, product: "RunForge", transport: "local-cli", entrypoint: "runforge" });
     expect(report.commands.submitTask).toContain("task-run start --spec");
-    expect(report.installation.root).toContain("RunForge-worktrees/onboarding-1");
+    expect(isAbsolute(report.installation.root)).toBe(true);
+    expect(JSON.parse(await readFile(join(report.installation.root, "package.json"), "utf8"))).toMatchObject({
+      name: "runforge",
+    });
     expect(report.unsupportedInterfaces).toContain("HTTP API");
     expect(renderOnboarding(report)).toContain("only when results.json reports awaiting_owner_decision");
     expect(JSON.stringify(report)).not.toMatch(/(ghp_|BEGIN PRIVATE KEY|password)/i);
