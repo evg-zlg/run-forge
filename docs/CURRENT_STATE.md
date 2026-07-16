@@ -1,8 +1,8 @@
 # RunForge Current State
 
-Status date: 2026-07-11.
+Status date: 2026-07-16.
 
-RunForge is currently a local, deterministic, artifact-first task-run harness. PRs #47 through #52 are merged. External validation, explicit runtime preparation, disposable repair, artifact-contained apply, real owner decisions, delegated authority, local non-main branch preparation, and draft-only publication are proven. REAL-USE-CAMPAIGN-1 adds a reusable bounded code-repair executor while continuing to prohibit target merge and deploy.
+RunForge is a self-discoverable local CLI, not a remote service. Its recommended public path is versioned onboarding JSON, project-aware doctor JSON, TaskSpec v2 intake, and normalized `results.json`/`summary.md`. Existing RunSpec, `run`, `external`, factory, and flag-based task-run surfaces remain supported as legacy/specialized interfaces. External validation, explicit runtime preparation, disposable repair, artifact-contained apply, real owner decisions, delegated authority, local non-main branch preparation, and draft-only publication continue to prohibit target merge and deploy.
 
 ## Current North Star
 
@@ -25,6 +25,11 @@ task
 
 ## Existing Capabilities
 
+- `runforge onboarding [--repo] [--format json]` publishes the stable discovery contract, supported/unsupported interfaces, safe defaults, commands, and next action.
+- `runforge doctor --repo ... --format json` distinguishes blockers, warnings, and optional integrations while reporting Git state, package manager, validation discovery, and safe artifact placement.
+- TaskSpec v2 provides strict, deterministic, redacted task intake with unknown-field/version/path validation and preserves legacy task-run flags.
+- TaskSpec runs standardize `summary.md` and normalized task-result-v1 `results.json` as the only required entry artifacts.
+- Explicit `--write-project-file` creates a compact, uncommitted `RUNFORGE.md`; discovery remains read-only by default.
 - Repeatable `task-run start` harness for local providerless task-runs.
 - Deterministic task classification for docs review, code inspection, and general review.
 - Planner/subtask artifacts, disposable workspace snapshots, executor logs, review artifacts, summary, and results.

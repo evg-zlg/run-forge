@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from "node:fs/promises";
+import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import { createExecutorRequest, DockerShellExecutor, LocalShellExecutor, type ExecutorResult, type TaskRunExecutor } from "./task-run-executor.js";
 import { ownerConclusion, recommendedNextStep, remainingGaps } from "./task-run-owner-decision.js";
@@ -22,10 +22,14 @@ import {
 } from "./task-run-reviewer.js";
 import { renderBrief, renderPlan, renderReport, renderSummary, toJsonResult, validateSummaryFreshness } from "./task-run-renderer.js";
 import { copyTaskRunWorkspace, prepareUnpreparedExternalWorkspace, taskRunSlug } from "./task-run-workspace.js";
+import { validateTaskResultContract } from "../product/task-result-contract.js";
 
 export type TaskRunRuntime = "local" | "docker";
 
 type TaskRunInput = {
+  taskId?: string;
+  executionRoot?: string;
+  forceExternal?: boolean;
   task: string;
   out: string;
   tmpRoot?: string;
@@ -97,9 +101,9 @@ export type TaskRunResult = {
   checks: CheckResult[];
 };
 export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunResult> {
-  const repoRoot = process.cwd();
+  const repoRoot = resolve(input.executionRoot ?? process.cwd());
   const sourceRoot = input.repo ? resolve(input.repo) : repoRoot;
-  const external = sourceRoot !== repoRoot;
+  const external = input.forceExternal === true || sourceRoot !== repoRoot;
   const outDir = resolve(repoRoot, input.out);
   const runId = basename(outDir);
   const runtime = input.runtime ?? "local";
@@ -124,8 +128,10 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
     ]);
   }
   const sourceBefore = external ? await inspectRepoState(sourceRoot) : null;
-  const readonlySource = external && prepareRuntime === "none" ? sourceBefore?.path : undefined;
-  const executor: TaskRunExecutor = runtime === "docker" ? new DockerShellExecutor(repoRoot, dockerImage, external, readonlySource) : new LocalShellExecutor(repoRoot);
+  const readonlyDependencies = external && prepareRuntime === "none" && sourceBefore?.path
+    ? await access(join(sourceBefore.path, "node_modules")).then(() => join(sourceBefore.path, "node_modules"), () => undefined)
+    : undefined;
+  const executor: TaskRunExecutor = runtime === "docker" ? new DockerShellExecutor(repoRoot, dockerImage, external, readonlyDependencies) : new LocalShellExecutor(repoRoot);
 
   await rm(outDir, { recursive: true, force: true });
   await rm(tmpRoot, { recursive: true, force: true });
@@ -286,7 +292,9 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
 
   const summary = renderSummary(result);
   validateSummaryFreshness(result, summary);
-  await writeFile(resultsPath, JSON.stringify(toJsonResult(result), null, 2) + "\n", "utf8");
+  const resultDocument = toJsonResult(result, input.taskId);
+  validateTaskResultContract(resultDocument);
+  await writeFile(resultsPath, JSON.stringify(resultDocument, null, 2) + "\n", "utf8");
   await writeFile(summaryPath, summary, "utf8");
   if (external) await writeExternalReadinessArtifacts(result, repoRoot);
   return result;

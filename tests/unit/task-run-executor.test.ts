@@ -56,7 +56,7 @@ describe("DockerShellExecutor policy", () => {
     expect(args.find((item) => item.startsWith("type=bind"))).not.toContain("readonly");
   });
 
-  it("preserves no-preparation triage with a read-only source mount", async () => {
+  it("preserves no-preparation triage with a node_modules-only read-only mount", async () => {
     const root = await tempRoot();
     const request = createExecutorRequest({
       runId: "EXTERNAL-RUN-2",
@@ -69,7 +69,8 @@ describe("DockerShellExecutor policy", () => {
 
     const args = dockerRunArgs(request, "runforge:local", "runforge-test", true, "/external/source");
 
-    expect(args).toContain("type=bind,src=/external/source,dst=/source,readonly");
+    expect(args).toContain("type=bind,src=/external/source,dst=/source/node_modules,readonly");
+    expect(args).not.toContain("type=bind,src=/external/source,dst=/source,readonly");
     expect(args).toEqual(expect.arrayContaining(["--network", "none"]));
   });
 });

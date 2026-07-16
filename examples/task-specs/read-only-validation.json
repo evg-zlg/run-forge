@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 2,
+  "taskId": "EXAMPLE-READONLY-1",
+  "task": {
+    "text": "Validate the repository without changing it.",
+    "goal": "Produce reproducible readiness evidence.",
+    "acceptanceCriteria": ["All discovered validation commands run", "Target HEAD and worktree remain unchanged"]
+  },
+  "target": { "repository": "/absolute/path/to/project" },
+  "runtime": { "preference": "docker", "prepareDependencies": true },
+  "validation": { "mode": "auto", "commands": [] },
+  "authority": { "profile": "read-only", "allowProviderCalls": false },
+  "git": { "publication": "none" },
+  "merge": { "policy": "never" },
+  "deploy": { "policy": "never" },
+  "ownerGate": { "policy": "stop-and-report" }
+}

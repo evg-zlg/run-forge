@@ -1,0 +1,31 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runforge.local/schemas/doctor-v1.schema.json",
+  "title": "RunForge doctor v1",
+  "type": "object", "additionalProperties": false,
+  "required": ["schemaVersion", "product", "runforgeVersion", "status", "runtime", "targetRepository", "artifactRoot", "integrations", "checks", "nextAction"],
+  "properties": {
+    "schemaVersion": { "const": 1 }, "product": { "const": "RunForge" }, "runforgeVersion": { "$ref": "#/$defs/string" },
+    "status": { "enum": ["ready", "ready_with_warnings", "blocked"] },
+    "runtime": { "type": "object", "additionalProperties": false, "required": ["node", "pnpm", "docker", "os", "insideContainer"], "properties": { "node": { "$ref": "#/$defs/string" }, "pnpm": { "type": ["string", "null"] }, "docker": { "type": ["string", "null"] }, "os": { "$ref": "#/$defs/string" }, "insideContainer": { "type": "boolean" } } },
+    "targetRepository": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/project" }] },
+    "artifactRoot": { "type": "object", "additionalProperties": false, "required": ["path", "outsideTargetRepository"], "properties": { "path": { "type": ["string", "null"] }, "outsideTargetRepository": { "type": ["boolean", "null"] } } },
+    "integrations": { "type": "object", "additionalProperties": false, "required": ["dockerRequired", "githubRequired", "databaseRequired", "productionRequired", "secretsRequired"], "properties": { "dockerRequired": { "type": "boolean" }, "githubRequired": { "type": "boolean" }, "databaseRequired": { "const": false }, "productionRequired": { "const": false }, "secretsRequired": { "const": false } } },
+    "checks": { "type": "array", "minItems": 1, "items": { "type": "object", "additionalProperties": false, "required": ["id", "status", "required", "summary"], "properties": { "id": { "$ref": "#/$defs/string" }, "status": { "enum": ["passed", "warning", "blocked", "not_required"] }, "required": { "type": "boolean" }, "summary": { "$ref": "#/$defs/string" }, "details": { "type": "object" } } } },
+    "nextAction": { "type": "object", "additionalProperties": false, "required": ["command", "reason"], "properties": { "command": { "type": ["string", "null"] }, "reason": { "$ref": "#/$defs/string" } } }
+  },
+  "$defs": {
+    "string": { "type": "string", "minLength": 1 },
+    "project": {
+      "type": "object", "additionalProperties": false,
+      "required": ["requestedPath", "path", "exists", "isGitRepository", "head", "branch", "detachedHead", "worktree", "defaultBranch", "packageManager", "dependencyPreparation", "validationCommands"],
+      "properties": {
+        "requestedPath": { "$ref": "#/$defs/string" }, "path": { "type": ["string", "null"] }, "exists": { "type": "boolean" }, "isGitRepository": { "type": "boolean" },
+        "head": { "type": ["string", "null"] }, "branch": { "type": ["string", "null"] }, "detachedHead": { "type": "boolean" }, "defaultBranch": { "type": ["string", "null"] }, "packageManager": { "type": ["string", "null"] },
+        "worktree": { "type": "object", "additionalProperties": false, "required": ["clean", "summary"], "properties": { "clean": { "type": ["boolean", "null"] }, "summary": { "type": ["string", "null"] } } },
+        "dependencyPreparation": { "type": "object", "additionalProperties": false, "required": ["supported", "lockfile", "command"], "properties": { "supported": { "type": "boolean" }, "lockfile": { "type": ["string", "null"] }, "command": { "type": ["string", "null"] } } },
+        "validationCommands": { "type": "array", "items": { "$ref": "#/$defs/string" } }
+      }
+    }
+  }
+}

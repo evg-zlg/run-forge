@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import { cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { promisify } from "node:util";
+import { isSensitiveWorkspacePath } from "./task-run-workspace.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -164,9 +165,9 @@ async function copyExternalWorkspace(repo: string, workspace: string): Promise<v
     filter: (source) => {
       const path = relative(repo, source);
       if (!path) return true;
+      if (isSensitiveWorkspacePath(path)) return false;
       const first = path.split("/")[0];
       if ([".git", "node_modules", "dist", "coverage", ".runforge", "artifacts"].includes(first!)) return false;
-      if (first === ".env" || (first?.startsWith(".env.") && first !== ".env.example")) return false;
       return true;
     }
   });
