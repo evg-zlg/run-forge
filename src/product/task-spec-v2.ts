@@ -5,17 +5,20 @@ import { loadCodeRepairPlan } from "../run/code-repair.js";
 import { defaultArtifactRoot, inspectProject, isPathInside } from "./project-inspection.js";
 
 export const taskSpecSchemaVersion = 2;
-const topKeys = ["schemaVersion", "taskId", "task", "target", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
+const topKeys = ["schemaVersion", "taskId", "task", "target", "execution", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
+
+export type TaskExecutionMode = "inspection" | "implementation" | "validation" | "repair";
 
 export type TaskSpecV2 = {
   schemaVersion: 2;
   taskId: string;
   task: { text: string; goal: string; acceptanceCriteria: string[] };
-  target: { repository: string; workingDirectory: string };
+  target: { repository: string; workingDirectory: string; expectedSha: string };
+  execution: { mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number };
   discovery: { policy: "auto" | "explicit" };
-  runtime: { preference: "docker" | "local"; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" };
+  runtime: { preference: "docker" | "local"; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" | "allowed" };
   validation: { mode: "auto" | "explicit"; commands: string[] };
-  authority: { profile: "read-only" | "bounded-implementation"; envelopeFile: string | null; forbiddenAreas: string[]; allowProviderCalls: false };
+  authority: { profile: "read-only" | "bounded-implementation"; envelopeFile: string | null; forbiddenAreas: string[]; allowProviderCalls: boolean; allowNetwork: boolean };
   git: { publication: "none" | "draft-pr"; branch: string | null };
   merge: { policy: "never" };
   deploy: { policy: "never" };
@@ -45,7 +48,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const task = object(raw.task, "task must be an object.");
   rejectUnknown(task, ["text", "goal", "acceptanceCriteria"], "task");
   const target = object(raw.target, "target must be an object.");
-  rejectUnknown(target, ["repository", "workingDirectory"], "target");
+  rejectUnknown(target, ["repository", "workingDirectory", "expectedSha"], "target");
   const repositoryInput = string(target.repository, "target.repository");
   const repository = resolve(baseDir, repositoryInput);
   const workingDirectory = optionalString(target.workingDirectory, "target.workingDirectory") ?? ".";
@@ -53,6 +56,10 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   if (!inspection.exists) throw new Error(`target.repository does not exist: ${repository}`);
   if (!inspection.isGitRepository || !inspection.path) throw new Error(`target.repository must be a Git repository: ${repository}`);
   if (!inspection.head) throw new Error(`target.repository must have a valid committed HEAD: ${repository}`);
+  const expectedSha = optionalString(target.expectedSha, "target.expectedSha") ?? inspection.head;
+  if (expectedSha !== inspection.head) throw new Error(`target.expectedSha mismatch: expected ${expectedSha}, current ${inspection.head}.`);
+  const executionRaw = optionalObject(raw.execution, "execution");
+  rejectUnknown(executionRaw, ["mode", "maxRepairIterations", "timeoutMs", "maxChangedFiles", "maxPatchBytes", "maxProviderTokens"], "execution");
   const artifactsRaw = optionalObject(raw.artifacts, "artifacts");
   rejectUnknown(artifactsRaw, ["root", "resultFormat"], "artifacts");
   const artifactInput = optionalString(artifactsRaw.root, "artifacts.root") ?? join(defaultArtifactRoot(inspection.path), taskId);
@@ -73,7 +80,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const runtimeRaw = optionalObject(raw.runtime, "runtime");
   rejectUnknown(runtimeRaw, ["preference", "dockerImage", "prepareDependencies", "dependencyPreparation", "externalNetwork"], "runtime");
   const authorityRaw = optionalObject(raw.authority, "authority");
-  rejectUnknown(authorityRaw, ["profile", "envelopeFile", "forbiddenAreas", "allowProviderCalls"], "authority");
+  rejectUnknown(authorityRaw, ["profile", "envelopeFile", "forbiddenAreas", "allowProviderCalls", "allowNetwork"], "authority");
   const gitRaw = optionalObject(raw.git, "git");
   rejectUnknown(gitRaw, ["publication", "branch"], "git");
   const mergeRaw = optionalObject(raw.merge, "merge");
@@ -87,6 +94,9 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const profile = choice(authorityRaw.profile ?? "read-only", ["read-only", "bounded-implementation"], "authority.profile");
   const forbiddenAreas = strings(authorityRaw.forbiddenAreas ?? defaultForbidden(), "authority.forbiddenAreas");
   const repairMode = choice(repairRaw.mode ?? "none", ["none", "disposable", "code"], "repair.mode");
+  const inferredMode: TaskExecutionMode = profile === "bounded-implementation" ? (repairMode === "none" ? "implementation" : "repair") : "validation";
+  const executionMode = choice(executionRaw.mode ?? inferredMode, ["inspection", "implementation", "validation", "repair"], "execution.mode");
+  if (["implementation", "repair"].includes(executionMode) !== (profile === "bounded-implementation")) throw new Error(`execution.mode='${executionMode}' is inconsistent with authority.profile='${profile}'.`);
   const authorityFile = authorityRaw.envelopeFile === undefined || authorityRaw.envelopeFile === null ? null : resolve(baseDir, string(authorityRaw.envelopeFile, "authority.envelopeFile"));
   const repairPlan = repairRaw.plan === undefined || repairRaw.plan === null ? null : resolve(baseDir, string(repairRaw.plan, "repair.plan"));
   if (runtimeRaw.prepareDependencies !== undefined && runtimeRaw.dependencyPreparation !== undefined) throw new Error("Use runtime.dependencyPreparation or legacy runtime.prepareDependencies, not both.");
@@ -103,21 +113,25 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   if (repairPlan) await assertRegularFile(repairPlan, "repair.plan");
   const repairFiles = repairMode === "code" && repairPlan ? (await loadCodeRepairPlan(repairPlan)).allowed_files : repairMode === "disposable" ? ["README.md"] : [];
   assertRepairOutsideForbiddenAreas(repairFiles, forbiddenAreas);
-  if (authorityRaw.allowProviderCalls !== undefined && authorityRaw.allowProviderCalls !== false) throw new Error("authority.allowProviderCalls currently supports only false.");
+  const allowProviderCalls = authorityRaw.allowProviderCalls === undefined ? false : boolean(authorityRaw.allowProviderCalls, "authority.allowProviderCalls");
+  const allowNetwork = authorityRaw.allowNetwork === undefined ? false : boolean(authorityRaw.allowNetwork, "authority.allowNetwork");
+  const externalNetwork = choice(runtimeRaw.externalNetwork ?? "denied", ["denied", "dependency-preparation-only", "allowed"], "runtime.externalNetwork");
+  if (externalNetwork === "allowed" && !allowNetwork) throw new Error("runtime.externalNetwork='allowed' requires authority.allowNetwork=true.");
   const spec: TaskSpecV2 = {
     schemaVersion: 2,
     taskId,
     task: { text: string(task.text, "task.text"), goal: string(task.goal, "task.goal"), acceptanceCriteria: strings(task.acceptanceCriteria, "task.acceptanceCriteria", true) },
-    target: { repository: await realpath(inspection.path), workingDirectory: inspection.workingDirectory ?? "." },
+    target: { repository: await realpath(inspection.path), workingDirectory: inspection.workingDirectory ?? ".", expectedSha },
+    execution: { mode: executionMode, maxRepairIterations: integer(executionRaw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(executionRaw.timeoutMs, "execution.timeoutMs", 1_000, 1_800_000, 300_000), maxChangedFiles: integer(executionRaw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(executionRaw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: integer(executionRaw.maxProviderTokens, "execution.maxProviderTokens", 1_000, 200_000, 30_000) },
     discovery: { policy: choice(discoveryRaw.policy ?? "auto", ["auto", "explicit"], "discovery.policy") },
     runtime: {
       preference: choice(runtimeRaw.preference ?? "docker", ["docker", "local"], "runtime.preference"),
       dockerImage: optionalString(runtimeRaw.dockerImage, "runtime.dockerImage") ?? "runforge:local",
       dependencyPreparation,
-      externalNetwork: choice(runtimeRaw.externalNetwork ?? "denied", ["denied", "dependency-preparation-only"], "runtime.externalNetwork")
+      externalNetwork
     },
     validation: { mode: validationMode, commands },
-    authority: { profile, envelopeFile: authorityFile, forbiddenAreas, allowProviderCalls: false },
+    authority: { profile, envelopeFile: authorityFile, forbiddenAreas, allowProviderCalls, allowNetwork },
     git: { publication, branch: nullableString(gitRaw.branch, "git.branch") },
     merge: { policy: choice(mergeRaw.policy ?? "never", ["never"], "merge.policy") },
     deploy: { policy: choice(deployRaw.policy ?? "never", ["never"], "deploy.policy") },
@@ -139,6 +153,7 @@ function string(value: unknown, name: string): string { if (typeof value !== "st
 function optionalString(value: unknown, name: string): string | undefined { return value === undefined ? undefined : string(value, name); }
 function nullableString(value: unknown, name: string): string | null { return value === undefined || value === null ? null : string(value, name); }
 function boolean(value: unknown, name: string): boolean { if (typeof value !== "boolean") throw new Error(`${name} must be boolean.`); return value; }
+function integer(value: unknown, name: string, min: number, max: number, fallback: number): number { const parsed = value === undefined ? fallback : value; if (!Number.isInteger(parsed) || Number(parsed) < min || Number(parsed) > max) throw new Error(`${name} must be an integer from ${min} to ${max}.`); return Number(parsed); }
 function strings(value: unknown, name: string, nonEmpty = false): string[] { if (!Array.isArray(value) || (nonEmpty && !value.length) || value.some((item) => typeof item !== "string" || !item.trim())) throw new Error(`${name} must be ${nonEmpty ? "a non-empty " : "an "}array of non-empty strings.`); return value.map((item) => item.trim()); }
 function choice<T extends string>(value: unknown, choices: readonly T[], name: string): T { if (typeof value !== "string" || !choices.includes(value as T)) throw new Error(`${name} must be one of: ${choices.join(", ")}.`); return value as T; }
 function rejectUnknown(value: Record<string, unknown>, allowed: string[], name: string): void { const unknown = Object.keys(value).filter((key) => !allowed.includes(key)); if (unknown.length) throw new Error(`${name} contains unknown field(s): ${unknown.join(", ")}.`); }
@@ -191,7 +206,7 @@ function redactValue(value: unknown): unknown {
   }
   if (Array.isArray(value)) return value.map(redactValue);
   if (typeof value === "object" && value !== null) {
-    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /token|password|secret|credential/i.test(key) ? "[REDACTED]" : redactValue(item)]));
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, /^(?:password|passwd|secret|credential|api[_-]?key|access[_-]?token|auth[_-]?token)$/i.test(key) ? "[REDACTED]" : redactValue(item)]));
   }
   return value;
 }

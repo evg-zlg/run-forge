@@ -8,6 +8,8 @@ export const defaultMaxRequestBytes = 1_048_576;
 export type ControlAuthority = {
   inspect: boolean;
   implementation: boolean;
+  providerCalls?: boolean;
+  network?: boolean;
   localBranch: boolean;
   localCommit: boolean;
   remotePush: boolean;
@@ -108,15 +110,16 @@ export type ControlTaskRecord = {
     lastRetry: { sourceExecutionId: string; executionId: string; requestedAt: string } | null;
   };
   continuation: { schemaVersion: 1; state: "none" | "available" | "consumed" | "unrecoverable"; decisionId: string | null; executionId: string | null; sourceExecutionId: string | null };
+  selection?: { requestedMode: string; selectedExecutor: string | null; selectionReason: string; rejectedAlternatives: Array<{ id: string; reason: string }>; provider: string | null; model: string | null };
 };
 
 export function defaultAuthority(value: unknown): ControlAuthority {
   const input = asObject(value, "authority", true);
-  const allowed = ["inspect", "implementation", "localBranch", "localCommit", "remotePush", "draftPublication", "merge", "deploy"];
+  const allowed = ["inspect", "implementation", "providerCalls", "network", "localBranch", "localCommit", "remotePush", "draftPublication", "merge", "deploy"];
   rejectUnknown(input, allowed, "authority");
   const flag = (name: string, fallback: boolean) => input[name] === undefined ? fallback : boolean(input[name], `authority.${name}`);
   const authority = {
-    inspect: flag("inspect", true), implementation: flag("implementation", false), localBranch: flag("localBranch", false),
+    inspect: flag("inspect", true), implementation: flag("implementation", false), providerCalls: flag("providerCalls", false), network: flag("network", false), localBranch: flag("localBranch", false),
     localCommit: flag("localCommit", false), remotePush: flag("remotePush", false), draftPublication: flag("draftPublication", false),
     merge: flag("merge", false), deploy: flag("deploy", false)
   };

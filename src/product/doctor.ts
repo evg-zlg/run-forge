@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { runForgeVersion } from "../core/version.js";
 import { runningInContainer, unsafeMountWarnings } from "../security/docker-policy.js";
 import { commandVersion, defaultArtifactRoot, inspectProject, isPathInside, type ReadinessCheck } from "./project-inspection.js";
+import { discoverImplementationExecutors, type ImplementationExecutorCapability } from "../implementation/executor.js";
 
 export type DoctorOptions = { repo?: string; workingDirectory?: string; artifactRoot?: string; runtime?: "local" | "docker"; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing"; dockerImage?: string; publication?: "none" | "draft-pr" };
 export type DoctorReport = {
@@ -14,12 +15,13 @@ export type DoctorReport = {
   targetRepository: Awaited<ReturnType<typeof inspectProject>> | null;
   artifactRoot: { path: string | null; outsideTargetRepository: boolean | null };
   integrations: { dockerRequired: boolean; githubRequired: boolean; databaseRequired: false; productionRequired: false; secretsRequired: false };
+  implementationExecutors: ImplementationExecutorCapability[];
   checks: ReadinessCheck[];
   nextAction: { command: string | null; reason: string };
 };
 
 export async function buildDoctorReport(options: DoctorOptions): Promise<DoctorReport> {
-  const [pnpm, docker] = await Promise.all([commandVersion("pnpm", ["--version"]), commandVersion("docker", ["--version"])]);
+  const [pnpm, docker, implementationExecutors] = await Promise.all([commandVersion("pnpm", ["--version"]), commandVersion("docker", ["--version"]), discoverImplementationExecutors()]);
   const nodeMajor = Number(process.versions.node.split(".")[0]);
   const dockerRequired = options.runtime === "docker";
   const dockerImage = options.dockerImage ?? "runforge:local";
@@ -29,6 +31,9 @@ export async function buildDoctorReport(options: DoctorOptions): Promise<DoctorR
     check("node", nodeMajor >= 20, true, nodeMajor >= 20 ? `Node ${process.version} satisfies >=20.` : `Node ${process.version} is unsupported; >=20 is required.`),
     pnpm ? check("pnpm", true, false, `pnpm ${pnpm} is available.`) : { id: "pnpm", status: "warning", required: false, summary: "pnpm is unavailable; installed CLI use remains ready, but source-checkout commands require corepack/pnpm." }
   ];
+  checks.push(implementationExecutors.some((item) => item.status === "ready")
+    ? check("implementation_executor", true, false, `Ready implementation executor(s): ${implementationExecutors.filter((item) => item.status === "ready").map((item) => item.id).join(", ")}.`)
+    : { id: "implementation_executor", status: "warning", required: false, summary: `Implementation tasks are unavailable: ${implementationExecutors.flatMap((item) => item.limitations).join("; ")}` });
   const target = options.repo ? await inspectProject(options.repo, options.workingDirectory ?? ".") : null;
   if (target) {
     checks.push(check("target_path", target.exists, true, target.exists ? `Target path exists: ${target.path}` : `Target path does not exist: ${target.requestedPath}`));
@@ -77,7 +82,7 @@ export async function buildDoctorReport(options: DoctorOptions): Promise<DoctorR
     runtime: { node: process.version, pnpm, docker, os: platform(), insideContainer: runningInContainer() },
     targetRepository: target,
     artifactRoot: { path: artifactPath, outsideTargetRepository: outside },
-    integrations: { dockerRequired, githubRequired, databaseRequired: false, productionRequired: false, secretsRequired: false },
+    integrations: { dockerRequired, githubRequired, databaseRequired: false, productionRequired: false, secretsRequired: false }, implementationExecutors,
     checks,
     nextAction: { command: nextCommand, reason: nextCommand ? "Create a TaskSpec v2 using the discovered repository contract." : "Resolve blocking readiness checks first." }
   };
@@ -86,6 +91,7 @@ export async function buildDoctorReport(options: DoctorOptions): Promise<DoctorR
 export function renderDoctor(report: DoctorReport): string {
   const lines = [`RunForge doctor: ${report.status}`, `Version: ${report.runforgeVersion}`, `Node: ${report.runtime.node}`, `pnpm: ${report.runtime.pnpm ?? "not available"}`];
   if (report.targetRepository) lines.push(`Repository root: ${report.targetRepository.repositoryRoot ?? report.targetRepository.requestedPath}`, `Execution root: ${report.targetRepository.executionRoot ?? "not resolved"}`, `Git: ${report.targetRepository.isGitRepository ? `${report.targetRepository.branch ?? "detached"} @ ${report.targetRepository.head}` : "not a repository"}`, `Worktree: ${report.targetRepository.worktree.clean === false ? "dirty (preserved; warning)" : report.targetRepository.worktree.clean === true ? "clean" : "unknown"}`, `Package manager: ${report.targetRepository.packageManager ?? "not detected"}`, `Lockfile: ${report.targetRepository.dependencyPreparation.lockfile ?? "not detected"}`, `Validation: ${report.targetRepository.validationCommands.join(", ") || "provide explicitly"}`, `Artifacts: ${report.artifactRoot.path ?? "not resolved"}`);
+  lines.push(`Implementation executors: ${report.implementationExecutors.map((item) => `${item.id}=${item.status}`).join(", ")}`);
   for (const item of report.checks.filter((value) => ["warning", "blocked"].includes(value.status))) lines.push(`${item.status.toUpperCase()}: ${item.summary}`);
   if (report.nextAction.command) lines.push(`Next: ${report.nextAction.command}`);
   return lines.join("\n");
