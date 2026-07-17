@@ -61,6 +61,10 @@ export type TaskRecovery = {
   retryAfter?: string;
   cleanupStatus: "not_required" | "pending" | "completed" | "detached";
   operation?: string;
+  prerequisites?: string[];
+  newTaskRequired?: boolean;
+  previousArtifactsReusable?: boolean;
+  targetShaChanged?: boolean | null;
 } | null;
 
 export type ExecutionLease = {
@@ -110,7 +114,12 @@ export type ControlTaskRecord = {
     lastRetry: { sourceExecutionId: string; executionId: string; requestedAt: string } | null;
   };
   continuation: { schemaVersion: 1; state: "none" | "available" | "consumed" | "unrecoverable"; decisionId: string | null; executionId: string | null; sourceExecutionId: string | null };
-  selection?: { requestedMode: string; selectedExecutor: string | null; selectionReason: string; rejectedAlternatives: Array<{ id: string; reason: string }>; provider: string | null; model: string | null };
+  selection?: {
+    requestedMode: string; normalizedMode: string; selectedExecutor: string | null; selectedRuntime: string | null;
+    selectionReason: string; rejectedAlternatives: Array<{ id: string; reason: string }>;
+    authorityChecks: Record<string, boolean>; providerDecision: string; networkDecision: string;
+    provider: string | null; model: string | null;
+  };
 };
 
 export function defaultAuthority(value: unknown): ControlAuthority {

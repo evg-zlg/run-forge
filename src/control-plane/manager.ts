@@ -48,26 +48,39 @@ export class ControlPlaneManager {
     if (await this.store.getTask(taskId)) throw new ControlPlaneError(409, "task_exists", `Task already exists: ${taskId}`, undefined, false, taskId);
     if (!input.authority.inspect) throw new ControlPlaneError(403, "authority_denied", "inspect authority is required to create a task.");
     if (project) raw.target = { repository: project.repository, workingDirectory: project.workingDirectory }; if (!raw.target) throw new ControlPlaneError(422, "project_required", "Provide projectId or taskSpec.target.");
-    if (object(raw.authority).profile === "bounded-implementation" && !input.authority.implementation) throw new ControlPlaneError(403, "authority_denied", "TaskSpec requests implementation but control-plane implementation authority is false.");
     const requestedInSpec = object(raw.git).publication; const publicationRequested = input.publicationRequested === "draft-pr" || requestedInSpec === "draft-pr" ? "draft-pr" : "none";
     raw.git = { publication: "none" }; raw.merge = { policy: "never" }; raw.deploy = { policy: "never" }; const artifactRoot = join(this.store.taskDir(taskId), "attempts", "1", "artifacts"); raw.artifacts = { ...object(raw.artifacts), root: artifactRoot, resultFormat: "normalized-v1" };
-    const specPath = await this.store.writeSpec(taskId, raw); let normalized: Awaited<ReturnType<typeof loadTaskSpecV2>>; try { normalized = await loadTaskSpecV2(specPath); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error)); }
-    if (normalized.authority.allowProviderCalls && input.authority.providerCalls !== true) throw new ControlPlaneError(403, "provider_authority_denied", "TaskSpec allows provider calls but control-plane providerCalls authority is false.");
-    if ((normalized.authority.allowNetwork || normalized.runtime.externalNetwork === "allowed") && input.authority.network !== true) throw new ControlPlaneError(403, "network_authority_denied", "TaskSpec allows network but control-plane network authority is false.");
+    const specPath = await this.store.writeSpec(taskId, raw); let normalized: Awaited<ReturnType<typeof loadTaskSpecV2>>; try { normalized = await loadTaskSpecV2(specPath); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error), { operation: "start_new_task", newTaskRequired: true }); }
+    const implementation = ["implementation", "repair"].includes(normalized.execution.mode);
+    if (implementation && !input.authority.implementation) throw preflightError("implementation_authority_denied", "Implementation mode requires control-plane implementation authority.", normalized, input.authority);
+    if (implementation && !input.authority.localBranch) throw preflightError("mutation_authority_denied", "Implementation mode requires localBranch mutation authority for the disposable worktree.", normalized, input.authority);
+    if (implementation && !input.authority.localCommit) throw preflightError("local_commit_authority_denied", "Implementation mode requires localCommit authority.", normalized, input.authority);
+    if (normalized.authority.allowProviderCalls && input.authority.providerCalls !== true) throw preflightError("provider_authority_denied", "TaskSpec allows provider calls but control-plane providerCalls authority is false.", normalized, input.authority);
+    if ((normalized.authority.allowNetwork || normalized.runtime.externalNetwork === "allowed") && input.authority.network !== true) throw preflightError("network_authority_denied", "TaskSpec allows network but control-plane network authority is false.", normalized, input.authority);
+    if (implementation && !normalized.authority.allowProviderCalls) throw preflightError("provider_permission_denied", "The implementation executor requires TaskSpec authority.allowProviderCalls=true.", normalized, input.authority);
+    if (implementation && (!normalized.authority.allowNetwork || normalized.runtime.externalNetwork !== "allowed")) throw preflightError("network_permission_denied", "The implementation executor requires authority.allowNetwork=true and runtime.externalNetwork='allowed'.", normalized, input.authority);
+    if (implementation && normalized.runtime.preference !== "local") throw preflightError("runtime_incompatible", "Implementation requires runtime.preference='local' (selected runtime local-disposable).", normalized, input.authority);
     const selected = ["implementation", "repair"].includes(normalized.execution.mode) ? await selectImplementationExecutor(normalized) : null;
-    if (selected && !selected.selected) throw new ControlPlaneError(503, "executor_unavailable", selected.reason, { requestedMode: normalized.execution.mode, rejectedAlternatives: selected.rejected }, true, taskId);
+    if (selected && !selected.selected) throw new ControlPlaneError(503, "implementation_executor_unavailable", selected.reason, { requestedMode: normalized.execution.mode, availableExecutors: selected.rejected.map((item) => item.id), rejectedAlternatives: selected.rejected, authorityFailures: [], operation: "start_new_task", newTaskRequired: true }, true, taskId);
     const now = new Date().toISOString(); const task: ControlTaskRecord = {
       id: taskId, projectId: project?.id ?? null, status: "queued", specPath, artifactRoot, authority: input.authority, publicationRequested,
       publicationGate: publicationRequested === "draft-pr" ? { required: true, status: "blocked_until_implementation_completes", reason: "Remote publication is a separate decision." } : { required: false, status: "not_requested" }, ownerGate: { required: false, status: "not_required" },
       createdAt: now, updatedAt: now, startedAt: null, finishedAt: null, error: null, decisions: [], events: [], progress: progress(now), recovery: null,
       execution: { attempt: 0, lease: null, attempts: [], lastRetry: null }, continuation: { schemaVersion: 1, state: "none", decisionId: null, executionId: null, sourceExecutionId: null },
-      selection: { requestedMode: normalized.execution.mode, selectedExecutor: selected?.selected?.id ?? null, selectionReason: selected?.reason ?? "Read-only mode uses the validation/inspection harness.", rejectedAlternatives: selected?.rejected ?? [], provider: selected?.selected?.providerCalls ? "configured-local-credential" : null, model: selected?.selected?.model ?? null }
+      selection: { requestedMode: normalized.execution.mode, normalizedMode: normalized.execution.mode, selectedExecutor: selected?.selected?.id ?? (normalized.execution.mode === "validation" ? "validation-lane" : "inspection-lane"), selectedRuntime: selected ? "local-disposable" : normalized.runtime.preference === "local" ? "local-disposable" : "docker", selectionReason: selected?.reason ?? `Explicit ${normalized.execution.mode} mode uses its dedicated lane.`, rejectedAlternatives: selected?.rejected ?? [], authorityChecks: { inspect: input.authority.inspect, implementation: !implementation || input.authority.implementation, providerCalls: !normalized.authority.allowProviderCalls || input.authority.providerCalls === true, network: !normalized.authority.allowNetwork || input.authority.network === true, localBranch: !implementation || input.authority.localBranch, localCommit: !implementation || input.authority.localCommit, publicationForbidden: normalized.git.publication === "none" }, providerDecision: normalized.authority.allowProviderCalls ? "allowed" : "not_requested", networkDecision: normalized.runtime.externalNetwork === "allowed" ? "allowed" : "denied", provider: selected?.selected?.providerCalls ? "configured-local-credential" : null, model: selected?.selected?.model ?? null }
     };
     await this.persist(task, "task_created"); if (publicationRequested === "draft-pr") await this.persist(task, "publication_gate_created", "blocked_until_implementation_completes"); await this.beginAttempt(task, "execution"); return task;
   }
 
-  async getTask(id: string): Promise<ControlTaskRecord> { return this.withLock(id, async () => { const task = await this.readTask(id); await this.advanceRecovery(task); return task; }); }
-  async getResult(id: string): Promise<Record<string, unknown>> { const task = await this.getTask(id); let published = await this.store.readPublishedResult(id); if (!published && task.status === "interrupted") { await this.writeInterruptedResult(task); published = await this.store.readPublishedResult(id); } if (!published || published.executionId !== task.progress.executionId) throw new ControlPlaneError(404, "result_not_ready", `Result is not available for active execution ${task.progress.executionId ?? "pending"}.`, undefined, true, id); return { ...published.result, controlPlane: { status: task.status, progress: task.progress, recovery: task.recovery, ownerGate: task.ownerGate, publicationGate: task.publicationGate, authority: task.authority } }; }
+  async getTask(id: string): Promise<ControlTaskRecord> { return this.withLock(id, async () => {
+    const task = await this.readTask(id); await this.advanceRecovery(task);
+    if (task.status === "failed" && !task.recovery) {
+      task.recovery = { reason: "execution_failed", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, originalExecutionId: task.progress.executionId, actions: ["start_new_task"], retryAvailable: false, cleanupStatus: "completed", operation: "start_new_task", prerequisites: ["Correct the reported failure.", "Submit a current TaskSpec v2."], newTaskRequired: true, previousArtifactsReusable: true, targetShaChanged: null };
+      await this.store.saveTask(task);
+    }
+    return task;
+  }); }
+  async getResult(id: string): Promise<Record<string, unknown>> { const task = await this.getTask(id); let published = await this.store.readPublishedResult(id); if (!published && task.status === "interrupted") { await this.writeInterruptedResult(task); published = await this.store.readPublishedResult(id); } if (!published || published.executionId !== task.progress.executionId) throw new ControlPlaneError(404, "result_not_ready", `Result is not available for active execution ${task.progress.executionId ?? "pending"}.`, undefined, true, id); return { ...published.result, ...(task.recovery ? { recovery: task.recovery } : {}), controlPlane: { status: task.status, progress: task.progress, recovery: task.recovery, ownerGate: task.ownerGate, publicationGate: task.publicationGate, authority: task.authority } }; }
 
   async ownerDecision(id: string, input: { decisionId: string; decision: string; targetBranch?: string; note: string }): Promise<Record<string, unknown>> { return this.withLock(id, async () => {
     const task = await this.readTask(id); const duplicate = task.decisions.find((item) => item.kind === "owner" && item.decisionId === input.decisionId);
@@ -204,12 +217,28 @@ function normalizeTask(task: ControlTaskRecord): ControlTaskRecord {
   task.progress ??= progress(task.updatedAt); task.progress.attempt ??= 1;
   task.execution ??= { attempt: task.progress.attempt, lease: task.progress.executionId ? { executionId: task.progress.executionId, attempt: task.progress.attempt, operation: task.progress.operation as "execution" | "continuation", state: ["running", "continuing"].includes(task.status) ? "active" : "finished", startedAt: task.progress.startedAt ?? task.updatedAt, revokedAt: null, cleanupDeadlineAt: null } : null, attempts: [], lastRetry: null };
   task.execution.attempts ??= []; task.execution.lastRetry ??= null;
-  if (task.recovery) task.recovery = { ...task.recovery, originalExecutionId: task.recovery.originalExecutionId ?? task.progress.executionId, retryAvailable: task.recovery.retryAvailable ?? Boolean(task.recovery.operation), cleanupStatus: task.recovery.cleanupStatus ?? "not_required" };
+  if (task.recovery) { const retryAvailable = task.recovery.retryAvailable ?? Boolean(task.recovery.operation); const cleanupPending = ["pending", "detached"].includes(task.recovery.cleanupStatus); task.recovery = { ...task.recovery, originalExecutionId: task.recovery.originalExecutionId ?? task.progress.executionId, retryAvailable, cleanupStatus: task.recovery.cleanupStatus ?? "not_required", ...(!task.recovery.operation && !cleanupPending ? { operation: retryAvailable ? `/v1/tasks/${task.id}/retry` : "start_new_task" } : {}), prerequisites: task.recovery.prerequisites ?? (retryAvailable ? ["Previous worker cleanup must be complete.", "Target SHA must still match the accepted TaskSpec."] : cleanupPending ? ["Poll until bounded worker cleanup completes."] : ["Correct the reported failure.", "Submit a current TaskSpec v2."]), newTaskRequired: task.recovery.newTaskRequired ?? (!retryAvailable && !cleanupPending), previousArtifactsReusable: task.recovery.previousArtifactsReusable ?? true, targetShaChanged: task.recovery.targetShaChanged ?? null }; }
   task.recovery ??= null; task.continuation ??= { schemaVersion: 1, state: "none", decisionId: null, executionId: null, sourceExecutionId: null }; task.continuation.sourceExecutionId ??= null; return task;
 }
 function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} is required.`); return value.trim(); }
 function decisionRecord(decisionId: string, kind: "owner" | "publication", decision: string, response: Record<string, unknown>): DecisionRecord { return { decisionId, kind, decision, response, createdAt: new Date().toISOString() }; }
 function safeMessage(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return message.replace(/(?:\/[\w.@-]+){2,}/g, "[internal path]").slice(0, 500); }
+function preflightError(code: string, message: string, spec: Awaited<ReturnType<typeof loadTaskSpecV2>>, authority: ControlAuthority): ControlPlaneError {
+  return new ControlPlaneError(403, code, message, {
+    requestedMode: spec.execution.mode,
+    requestedRuntime: spec.runtime.preference,
+    authorityFailures: [code],
+    authorityChecks: {
+      implementation: authority.implementation,
+      providerCalls: authority.providerCalls === true,
+      network: authority.network === true,
+      localBranch: authority.localBranch,
+      localCommit: authority.localCommit
+    },
+    operation: "start_new_task",
+    newTaskRequired: true
+  }, false, spec.taskId);
+}
 function continuationError(task: ControlTaskRecord, error: unknown): ControlPlaneError { return new ControlPlaneError(409, "continuation_state_unavailable", "Owner decision could not be safely bound to continuation state.", { reason: safeMessage(error), recoveryActions: ["retry", "cancel"] }, false, task.id); }
 async function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> { if (signal.aborted) throw new Error("cancelled"); return new Promise<T>((resolve, reject) => { const cancel = () => reject(new Error("cancelled")); signal.addEventListener("abort", cancel, { once: true }); work.then(resolve, reject).finally(() => signal.removeEventListener("abort", cancel)); }); }

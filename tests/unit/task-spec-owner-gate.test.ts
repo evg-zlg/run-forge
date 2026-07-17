@@ -20,7 +20,7 @@ describe("TaskSpec owner gates", () => {
     await execFileAsync("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@example.com", "commit", "-m", "init"]);
     await writeFile(specPath, JSON.stringify({
       schemaVersion: 2, taskId: "LOCAL-DENIED-1", task: { text: "Inspect", goal: "Evidence", acceptanceCriteria: ["Command passes"] },
-      target: { repository: repo }, runtime: { preference: "local", dependencyPreparation: "disabled" },
+      target: { repository: repo }, execution: { mode: "validation" }, runtime: { preference: "local", dependencyPreparation: "disabled" },
       validation: { mode: "explicit", commands: ["node --version"] }, artifacts: { root: artifacts }
     }));
     await expect(runTaskSpecFile(specPath)).rejects.toThrow("disposable local workspace");
@@ -43,7 +43,7 @@ describe("TaskSpec owner gates", () => {
     const authority = join(root, "authority.json"); const plan = join(root, "plan.json"); const specPath = join(root, "task.json");
     await writeFile(authority, JSON.stringify({ authority_id: "LOCAL-REPAIR", scope: "test", repo, allowed_actions: actions, forbidden_actions: forbidden, allowed_patch_risk: { max_risk: "low", allowed_file_patterns: ["frontend/README.md"], forbidden_file_patterns: [".env*"] }, controlled_apply: { allowed: true, mode: "artifact-contained-worktree", branch_name: "runforge/test", requires_source_clean: true }, expires_at: null, owner_note: "test" }));
     await writeFile(plan, JSON.stringify({ schema_version: "runforge.code-repair.v1", candidate_id: "LOCAL", task: "Update docs", allowed_files: ["README.md"], max_changed_files: 1, validation_commands: ["npm test"], changes: [{ file: "README.md", replacements: [{ find: "before", replace: "after" }] }] }));
-    await writeFile(specPath, JSON.stringify({ schemaVersion: 2, taskId: "LOCAL-REPAIR-1", task: { text: "Update docs", goal: "Apply bounded change", acceptanceCriteria: ["Patch is validated"] }, target: { repository: repo, workingDirectory: "frontend" }, runtime: { preference: "local", dependencyPreparation: "disabled", externalNetwork: "denied" }, validation: { mode: "explicit", commands: ["npm test"] }, authority: { profile: "bounded-implementation", envelopeFile: authority }, artifacts: { root: artifacts }, repair: { mode: "code", plan } }));
+    await writeFile(specPath, JSON.stringify({ schemaVersion: 2, taskId: "LOCAL-REPAIR-1", task: { text: "Update docs", goal: "Apply bounded change", acceptanceCriteria: ["Patch is validated"] }, target: { repository: repo, workingDirectory: "frontend" }, execution: { mode: "repair" }, runtime: { preference: "local", dependencyPreparation: "disabled", externalNetwork: "denied" }, validation: { mode: "explicit", commands: ["npm test"] }, authority: { profile: "bounded-implementation", envelopeFile: authority }, artifacts: { root: artifacts }, repair: { mode: "code", plan } }));
     const execution = await runTaskSpecFile(specPath);
     expect(execution.success).toBe(true);
     const canonical = await realpath(repo);
