@@ -2,6 +2,8 @@
 
 RunForge is a local CLI and artifact-first engineering harness for turning an engineering task into a reviewable result. It is not a remote service. Its official external workflow is `onboarding` → project-aware `doctor` → TaskSpec v2 → `task-run start` → `results.json` and `summary.md` → an explicit owner gate when needed.
 
+The localhost control plane can also execute capability-gated bounded implementation through a real local coding-agent backend. Implementation runs in disposable Git worktrees, returns local commit/patch evidence, and leaves remote publication behind a separate owner gate.
+
 It solves the "what did the agent see, do, and propose?" problem for local code work. Instead of hiding work inside an autonomous run, RunForge writes the task, context, command evidence, trajectory, safety report, patch proposal, and human review packet to disk so a person can inspect the decision trail before anything is applied.
 
 RunForge is not a public HTTP API, remote daemon, MCP server, watched queue, SaaS service, automatic merge system, or deploy service. Legacy `run`, `external`, and flag-based `task-run` surfaces remain compatible, but TaskSpec v2 is the recommended new-session intake.

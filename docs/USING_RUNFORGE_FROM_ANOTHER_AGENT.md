@@ -18,6 +18,8 @@ For foreground development use `corepack pnpm dev -- control-plane serve`. The d
 Use the RunForge control plane at http://127.0.0.1:7373.
 Do not enter or inspect the RunForge repository and do not invoke its CLI.
 First GET /.well-known/runforge and /v1/capabilities.
+
+Before implementation, require a compatible `implementationExecutors` entry with `status: "ready"`. With no compatible backend, RunForge rejects the request with `executor_unavailable` before creating the task; it never silently performs inspection.
 Then POST /v1/projects/inspect with this project's absolute checkout path and working directory.
 Submit a TaskSpec v2 to POST /v1/tasks with an explicit authority object.
 Poll GET /v1/tasks/{id}; read GET /v1/tasks/{id}/result when ready.
@@ -35,6 +37,29 @@ Use publication-decisions separately; merge and deploy are unavailable.
 BASE=http://127.0.0.1:7373
 curl -fsS "$BASE/.well-known/runforge"
 curl -fsS "$BASE/v1/capabilities"
+
+The default backend is the locally available `codex` CLI. It can instead be set through an enabled `codex-cli` admin provider or `RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND`. Credentials remain in the CLI credential store and are never copied into TaskSpec, logs, or results.
+
+Implementation adds explicit mode and independent provider/network authority:
+
+```json
+{
+  "taskSpec": {
+    "execution": { "mode": "implementation", "maxRepairIterations": 2, "maxProviderTokens": 30000 },
+    "runtime": { "preference": "local", "externalNetwork": "allowed" },
+    "authority": {
+      "profile": "bounded-implementation",
+      "allowProviderCalls": true,
+      "allowNetwork": true,
+      "forbiddenAreas": [".github", "deploy", "migrations"]
+    },
+    "git": { "publication": "none" }
+  },
+  "authority": { "implementation": true, "providerCalls": true, "network": true }
+}
+```
+
+Poll `selection` and `progress.phase`. The result reports `implementation.status`, changed files, validation stdout/stderr evidence, `localCommit`, `patchPackage`, provider-call audit, and `publication.status: "on_hold"`.
 curl -fsS -H 'content-type: application/json' -d '{"path":"/absolute/project","workingDirectory":".","register":true}' "$BASE/v1/projects/inspect"
 ```
 

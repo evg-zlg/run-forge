@@ -111,7 +111,7 @@ describe("TaskSpec v2", () => {
     await writeFile(join(repo, "frontend", "package.json"), JSON.stringify({ scripts: { test: "node --test", typecheck: "node -e \"\"" } }));
     await writeFile(join(repo, "frontend", "yarn.lock"), "# yarn\n");
     const spec = await normalizeTaskSpecV2({ ...minimal(repo), target: { repository: repo, workingDirectory: "frontend" } });
-    expect(spec.target).toEqual({ repository: await realpath(repo), workingDirectory: "frontend" });
+    expect(spec.target).toEqual({ repository: await realpath(repo), workingDirectory: "frontend", expectedSha: expect.any(String) });
     expect(spec.validation.commands).toEqual(["corepack yarn run typecheck", "corepack yarn test"]);
   });
 

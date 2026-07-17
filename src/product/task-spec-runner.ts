@@ -6,15 +6,28 @@ import { runExternalExecution, type ExternalExecutionResult } from "../run/exter
 import { loadTaskSpecV2, redactedTaskSpec, type TaskSpecV2 } from "./task-spec-v2.js";
 import { completionStatusForIntent, externalResultContract, readExternalValidationResults, validateTaskResultContract } from "./task-result-contract.js";
 import { inspectProject, type ProjectInspection } from "./project-inspection.js";
+import { runImplementationExecutor, type ImplementationExecutorResult } from "../implementation/executor.js";
 
 export type TaskSpecExecution =
   | { kind: "validation"; spec: TaskSpecV2; result: TaskRunResult; summary: string; success: boolean }
-  | { kind: "repair"; spec: TaskSpecV2; result: ExternalExecutionResult; summary: string; success: boolean };
+  | { kind: "repair"; spec: TaskSpecV2; result: ExternalExecutionResult; summary: string; success: boolean }
+  | { kind: "implementation"; spec: TaskSpecV2; result: ImplementationExecutorResult; summary: string; success: boolean };
 
-export async function runTaskSpecFile(path: string): Promise<TaskSpecExecution> {
+export async function runTaskSpecFile(path: string, context: { signal?: AbortSignal; attempt?: number; executionId?: string; onProgress?: (phase: string, detail: string) => void | Promise<void> } = {}): Promise<TaskSpecExecution> {
   const spec = await loadTaskSpecV2(path);
   const initialTarget = await inspectProject(spec.target.repository, spec.target.workingDirectory);
   await writeNormalizedSpec(spec);
+  if (["implementation", "repair"].includes(spec.execution.mode) && spec.repair.mode === "none") {
+    const result = await preserveSpecOnFailure(spec, initialTarget, () => runImplementationExecutor({
+      spec, targetRepository: spec.target.repository, workingDirectory: spec.target.workingDirectory,
+      projectProfile: { runtime: spec.runtime.preference }, acceptanceCriteria: spec.task.acceptanceCriteria,
+      authorityEnvelope: spec.authority, forbiddenZones: spec.authority.forbiddenAreas,
+      runtimePolicy: spec.runtime, validationProfile: spec.validation, artifactRoot: spec.artifacts.root,
+      attempt: context.attempt ?? 1, generation: context.executionId ?? "standalone", signal: context.signal, onProgress: context.onProgress
+    }));
+    await finalizeImplementationArtifacts(spec, result);
+    return { kind: "implementation", spec, result, summary: `TaskSpec ${spec.taskId}: ${result.status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: ["implemented_and_validated", "no_change_required"].includes(result.status) };
+  }
   if (spec.repair.mode === "none") {
     const result = await preserveSpecOnFailure(spec, initialTarget, () => runTaskRunHarness({
       taskId: spec.taskId,
@@ -47,7 +60,7 @@ export async function runTaskSpecFile(path: string): Promise<TaskSpecExecution> 
     dockerImage: spec.runtime.dockerImage,
     prepareRuntime: spec.runtime.dependencyPreparation === "required" ? "explicit" : "none",
     dependencyPreparation: spec.runtime.dependencyPreparation,
-    externalNetwork: spec.runtime.externalNetwork,
+    externalNetwork: spec.runtime.externalNetwork === "allowed" ? "denied" : spec.runtime.externalNetwork,
     repairMode: spec.repair.mode,
     repairPlan: spec.repair.plan ?? undefined,
     existingCandidates: [],
@@ -63,6 +76,31 @@ export async function runTaskSpecFile(path: string): Promise<TaskSpecExecution> 
   await writeNormalizedSpec(spec);
   const status = await finalizeRepairArtifacts(spec, result);
   return { kind: "repair", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: ["completed", "awaiting_owner_decision"].includes(status) };
+}
+
+async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: ImplementationExecutorResult): Promise<void> {
+  const completed = ["implemented_and_validated", "no_change_required"].includes(result.status);
+  const ownerRequired = result.status === "blocked_with_owner_gate";
+  const status = completed ? "completed" : ownerRequired ? "awaiting_owner_decision" : "failed";
+  const document = {
+    schemaVersion: 1, contract: "runforge-task-result", taskId: spec.taskId, status,
+    requestedIntent: spec.execution.mode, actualExecutorMode: "implementation", selectedExecutor: result.selectedExecutor,
+    implementation: { status: result.status, performed: result.changedFiles.length > 0, plan: result.plan, changedFiles: result.changedFiles, localCommit: result.localCommit, patchPackage: result.patchPackage, unresolvedAcceptanceCriteria: result.unresolvedFindings },
+    targetRepository: { path: spec.target.repository, repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory), initialSha: spec.target.expectedSha, finalSha: spec.target.expectedSha, changed: false },
+    completedWork: result.changedFiles.map((file) => ({ file, status: "changed_in_disposable_workspace" })),
+    validation: result.validationResults,
+    artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", plan: "implementation-plan.json", patch: result.patchPackage ? "implementation.patch" : null },
+    git: { branch: null, commit: result.localCommit, patchPackage: result.patchPackage, pullRequest: null, merge: null },
+    publication: { status: "on_hold", ownerGate: { required: false, status: "not_requested" }, performed: false },
+    providerCalls: result.providerCalls,
+    ownerGate: { required: ownerRequired, status: ownerRequired ? "awaiting_owner_decision" : "not_required", ...(result.ownerGate.reason ? { reason: result.ownerGate.reason } : {}) },
+    nextAction: { recommendation: completed ? "Review the local commit/patch package, then use the separate publication decision API if publication is desired and authorized." : ownerRequired ? "Resolve the bounded owner gate, then retry with a new generation." : "Inspect structured executor and validation diagnostics, correct the infrastructure/backend failure, and retry." },
+    safetyAssertions: { targetUnchanged: true, targetMainMutation: false, targetMainPush: false, targetPrMerge: false, deploy: false, databaseAccess: false, productionAccess: false, secretAccess: false, providerCalls: result.providerCalls.length > 0, ...result.safetyAssertions },
+    diagnostics: result.diagnostics, errors: result.status === "failed_with_diagnostics" ? result.unresolvedFindings : [], limitations: ownerRequired ? result.unresolvedFindings : []
+  };
+  validateTaskResultContract(document);
+  await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
+  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} implementation result\n\nOutcome: **${result.status}**\n\nExecutor: **${result.selectedExecutor.id}**${result.selectedExecutor.model ? ` / ${result.selectedExecutor.model}` : ""}\n\nChanged files: ${result.changedFiles.length ? result.changedFiles.map((file) => `\`${file}\``).join(", ") : "none"}\n\nValidation: ${result.validationResults.every((item) => item.exitCode === 0) ? "passed" : "not green"}\n\nLocal commit: ${result.localCommit ?? "none"}\nPatch package: ${result.patchPackage ?? "none"}\n\nPublication: **on hold; not performed**.\n`, "utf8");
 }
 
 async function preserveSpecOnFailure<T>(spec: TaskSpecV2, initialTarget: ProjectInspection, execute: () => Promise<T>): Promise<T> {

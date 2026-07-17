@@ -5,7 +5,7 @@
   "oneOf": [{ "$ref": "#/$defs/projectInspection" }, { "$ref": "#/$defs/taskSubmission" }, { "$ref": "#/$defs/ownerDecision" }, { "$ref": "#/$defs/publicationDecision" }, { "$ref": "#/$defs/emptyOperation" }],
   "$defs": {
     "authority": { "type": "object", "additionalProperties": false, "properties": {
-      "inspect": { "type": "boolean" }, "implementation": { "type": "boolean" }, "localBranch": { "type": "boolean" }, "localCommit": { "type": "boolean" },
+      "inspect": { "type": "boolean" }, "implementation": { "type": "boolean" }, "providerCalls": { "type": "boolean" }, "network": { "type": "boolean" }, "localBranch": { "type": "boolean" }, "localCommit": { "type": "boolean" },
       "remotePush": { "type": "boolean" }, "draftPublication": { "type": "boolean" }, "merge": { "const": false }, "deploy": { "const": false }
     } },
     "projectInspection": { "type": "object", "additionalProperties": false, "required": ["path"], "properties": {

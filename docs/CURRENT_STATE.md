@@ -26,6 +26,9 @@ task
 ## Existing Capabilities
 
 - `runforge control-plane serve|start|stop|status` exposes versioned discovery, capabilities, project registration, durable task lifecycle, explicit owner decisions/continuation, and a separate non-executing publication gate on loopback only.
+- TaskSpec v2 has explicit `inspection`, `implementation`, `validation`, and `repair` modes. Implementation/repair requests are capability-checked before acceptance and never fall back to inspection.
+- The `local-coding-agent` executor runs an authorized coding-agent CLI in a detached disposable Git worktree, performs bounded validate/repair iterations, checks paths and secrets, and returns a local commit plus patch package while publication stays on hold.
+- Discovery, capabilities, readiness, and `doctor` expose executor status, requirements, limits, and degradation reasons.
 
 - `runforge onboarding [--repo] [--format json]` publishes the stable discovery contract, supported/unsupported interfaces, safe defaults, commands, and next action.
 - `runforge doctor --repo ... --format json` distinguishes blockers, warnings, and optional integrations while reporting Git state, package manager, validation discovery, and safe artifact placement.

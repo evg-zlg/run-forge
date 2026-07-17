@@ -1,0 +1,5 @@
+{
+  "name": "runforge-implementation-fixture",
+  "private": true,
+  "scripts": { "test": "node test.js", "lint": "node lint.js", "typecheck": "node typecheck.js" }
+}
