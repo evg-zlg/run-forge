@@ -2,7 +2,7 @@
 
 Status date: 2026-07-16.
 
-RunForge is a self-discoverable local CLI, not a remote service. Its recommended public path is versioned onboarding JSON, project-aware doctor JSON, TaskSpec v2 intake, and normalized `results.json`/`summary.md`. Existing RunSpec, `run`, `external`, factory, and flag-based task-run surfaces remain supported as legacy/specialized interfaces. External validation, explicit runtime preparation, disposable repair, artifact-contained apply, real owner decisions, delegated authority, local non-main branch preparation, and draft-only publication continue to prohibit target merge and deploy.
+RunForge is a self-discoverable local CLI with a persistent localhost-only HTTP control plane. Its recommended public path is versioned discovery, project-aware doctor inspection, TaskSpec v2 intake, and normalized `results.json`/`summary.md`. Existing RunSpec, `run`, `external`, factory, and flag-based task-run surfaces remain supported as legacy/specialized interfaces. External validation, explicit runtime preparation, disposable repair, artifact-contained apply, real owner decisions, delegated authority, local non-main branch preparation, and draft-only publication continue to prohibit target merge and deploy.
 
 ## Current North Star
 
@@ -24,6 +24,8 @@ task
 ```
 
 ## Existing Capabilities
+
+- `runforge control-plane serve|start|stop|status` exposes versioned discovery, capabilities, project registration, durable task lifecycle, explicit owner decisions/continuation, and a separate non-executing publication gate on loopback only.
 
 - `runforge onboarding [--repo] [--format json]` publishes the stable discovery contract, supported/unsupported interfaces, safe defaults, commands, and next action.
 - `runforge doctor --repo ... --format json` distinguishes blockers, warnings, and optional integrations while reporting Git state, package manager, validation discovery, and safe artifact placement.

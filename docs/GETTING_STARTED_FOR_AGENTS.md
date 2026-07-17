@@ -7,7 +7,7 @@
 5. Read only `results.json` and `summary.md` first.
 6. Stop only on a real owner gate reported by `results.json`.
 
-RunForge is a local CLI, not a remote service. You do not need to inspect its internal code or choose between legacy rails.
+RunForge is available as a local CLI and as a localhost-only persistent control plane. You do not need to inspect its internal code or choose between legacy rails. Product sessions should prefer the [control-plane bootstrap](USING_RUNFORGE_FROM_ANOTHER_AGENT.md) when the service is available.
 
 ```bash
 runforge onboarding --repo /absolute/path/to/project --working-directory frontend --format json
@@ -59,4 +59,4 @@ If `ownerGate.status` is `awaiting_owner_decision`, use the exact owner-decision
 
 `runforge onboarding --repo /path --write-project-file` creates `RUNFORGE.md` only when explicitly requested. It contains project-specific validation, authority, artifact, CI, merge/deploy, and gate defaults. The command refuses to overwrite an existing file and never commits it.
 
-Supported today: local CLI, discovery/readiness, Docker-isolated external validation, bounded repair rails, explicit owner decisions, and normalized artifacts. Not supported: HTTP/remote/MCP/queue transports, deploy, or automatic target PR merge.
+Supported today: local CLI, localhost HTTP discovery/readiness, persistent task state, Docker-isolated external validation, bounded repair rails, explicit owner and publication decisions, and normalized artifacts. Not supported: network-remote/MCP/queue transports, deploy, or automatic target PR merge.

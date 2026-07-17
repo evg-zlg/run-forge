@@ -1,0 +1,25 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runforge.local/schemas/control-plane-v1.schema.json",
+  "title": "RunForge Local Control Plane v1 requests",
+  "oneOf": [{ "$ref": "#/$defs/projectInspection" }, { "$ref": "#/$defs/taskSubmission" }, { "$ref": "#/$defs/ownerDecision" }, { "$ref": "#/$defs/publicationDecision" }],
+  "$defs": {
+    "authority": { "type": "object", "additionalProperties": false, "properties": {
+      "inspect": { "type": "boolean" }, "implementation": { "type": "boolean" }, "localBranch": { "type": "boolean" }, "localCommit": { "type": "boolean" },
+      "remotePush": { "type": "boolean" }, "draftPublication": { "type": "boolean" }, "merge": { "const": false }, "deploy": { "const": false }
+    } },
+    "projectInspection": { "type": "object", "additionalProperties": false, "required": ["path"], "properties": {
+      "path": { "type": "string", "minLength": 1 }, "workingDirectory": { "type": "string", "minLength": 1 }, "register": { "type": "boolean" },
+      "runtime": { "enum": ["local", "docker"] }, "dependencyPreparation": { "enum": ["required", "if-needed", "disabled", "reuse-existing"] }
+    } },
+    "taskSubmission": { "type": "object", "additionalProperties": false, "required": ["taskSpec"], "properties": {
+      "projectId": { "type": "string", "minLength": 1 }, "taskSpec": { "$ref": "task-spec-v2.schema.json" }, "authority": { "$ref": "#/$defs/authority" }, "publication": { "enum": ["none", "draft-pr"] }
+    } },
+    "ownerDecision": { "type": "object", "additionalProperties": false, "required": ["decision", "note"], "properties": {
+      "decisionId": { "type": "string", "minLength": 1 }, "decision": { "enum": ["approve", "reject", "continue", "hold"] }, "targetBranch": { "type": "string", "minLength": 1 }, "note": { "type": "string", "minLength": 1 }
+    } },
+    "publicationDecision": { "type": "object", "additionalProperties": false, "required": ["decision", "note"], "properties": {
+      "decisionId": { "type": "string", "minLength": 1 }, "decision": { "enum": ["approve", "reject", "hold"] }, "note": { "type": "string", "minLength": 1 }
+    } }
+  }
+}
