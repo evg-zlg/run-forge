@@ -2,6 +2,7 @@
 import { Command } from "commander";
 import { runForgeVersion } from "../core/version.js";
 import { adminCommand } from "./commands/admin.js";
+import { controlPlaneCommand } from "./commands/control-plane.js";
 import { dashboardCommand } from "./commands/dashboard.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { externalCommand } from "./commands/external.js";
@@ -23,6 +24,7 @@ program
   .version(runForgeVersion);
 
 program.addCommand(adminCommand());
+program.addCommand(controlPlaneCommand());
 program.addCommand(dashboardCommand());
 program.addCommand(doctorCommand());
 program.addCommand(externalCommand());
