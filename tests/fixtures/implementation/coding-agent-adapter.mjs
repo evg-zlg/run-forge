@@ -14,3 +14,4 @@ else {
   if (prompt.includes("ADD_TEST") && !existsSync("added.test.js")) writeFileSync("added.test.js", "import { add } from './calculator.js';\nif (add(2, 2) !== 4) process.exit(1);\n");
   console.log("implemented bounded change and tests");
 }
+console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 80, output_tokens: 20 } }));

@@ -33,6 +33,7 @@ describe("implementation executor", () => {
     expect(result.validation).toHaveLength(4);
     expect((result.validation as Array<Record<string, unknown>>).every((item) => item.exitCode === 0 && typeof item.stdout === "string" && typeof item.stderr === "string")).toBe(true);
     expect(result.providerCalls).toMatchObject([{ providerCalls: true, networkAuthorized: true }, { providerCalls: true, networkAuthorized: true }]);
+    expect(result.providerCalls).toMatchObject([{ tokenUsage: 100 }, { tokenUsage: 100 }]);
     expect(await git(repo, ["rev-parse", "HEAD"])).toBe(before); expect(await git(repo, ["status", "--porcelain"])).toBe(beforeStatus);
     expect(await readFile(String((result.implementation as Record<string, unknown>).patchPackage), "utf8")).toContain("added.test.js");
     expect(result.publication).toMatchObject({ status: "on_hold", performed: false });
