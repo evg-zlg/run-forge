@@ -24,11 +24,11 @@ export type RuntimePreparationResult = {
   packageManager: PackageManager;
   lockfilePath: string;
   lockfileHash: string;
-  target: { platform: "linux"; architecture: string };
+  target: { platform: string; architecture: string };
   dependencyCommand: string;
-  hostNodeModulesReused: false;
-  linuxCompatibleDependenciesCreated: true;
-  networkUsed: true;
+  hostNodeModulesReused: boolean;
+  linuxCompatibleDependenciesCreated: boolean;
+  networkUsed: boolean;
   image: { name: string; id: string };
   startedAt: string;
   completedAt: string;
@@ -58,13 +58,15 @@ export async function detectLockfileName(repo: string): Promise<string> {
 
 export async function prepareExternalRuntime(input: {
   repo: string;
+  workingDirectory?: string;
   workspace: string;
   outDir: string;
   image: string;
 }): Promise<RuntimePreparationResult> {
   const startedAt = new Date().toISOString();
   const source = await inspectRepoState(input.repo);
-  const dependency = await detectDependencyContract(source.path);
+  const workingDirectory = input.workingDirectory ?? ".";
+  const dependency = await detectDependencyContract(join(source.path, workingDirectory));
   const image = await inspectImage(input.image);
 
   await rm(input.workspace, { recursive: true, force: true });
@@ -73,7 +75,7 @@ export async function prepareExternalRuntime(input: {
   await execFileAsync("git", ["init", "--quiet"], { cwd: input.workspace });
 
   const containerName = `runforge-prepare-${safeName(basename(input.outDir))}-${process.pid}`;
-  const args = preparationDockerArgs(input.workspace, input.image, containerName, dependency.command);
+  const args = preparationDockerArgs(input.workspace, input.image, containerName, dependency.command, workingDirectory);
   let stdout = "";
   let stderr = "";
   let exitCode = 0;
@@ -99,7 +101,7 @@ export async function prepareExternalRuntime(input: {
     source,
     workspace: input.workspace,
     packageManager: dependency.manager,
-    lockfilePath: dependency.lockfile,
+    lockfilePath: join(workingDirectory, dependency.lockfile),
     lockfileHash: dependency.hash,
     target: { platform: "linux", architecture: image.architecture },
     dependencyCommand: dependency.command,
@@ -115,7 +117,7 @@ export async function prepareExternalRuntime(input: {
   return result;
 }
 
-export function preparationDockerArgs(workspace: string, image: string, containerName: string, command: string): string[] {
+export function preparationDockerArgs(workspace: string, image: string, containerName: string, command: string, workingDirectory = "."): string[] {
   return [
     "run", "--rm", "--pull", "never", "--name", containerName,
     "--network", "bridge",
@@ -126,12 +128,65 @@ export function preparationDockerArgs(workspace: string, image: string, containe
     "--cpus", "2",
     "--user", "0",
     "--mount", `type=bind,src=${workspace},dst=/workspace`,
-    "--workdir", "/workspace",
+    "--workdir", join("/workspace", workingDirectory),
     "--entrypoint", "/bin/sh",
     image,
     "-lc",
     `${command} && mkdir -p /workspace/.runforge-tmp && chmod -R a+rwX /workspace`
   ];
+}
+
+export async function prepareLocalRuntime(input: {
+  repo: string;
+  workingDirectory?: string;
+  workspace: string;
+  outDir: string;
+  strategy: "required" | "if-needed" | "disabled" | "reuse-existing";
+  externalNetwork: "denied" | "dependency-preparation-only";
+}): Promise<RuntimePreparationResult> {
+  const startedAt = new Date().toISOString();
+  const source = await inspectRepoState(input.repo);
+  const workingDirectory = input.workingDirectory ?? ".";
+  const sourceExecutionRoot = join(source.path, workingDirectory);
+  const workspaceExecutionRoot = join(input.workspace, workingDirectory);
+  const dependency = await detectDependencyContract(sourceExecutionRoot).catch(() => null);
+  await rm(input.workspace, { recursive: true, force: true });
+  await mkdir(input.workspace, { recursive: true });
+  await copyExternalWorkspace(source.path, input.workspace);
+  await execFileAsync("git", ["init", "--quiet"], { cwd: input.workspace });
+  let dependencyCommand = "none";
+  let networkUsed = false;
+  let reused = false;
+  const sourceModules = join(sourceExecutionRoot, "node_modules");
+  const modulesExist = await readFile(join(sourceModules, ".modules.yaml")).then(() => true, () => false)
+    || await readFile(join(sourceModules, ".package-lock.json")).then(() => true, () => false)
+    || await execFileAsync("test", ["-d", sourceModules]).then(() => true, () => false);
+  if (["reuse-existing", "if-needed"].includes(input.strategy) && modulesExist) {
+    await cp(sourceModules, join(workspaceExecutionRoot, "node_modules"), { recursive: true, verbatimSymlinks: true });
+    dependencyCommand = "reuse existing dependencies from source snapshot";
+    reused = true;
+  } else if (input.strategy === "required") {
+    if (!dependency) throw new Error("Required dependency preparation has no supported lockfile in the execution root.");
+    if (input.externalNetwork !== "dependency-preparation-only") throw new Error("Required local dependency preparation needs runtime.externalNetwork='dependency-preparation-only'.");
+    await execFileAsync("sh", ["-lc", dependency.command], { cwd: workspaceExecutionRoot, timeout: 10 * 60_000, maxBuffer: 16 * 1024 * 1024 });
+    dependencyCommand = dependency.command;
+    networkUsed = true;
+  } else if (input.strategy === "reuse-existing") {
+    throw new Error("runtime.dependencyPreparation='reuse-existing' requires node_modules in the execution root.");
+  }
+  const commandLog = join(input.outDir, "runtime-preparation-command.log");
+  await writeFile(commandLog, `runtime: local-disposable\nstrategy: ${input.strategy}\nworkingDirectory: ${workingDirectory}\ndependencyCommand: ${dependencyCommand}\nnetworkUsed: ${networkUsed}\nsourceMounted: false\n`, "utf8");
+  const result: RuntimePreparationResult = {
+    strategy: "disposable-workspace-snapshot", requested: true, status: "prepared", source,
+    workspace: input.workspace, packageManager: dependency?.manager ?? "npm",
+    lockfilePath: dependency ? join(workingDirectory, dependency.lockfile) : "lockfile (not required)",
+    lockfileHash: dependency?.hash ?? "not-required", target: { platform: process.platform, architecture: process.arch },
+    dependencyCommand, hostNodeModulesReused: reused, linuxCompatibleDependenciesCreated: false,
+    networkUsed, image: { name: "local-disposable", id: process.version }, startedAt,
+    completedAt: new Date().toISOString(), commandLog: relative(process.cwd(), commandLog)
+  };
+  await writeFile(join(input.outDir, "runtime-preparation-report.md"), renderPreparationReport(result), "utf8");
+  return result;
 }
 
 async function detectDependencyContract(repo: string): Promise<{ manager: PackageManager; lockfile: string; hash: string; command: string }> {
@@ -166,8 +221,8 @@ async function copyExternalWorkspace(repo: string, workspace: string): Promise<v
       const path = relative(repo, source);
       if (!path) return true;
       if (isSensitiveWorkspacePath(path)) return false;
-      const first = path.split("/")[0];
-      if ([".git", "node_modules", "dist", "coverage", ".runforge", "artifacts"].includes(first!)) return false;
+      const parts = path.split("/");
+      if (parts.some((part) => [".git", "node_modules", "dist", "coverage", ".runforge", "artifacts"].includes(part))) return false;
       return true;
     }
   });

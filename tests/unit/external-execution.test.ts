@@ -40,13 +40,17 @@ describe("external execution gates", () => {
   });
 
   it.each([
-    [{ runtime: "local" }, "--runtime docker"],
-    [{ prepareRuntime: "none" }, "--prepare-runtime explicit"],
+    [{ runtime: "remote" }, "docker or local"],
     [{ repairMode: "in-place" }, "only 'disposable'"],
     [{ approvalMode: "automatic" }, "only 'require-owner-decision'"],
     [{ applyMode: "main" }, "only 'none'"]
   ])("rejects unsafe mode %j", (override, message) => {
     expect(() => validateExternalExecutionModes({ ...valid, ...override })).toThrow(message);
+  });
+
+  it("accepts Docker and explicitly bounded local disposable repair modes", () => {
+    expect(() => validateExternalExecutionModes({ ...valid, runtime: "docker", prepareRuntime: "none" })).not.toThrow();
+    expect(() => validateExternalExecutionModes({ ...valid, runtime: "local", prepareRuntime: "none" })).not.toThrow();
   });
 
   it("accepts only the single expected README patch", () => {

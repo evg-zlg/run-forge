@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
@@ -34,6 +34,19 @@ describe("onboarding and doctor contracts", () => {
     expect(report.artifactRoot.outsideTargetRepository).toBe(true);
     expect(report.checks.find((item) => item.id === "target_worktree")?.status).toBe("warning");
     expect(report.checks.find((item) => item.id === "github")?.status).toBe("not_required");
+  });
+
+  it("reports repository and nested execution roots with the nested package contract", async () => {
+    const repo = await gitRepo();
+    await mkdir(join(repo, "frontend"));
+    await writeFile(join(repo, "frontend", "package.json"), JSON.stringify({ scripts: { test: "node --test" } }));
+    await writeFile(join(repo, "frontend", "yarn.lock"), "# lock\n");
+    const report = await buildDoctorReport({ repo, workingDirectory: "frontend", dependencyPreparation: "if-needed" });
+    const canonical = await realpath(repo);
+    expect(report.targetRepository).toMatchObject({ repositoryRoot: canonical, executionRoot: join(canonical, "frontend"), workingDirectory: "frontend", packageManager: "yarn" });
+    expect(report.targetRepository?.dependencyPreparation.lockfile).toBe(join(canonical, "frontend", "yarn.lock"));
+    expect(report.targetRepository?.validationCommands).toEqual(["corepack yarn test"]);
+    expect(renderOnboarding(await buildOnboardingReport({ repo, workingDirectory: "frontend" }))).toContain(`Execution root: ${join(canonical, "frontend")}`);
   });
 
   it("blocks missing paths, non-Git paths, and artifact roots inside targets", async () => {

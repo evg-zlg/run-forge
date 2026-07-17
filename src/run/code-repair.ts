@@ -17,6 +17,12 @@ export type CodeRepairPlan = {
   changes: CodeRepairChange[];
 };
 
+export function scopeCodeRepairPlan(plan: CodeRepairPlan, workingDirectory: string): CodeRepairPlan {
+  if (workingDirectory === ".") return plan;
+  const prefix = workingDirectory.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, "");
+  return { ...plan, allowed_files: plan.allowed_files.map((file) => `${prefix}/${file}`), changes: plan.changes.map((change) => ({ ...change, file: `${prefix}/${change.file}` })) };
+}
+
 const absoluteForbidden = [
   /(^|\/)\.env(?:\.|$)/i,
   /(^|\/)(?:package-lock\.json|pnpm-lock\.yaml|yarn\.lock)$/i,

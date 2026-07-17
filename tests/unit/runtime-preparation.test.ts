@@ -17,6 +17,11 @@ describe("external runtime preparation policy", () => {
     expect(args.at(-1)).toContain("npm ci --ignore-scripts");
   });
 
+  it("prepares dependencies from the nested execution root", () => {
+    const args = preparationDockerArgs("/tmp/prepared", "runforge:local", "prepare-test", "corepack yarn install --immutable", "frontend");
+    expect(args).toContain("/workspace/frontend");
+  });
+
   it("plans the required validation commands for the detected package manager", () => {
     expect(planExternalValidationTaskRun("validate", "package-lock.json").subtasks.map((item) => item.evidenceCommand)).toEqual([
       "npm run typecheck", "npm test", "npm run build"

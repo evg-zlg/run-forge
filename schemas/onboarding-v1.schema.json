@@ -73,8 +73,8 @@
       "properties": {
         "schemaVersion": { "const": 2 }, "taskId": { "$ref": "#/$defs/nonEmptyString" },
         "task": { "type": "object", "additionalProperties": false, "required": ["text", "goal", "acceptanceCriteria"], "properties": { "text": { "$ref": "#/$defs/nonEmptyString" }, "goal": { "$ref": "#/$defs/nonEmptyString" }, "acceptanceCriteria": { "$ref": "#/$defs/nonEmptyStrings" } } },
-        "target": { "type": "object", "additionalProperties": false, "required": ["repository"], "properties": { "repository": { "$ref": "#/$defs/nonEmptyString" } } },
-        "runtime": { "type": "object", "additionalProperties": false, "required": ["preference", "prepareDependencies"], "properties": { "preference": { "const": "docker" }, "prepareDependencies": { "type": "boolean" } } },
+        "target": { "type": "object", "additionalProperties": false, "required": ["repository", "workingDirectory"], "properties": { "repository": { "$ref": "#/$defs/nonEmptyString" }, "workingDirectory": { "$ref": "#/$defs/nonEmptyString" } } },
+        "runtime": { "type": "object", "additionalProperties": false, "required": ["preference", "dependencyPreparation", "externalNetwork"], "properties": { "preference": { "enum": ["docker", "local"] }, "dependencyPreparation": { "enum": ["required", "if-needed", "disabled", "reuse-existing"] }, "externalNetwork": { "enum": ["denied", "dependency-preparation-only"] } } },
         "validation": { "type": "object", "additionalProperties": false, "required": ["mode", "commands"], "properties": { "mode": { "const": "auto" }, "commands": { "type": "array", "maxItems": 0 } } },
         "authority": { "type": "object", "additionalProperties": false, "required": ["profile", "allowProviderCalls"], "properties": { "profile": { "const": "read-only" }, "allowProviderCalls": { "const": false } } },
         "git": { "type": "object", "additionalProperties": false, "required": ["publication"], "properties": { "publication": { "const": "none" } } },
@@ -98,9 +98,9 @@
     "nonEmptyStrings": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/nonEmptyString" } },
     "projectInspection": {
       "type": "object", "additionalProperties": false,
-      "required": ["requestedPath", "path", "exists", "isGitRepository", "head", "branch", "detachedHead", "worktree", "defaultBranch", "packageManager", "dependencyPreparation", "validationCommands"],
+      "required": ["requestedPath", "requestedWorkingDirectory", "path", "repositoryRoot", "executionRoot", "workingDirectory", "exists", "isGitRepository", "head", "branch", "detachedHead", "worktree", "defaultBranch", "packageManager", "dependencyPreparation", "validationCommands"],
       "properties": {
-        "requestedPath": { "$ref": "#/$defs/nonEmptyString" }, "path": { "type": ["string", "null"] }, "exists": { "type": "boolean" },
+        "requestedPath": { "$ref": "#/$defs/nonEmptyString" }, "requestedWorkingDirectory": { "$ref": "#/$defs/nonEmptyString" }, "path": { "type": ["string", "null"] }, "repositoryRoot": { "type": ["string", "null"] }, "executionRoot": { "type": ["string", "null"] }, "workingDirectory": { "type": ["string", "null"] }, "exists": { "type": "boolean" },
         "isGitRepository": { "type": "boolean" }, "head": { "type": ["string", "null"] }, "branch": { "type": ["string", "null"] },
         "detachedHead": { "type": "boolean" }, "defaultBranch": { "type": ["string", "null"] }, "packageManager": { "type": ["string", "null"] },
         "validationCommands": { "type": "array", "items": { "type": "string", "minLength": 1 } },

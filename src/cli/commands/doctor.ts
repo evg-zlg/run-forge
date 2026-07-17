@@ -5,16 +5,19 @@ export function doctorCommand(): Command {
   return new Command("doctor")
     .description("Check RunForge and optional target-repository readiness without changing either repository.")
     .option("--repo <path>", "target repository to inspect")
+    .option("--working-directory <path>", "execution root relative to the Git repository", ".")
     .option("--format <format>", "output format: human or json", "human")
     .option("--artifact-root <path>", "planned artifact root to validate")
     .option("--runtime <runtime>", "planned runtime: local or docker")
+    .option("--dependency-preparation <strategy>", "required, if-needed, disabled, or reuse-existing", "if-needed")
     .option("--docker-image <image>", "local image required by Docker runtime", "runforge:local")
     .option("--publication <mode>", "planned publication: none or draft-pr", "none")
     .action(async (opts) => {
       const format = parseChoice(opts.format, ["human", "json"], "--format");
       const runtime = opts.runtime === undefined ? undefined : parseChoice(opts.runtime, ["local", "docker"], "--runtime");
+      const dependencyPreparation = parseChoice(opts.dependencyPreparation, ["required", "if-needed", "disabled", "reuse-existing"], "--dependency-preparation");
       const publication = parseChoice(opts.publication, ["none", "draft-pr"], "--publication");
-      const report = await buildDoctorReport({ repo: opts.repo, artifactRoot: opts.artifactRoot, runtime, dockerImage: opts.dockerImage, publication });
+      const report = await buildDoctorReport({ repo: opts.repo, workingDirectory: opts.workingDirectory, artifactRoot: opts.artifactRoot, runtime, dependencyPreparation, dockerImage: opts.dockerImage, publication });
       console.log(format === "json" ? JSON.stringify(report, null, 2) : renderDoctor(report));
       if (report.status === "blocked") process.exitCode = 2;
     });

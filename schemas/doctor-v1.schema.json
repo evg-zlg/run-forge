@@ -18,9 +18,9 @@
     "string": { "type": "string", "minLength": 1 },
     "project": {
       "type": "object", "additionalProperties": false,
-      "required": ["requestedPath", "path", "exists", "isGitRepository", "head", "branch", "detachedHead", "worktree", "defaultBranch", "packageManager", "dependencyPreparation", "validationCommands"],
+      "required": ["requestedPath", "requestedWorkingDirectory", "path", "repositoryRoot", "executionRoot", "workingDirectory", "exists", "isGitRepository", "head", "branch", "detachedHead", "worktree", "defaultBranch", "packageManager", "dependencyPreparation", "validationCommands"],
       "properties": {
-        "requestedPath": { "$ref": "#/$defs/string" }, "path": { "type": ["string", "null"] }, "exists": { "type": "boolean" }, "isGitRepository": { "type": "boolean" },
+        "requestedPath": { "$ref": "#/$defs/string" }, "requestedWorkingDirectory": { "$ref": "#/$defs/string" }, "path": { "type": ["string", "null"] }, "repositoryRoot": { "type": ["string", "null"] }, "executionRoot": { "type": ["string", "null"] }, "workingDirectory": { "type": ["string", "null"] }, "exists": { "type": "boolean" }, "isGitRepository": { "type": "boolean" },
         "head": { "type": ["string", "null"] }, "branch": { "type": ["string", "null"] }, "detachedHead": { "type": "boolean" }, "defaultBranch": { "type": ["string", "null"] }, "packageManager": { "type": ["string", "null"] },
         "worktree": { "type": "object", "additionalProperties": false, "required": ["clean", "summary"], "properties": { "clean": { "type": ["boolean", "null"] }, "summary": { "type": ["string", "null"] } } },
         "dependencyPreparation": { "type": "object", "additionalProperties": false, "required": ["supported", "lockfile", "command"], "properties": { "supported": { "type": "boolean" }, "lockfile": { "type": ["string", "null"] }, "command": { "type": ["string", "null"] } } },

@@ -11,9 +11,9 @@ export type TaskSpecV2 = {
   schemaVersion: 2;
   taskId: string;
   task: { text: string; goal: string; acceptanceCriteria: string[] };
-  target: { repository: string };
+  target: { repository: string; workingDirectory: string };
   discovery: { policy: "auto" | "explicit" };
-  runtime: { preference: "docker"; dockerImage: string; prepareDependencies: boolean };
+  runtime: { preference: "docker" | "local"; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" };
   validation: { mode: "auto" | "explicit"; commands: string[] };
   authority: { profile: "read-only" | "bounded-implementation"; envelopeFile: string | null; forbiddenAreas: string[]; allowProviderCalls: false };
   git: { publication: "none" | "draft-pr"; branch: string | null };
@@ -45,10 +45,11 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const task = object(raw.task, "task must be an object.");
   rejectUnknown(task, ["text", "goal", "acceptanceCriteria"], "task");
   const target = object(raw.target, "target must be an object.");
-  rejectUnknown(target, ["repository"], "target");
+  rejectUnknown(target, ["repository", "workingDirectory"], "target");
   const repositoryInput = string(target.repository, "target.repository");
   const repository = resolve(baseDir, repositoryInput);
-  const inspection = await inspectProject(repository);
+  const workingDirectory = optionalString(target.workingDirectory, "target.workingDirectory") ?? ".";
+  const inspection = await inspectProject(repository, workingDirectory);
   if (!inspection.exists) throw new Error(`target.repository does not exist: ${repository}`);
   if (!inspection.isGitRepository || !inspection.path) throw new Error(`target.repository must be a Git repository: ${repository}`);
   if (!inspection.head) throw new Error(`target.repository must have a valid committed HEAD: ${repository}`);
@@ -70,7 +71,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const discoveryRaw = optionalObject(raw.discovery, "discovery");
   rejectUnknown(discoveryRaw, ["policy"], "discovery");
   const runtimeRaw = optionalObject(raw.runtime, "runtime");
-  rejectUnknown(runtimeRaw, ["preference", "dockerImage", "prepareDependencies"], "runtime");
+  rejectUnknown(runtimeRaw, ["preference", "dockerImage", "prepareDependencies", "dependencyPreparation", "externalNetwork"], "runtime");
   const authorityRaw = optionalObject(raw.authority, "authority");
   rejectUnknown(authorityRaw, ["profile", "envelopeFile", "forbiddenAreas", "allowProviderCalls"], "authority");
   const gitRaw = optionalObject(raw.git, "git");
@@ -88,11 +89,11 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const repairMode = choice(repairRaw.mode ?? "none", ["none", "disposable", "code"], "repair.mode");
   const authorityFile = authorityRaw.envelopeFile === undefined || authorityRaw.envelopeFile === null ? null : resolve(baseDir, string(authorityRaw.envelopeFile, "authority.envelopeFile"));
   const repairPlan = repairRaw.plan === undefined || repairRaw.plan === null ? null : resolve(baseDir, string(repairRaw.plan, "repair.plan"));
-  const prepareDependencies = boolean(runtimeRaw.prepareDependencies ?? false, "runtime.prepareDependencies");
-  if (prepareDependencies && !inspection.dependencyPreparation.supported) throw new Error(`runtime.prepareDependencies=true requires a supported npm, pnpm, or yarn lockfile in target.repository.`);
+  if (runtimeRaw.prepareDependencies !== undefined && runtimeRaw.dependencyPreparation !== undefined) throw new Error("Use runtime.dependencyPreparation or legacy runtime.prepareDependencies, not both.");
+  const legacyPrepare = runtimeRaw.prepareDependencies === undefined ? undefined : boolean(runtimeRaw.prepareDependencies, "runtime.prepareDependencies");
+  const dependencyPreparation = choice(runtimeRaw.dependencyPreparation ?? (legacyPrepare === true ? "required" : legacyPrepare === false ? "disabled" : "if-needed"), ["required", "if-needed", "disabled", "reuse-existing"], "runtime.dependencyPreparation");
   if (profile === "read-only" && repairMode !== "none") throw new Error("authority.profile='read-only' requires repair.mode='none'.");
   if (repairMode === "code" && !repairRaw.plan) throw new Error("repair.mode='code' requires repair.plan.");
-  if (repairMode !== "none" && !prepareDependencies) throw new Error("Repair tasks require runtime.prepareDependencies=true.");
   const publication = choice(gitRaw.publication ?? "none", ["none", "draft-pr"], "git.publication");
   if (publication === "none" && gitRaw.branch != null) throw new Error("git.branch is only valid when git.publication='draft-pr'.");
   if (publication === "draft-pr" && profile !== "bounded-implementation") throw new Error("Draft PR publication requires bounded-implementation authority.");
@@ -107,9 +108,14 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
     schemaVersion: 2,
     taskId,
     task: { text: string(task.text, "task.text"), goal: string(task.goal, "task.goal"), acceptanceCriteria: strings(task.acceptanceCriteria, "task.acceptanceCriteria", true) },
-    target: { repository: await realpath(inspection.path) },
+    target: { repository: await realpath(inspection.path), workingDirectory: inspection.workingDirectory ?? "." },
     discovery: { policy: choice(discoveryRaw.policy ?? "auto", ["auto", "explicit"], "discovery.policy") },
-    runtime: { preference: choice(runtimeRaw.preference ?? "docker", ["docker"], "runtime.preference"), dockerImage: optionalString(runtimeRaw.dockerImage, "runtime.dockerImage") ?? "runforge:local", prepareDependencies },
+    runtime: {
+      preference: choice(runtimeRaw.preference ?? "docker", ["docker", "local"], "runtime.preference"),
+      dockerImage: optionalString(runtimeRaw.dockerImage, "runtime.dockerImage") ?? "runforge:local",
+      dependencyPreparation,
+      externalNetwork: choice(runtimeRaw.externalNetwork ?? "denied", ["denied", "dependency-preparation-only"], "runtime.externalNetwork")
+    },
     validation: { mode: validationMode, commands },
     authority: { profile, envelopeFile: authorityFile, forbiddenAreas, allowProviderCalls: false },
     git: { publication, branch: nullableString(gitRaw.branch, "git.branch") },

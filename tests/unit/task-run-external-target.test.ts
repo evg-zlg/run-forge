@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { runTaskRunHarness } from "../../src/run/task-run-harness.js";
-import { assertExternalPathsOutsideTarget } from "../../src/run/task-run-external-target.js";
+import { assertExternalPathsOutsideTarget, assertExternalTaskPolicy } from "../../src/run/task-run-external-target.js";
 
 const roots: string[] = [];
 
@@ -12,6 +12,11 @@ afterEach(async () => {
 });
 
 describe("external task-run target boundaries", () => {
+  it("allows local execution only with explicit disposable-workspace authority", async () => {
+    const repo = await tempRoot("runforge-external-target-");
+    await expect(assertExternalTaskPolicy({ repo, runtime: "local", commands: ["node --version"] })).rejects.toThrow("disposable local workspace");
+    await expect(assertExternalTaskPolicy({ repo, runtime: "local", commands: ["node --version"], allowDisposableLocal: true })).resolves.toBeUndefined();
+  });
   it("rejects artifact and tmp paths inside the original repository", async () => {
     const repo = await tempRoot("runforge-external-target-");
     await expect(assertExternalPathsOutsideTarget(repo, [join(repo, "validation", "run")])).rejects.toThrow("must be outside --repo");

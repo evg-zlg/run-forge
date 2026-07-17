@@ -47,7 +47,7 @@ export type TaskRunExecutor = {
 export class LocalShellExecutor implements TaskRunExecutor {
   readonly lane = "local-shell" as const;
 
-  constructor(private readonly repoRoot: string) {}
+  constructor(private readonly repoRoot: string, private readonly controlledEnvironment = false) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
     await mkdir(request.artifactDir, { recursive: true });
@@ -61,6 +61,7 @@ export class LocalShellExecutor implements TaskRunExecutor {
     try {
       const output = await execFileAsync("sh", ["-lc", request.command], {
         cwd: request.cwd,
+        env: this.controlledEnvironment ? controlledLocalEnvironment() : process.env,
         maxBuffer: 1024 * 1024 * 8,
         timeout: request.timeoutMs
       });
@@ -111,6 +112,11 @@ export class LocalShellExecutor implements TaskRunExecutor {
     await writeFile(paths.report, JSON.stringify(toExecutorReport(request, result, this.repoRoot), null, 2) + "\n", "utf8");
     return result;
   }
+}
+
+function controlledLocalEnvironment(): NodeJS.ProcessEnv {
+  const allowed = ["PATH", "LANG", "LC_ALL", "TMPDIR", "SHELL", "TERM"];
+  return { ...Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]])), CI: "1", RUNFORGE_RUNTIME_NETWORK: "denied" };
 }
 
 export class DockerShellExecutor implements TaskRunExecutor {
