@@ -32,7 +32,7 @@ When running from the source checkout, use `corepack pnpm dev` in place of `runf
     ]
   },
   "target": { "repository": "/absolute/path/to/project", "workingDirectory": "frontend" },
-  "runtime": { "preference": "local", "dependencyPreparation": "reuse-existing", "externalNetwork": "denied" },
+  "runtime": { "preference": "docker", "dependencyPreparation": "reuse-existing", "externalNetwork": "denied" },
   "validation": { "mode": "auto", "commands": [] },
   "authority": { "profile": "read-only", "allowProviderCalls": false },
   "git": { "publication": "none" },
@@ -45,7 +45,7 @@ Use `validation.mode: "explicit"` with a non-empty command list if doctor cannot
 
 `target.workingDirectory` is optional and defaults to the repository root. It must be a relative existing directory whose canonical path remains inside the Git repository; traversal and symlink escapes are rejected. Git safety and identity remain repository-scoped, while package manager, lockfile, dependency preparation, validation, and repair commands are execution-root scoped.
 
-TaskSpec v2 supports Docker and explicitly authorized local disposable repair runtimes. Dependency preparation uses `required`, `if-needed`, `disabled`, or `reuse-existing`; legacy `prepareDependencies` remains accepted and migrates to `required`/`disabled`. Missing preparation prerequisites become a normalized blocked result with an owner gate instead of a schema rejection. Local repair requires a clean source, external artifacts, an explicit authority envelope, a disposable workspace, a controlled environment, source immutability checks, and an explicit external-network policy.
+TaskSpec v2 runtime IDs are `docker` and `local-disposable`. Implementation and repair default to the compatible `local-disposable` runtime when `runtime.preference` is omitted; inspection and validation default to `docker`. An explicit incompatible runtime is rejected rather than silently replaced. Dependency preparation uses `required`, `if-needed`, `disabled`, or `reuse-existing`; legacy `prepareDependencies` remains accepted and migrates to `required`/`disabled`. Missing preparation prerequisites become a normalized blocked result with an owner gate instead of a schema rejection. Local repair requires a clean source, external artifacts, an explicit authority envelope, a disposable workspace, a controlled environment, source immutability checks, and an explicit external-network policy.
 
 The full contract is [task-spec-v2.schema.json](../schemas/task-spec-v2.schema.json). Unknown fields and unsupported versions are errors. Runtime provider calls, secrets, target-main writes, PR merge, deploy, DB, and production access are denied by default.
 

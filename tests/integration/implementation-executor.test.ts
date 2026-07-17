@@ -4,6 +4,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
 import { discoverImplementationExecutors } from "../../src/implementation/executor.js";
@@ -64,13 +65,18 @@ describe("implementation executor", () => {
       const capabilities = await fetch(`${server.url}/v1/capabilities`).then((response) => response.json()) as Record<string, any>;
       expect(capabilities.implementationExecutors).toMatchObject([{ status: "ready" }]);
       expect(capabilities.implementationExecutors[0].command).toBeUndefined();
-      expect(capabilities.taskSpecContract).toMatchObject({ contractVersion: "task-spec-v2", schemaVersion: 2, schemaUrl: "/schemas/task-spec-v2.schema.json", schema: { required: expect.arrayContaining(["execution"]) }, implementationRequest: { taskSpec: { execution: { mode: "implementation" }, runtime: { preference: "local" } }, authority: { localBranch: true, localCommit: true } } });
+      expect(capabilities.taskSpecContract).toMatchObject({ contractVersion: "task-spec-v2", schemaVersion: 2, schemaUrl: "/schemas/task-spec-v2.schema.json", schema: { required: expect.arrayContaining(["execution"]) }, runtimeDefaults: { implementation: "local-disposable" }, implementationRequest: { taskSpec: { execution: { mode: "implementation" }, runtime: { preference: "local-disposable" } }, authority: { localBranch: true, localCommit: true } } });
       const discovery = await fetch(`${server.url}/.well-known/runforge`).then((response) => response.json()) as Record<string, any>;
-      expect(discovery.taskSpecContract).toMatchObject({ implementationExecutorIds: ["local-coding-agent"], compatibleRuntimes: { "local-coding-agent": ["local-disposable"] } });
-      expect(await fetch(`${server.url}${discovery.endpoints.taskSpecSchema}`).then((response) => response.json())).toMatchObject({ title: "RunForge TaskSpec v2", required: expect.arrayContaining(["execution"]) });
+      expect(discovery.taskSpecContract).toMatchObject({ implementationExecutorIds: ["local-coding-agent"], compatibleRuntimes: { "local-coding-agent": ["local-disposable"] }, implementationRequest: { taskSpec: { runtime: { preference: "local-disposable" } } } });
+      const schemaResponse = await fetch(`${server.url}${discovery.endpoints.taskSpecSchema}`); expect(schemaResponse.status).toBe(200);
+      const schema = await schemaResponse.json() as Record<string, any>; expect(schema).toMatchObject({ title: "RunForge TaskSpec v2", required: expect.arrayContaining(["execution"]), properties: { runtime: { properties: { preference: { enum: ["docker", "local-disposable"] } } } } });
+      expect(schema).toEqual(JSON.parse(await readFile(resolve(here, "../../schemas/task-spec-v2.schema.json"), "utf8")));
+      const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(schema); expect(validate(discovery.taskSpecContract.implementationRequest.taskSpec), validate.errors?.map((item: { instancePath: string; message?: string }) => `${item.instancePath} ${item.message}`).join("; ")).toBe(true);
+      const ready = await fetch(`${server.url}/readyz`).then((response) => response.json()) as Record<string, any>;
+      expect(ready.implementationExecutors).toEqual(discovery.implementationExecutors); expect(discovery.implementationExecutors).toEqual(capabilities.implementationExecutors);
       const project = await fetch(`${server.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repo, register: true, runtime: "local" }) }).then((response) => response.json()) as Record<string, any>;
-      const request: Record<string, any> = spec(repo, "EXECUTOR-HTTP-1", "ADD_TEST fix add", ["node test.js", "node added.test.js"]); delete request.target;
-      const created = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: project.project.id, taskSpec: request, authority: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true } }) });
+      const request = structuredClone(discovery.taskSpecContract.implementationRequest); request.projectId = project.project.id; request.taskSpec.taskId = "EXECUTOR-HTTP-1"; request.taskSpec.task.text = "ADD_TEST fix add"; request.taskSpec.validation = { mode: "explicit", commands: ["node test.js", "node added.test.js"] };
+      const created = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) });
       expect(created.status).toBe(202);
       const accepted = await created.json() as Record<string, any>; expect(accepted.selection).toMatchObject({ requestedMode: "implementation", normalizedMode: "implementation", selectedExecutor: "local-coding-agent", selectedRuntime: "local-disposable", authorityChecks: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true }, providerDecision: "allowed", networkDecision: "allowed" });
       const terminal = await poll(`${server.url}/v1/tasks/EXECUTOR-HTTP-1`); expect(terminal.status).toBe("completed");
@@ -110,9 +116,21 @@ describe("implementation executor", () => {
       for (const [name, mutate, authority, code] of cases) {
         const value = spec(repo, `EXECUTOR-${name}-PREFLIGHT`, "fix", ["node test.js"]); mutate(value);
         const response = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: value, authority }) });
-        expect(response.status).toBeGreaterThanOrEqual(400); expect(await response.json()).toMatchObject({ error: { code, details: { operation: "start_new_task", newTaskRequired: true } } });
+        expect(response.status).toBeGreaterThanOrEqual(400); const error = await response.json(); expect(error).toMatchObject({ error: { code, details: { operation: "start_new_task", newTaskRequired: true } } });
+        if (name === "RUNTIME") expect(error).toMatchObject({ error: { code: "runtime_incompatible", message: expect.stringContaining("local-disposable"), details: { executorId: "local-coding-agent", requestedRuntime: "docker", allowedValues: ["docker", "local-disposable"], compatibleRuntimes: ["local-disposable"], correctedRequest: { taskSpec: { runtime: { preference: "local-disposable" } } } } } });
       }
       expect(await server.manager.store.listTasks()).toHaveLength(0);
+    } finally { await server.close(); }
+  });
+
+  it("uses the documented compatible runtime when implementation runtime is omitted", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository(); const state = await mkdtemp(join(tmpdir(), "runforge-implementation-default-runtime-"));
+    const server = await startControlPlaneServer({ port: 0, stateRoot: state });
+    try {
+      const value: Record<string, any> = spec(repo, "EXECUTOR-DEFAULT-RUNTIME-1", "fix", ["node test.js"]); delete value.runtime.preference;
+      const response = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: value, authority: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true } }) });
+      expect(response.status).toBe(202); expect(await response.json()).toMatchObject({ selection: { selectedExecutor: "local-coding-agent", selectedRuntime: "local-disposable" } });
     } finally { await server.close(); }
   });
 
@@ -131,7 +149,7 @@ describe("implementation executor", () => {
 
 async function repository(): Promise<string> { const repo = await mkdtemp(join(tmpdir(), "runforge-implementation-repo-")); await cp(fixture, repo, { recursive: true }); await git(repo, ["init", "-b", "main"]); await git(repo, ["add", "."]); await git(repo, ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]); return repo; }
 async function git(cwd: string, args: string[]): Promise<string> { return (await exec("git", args, { cwd })).stdout; }
-function spec(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []) { return { schemaVersion: 2, taskId, task: { text, goal: "Make the deterministic fixture satisfy acceptance", acceptanceCriteria: ["validation is green", "local patch evidence exists"] }, target: { repository: repo, workingDirectory: "." }, execution: { mode: "implementation", maxRepairIterations: 2 }, runtime: { preference: "local", externalNetwork: "allowed", dependencyPreparation: "disabled" }, validation: { mode: "explicit", commands }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true, forbiddenAreas }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
+function spec(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []) { return { schemaVersion: 2, taskId, task: { text, goal: "Make the deterministic fixture satisfy acceptance", acceptanceCriteria: ["validation is green", "local patch evidence exists"] }, target: { repository: repo, workingDirectory: "." }, execution: { mode: "implementation", maxRepairIterations: 2 }, runtime: { preference: "local-disposable", externalNetwork: "allowed", dependencyPreparation: "disabled" }, validation: { mode: "explicit", commands }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true, forbiddenAreas }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
 async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
 async function poll(url: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("task did not finish"); }
 async function pollPhase(url: string, phase: string): Promise<void> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (task.progress?.phase === phase) return; await new Promise((done) => setTimeout(done, 25)); } throw new Error(`task did not reach ${phase}`); }

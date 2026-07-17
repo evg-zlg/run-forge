@@ -6,6 +6,7 @@ import { execFile } from "node:child_process";
 import { loadAdminConfig } from "../admin/config.js";
 import { scanSecrets } from "../security/secret-scan.js";
 import type { TaskSpecV2, TaskExecutionMode } from "../product/task-spec-v2.js";
+import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor } from "../product/task-spec-contract.js";
 
 const execFileAsync = promisify(execFile);
 const credentialCache = new Map<string, { at: number; ready: boolean }>();
@@ -55,7 +56,7 @@ export async function selectImplementationExecutor(spec: TaskSpecV2): Promise<{ 
     const reasons: string[] = [];
     if (executor.status !== "ready") reasons.push(...executor.limitations);
     if (!executor.supports.includes(spec.execution.mode)) reasons.push(`mode ${spec.execution.mode} is unsupported`);
-    if (spec.runtime.preference !== "local") reasons.push(`runtime ${spec.runtime.preference} is unsupported; implementation requires local-disposable`);
+    if (!runtimeCompatibleWithImplementationExecutor(spec.runtime.preference)) reasons.push(`runtime ${spec.runtime.preference} is unsupported; ${executor.id} accepts: ${executor.runtime.join(", ")}`);
     if (spec.execution.maxProviderTokens > executor.maxLimits.providerTokens) reasons.push(`provider token budget exceeds executor limit ${executor.maxLimits.providerTokens}`);
     if (executor.providerCalls && !spec.authority.allowProviderCalls) reasons.push("provider calls denied by TaskSpec authority");
     if (executor.providerCalls && (!spec.authority.allowNetwork || spec.runtime.externalNetwork !== "allowed")) reasons.push("provider network denied by TaskSpec authority/runtime policy");
@@ -148,7 +149,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   }
 }
 
-function capability(command: string | null, status: ExecutorStatus, limitations: string[], model: string | null = process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null): ImplementationExecutorCapability { const result = { id: "local-coding-agent", status, supports: ["implementation", "repair"], providerCalls: true, runtime: ["local-disposable"], providerRequirements: ["existing local coding-agent credential mechanism"], networkRequirements: ["provider transport; denied unless separately authorized"], maxLimits: { timeoutMs: 1_800_000, repairIterations: 3, changedFiles: 100, patchBytes: 5_000_000, providerTokens: 200_000 }, limitations, model } as ImplementationExecutorCapability; Object.defineProperty(result, "command", { value: command, enumerable: false }); return result; }
+function capability(command: string | null, status: ExecutorStatus, limitations: string[], model: string | null = process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null): ImplementationExecutorCapability { const result = { id: implementationExecutorContract.id, status, supports: [...implementationExecutorContract.modes], providerCalls: true, runtime: [...implementationExecutorContract.runtimes], providerRequirements: ["existing local coding-agent credential mechanism"], networkRequirements: ["provider transport; denied unless separately authorized"], maxLimits: { timeoutMs: 1_800_000, repairIterations: 3, changedFiles: 100, patchBytes: 5_000_000, providerTokens: 200_000 }, limitations, model } as ImplementationExecutorCapability; Object.defineProperty(result, "command", { value: command, enumerable: false }); return result; }
 async function configuredCommand(): Promise<{ command: string; model: string | null } | null> { const env = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND?.trim(); if (env) return { command: env, model: process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null }; const config = await loadAdminConfig(); const provider = config.config.providers.find((item) => item.id === "codex-cli" && item.type === "cli" && item.enabled && item.command); if (provider?.command) return { command: provider.command, model: provider.defaultModel ?? null }; return executableAvailable("codex").then((ready) => ready ? { command: "codex", model: process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null } : null); }
 async function executableAvailable(command: string): Promise<boolean> { if (command.includes("/")) return access(command).then(() => true, () => false); return execFileAsync("sh", ["-c", `command -v "$1" >/dev/null 2>&1`, "sh", command]).then(() => true, () => false); }
 async function codexCredentialReady(argv: string[]): Promise<boolean> { const key = argv.join("\0"), cached = credentialCache.get(key); if (cached && Date.now() - cached.at < 30_000) return cached.ready; const ready = await execFileAsync(argv[0]!, [...argv.slice(1), "login", "status"], { env: safeRuntimeEnv(), timeout: 10_000 }).then(() => true, () => false); credentialCache.set(key, { at: Date.now(), ready }); return ready; }

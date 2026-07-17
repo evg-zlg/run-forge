@@ -1,0 +1,89 @@
+export const taskSpecSchemaVersion = 2 as const;
+export const taskSpecSchemaPath = "/schemas/task-spec-v2.schema.json" as const;
+export const taskExecutionModes = ["inspection", "implementation", "validation", "repair"] as const;
+export type TaskExecutionMode = typeof taskExecutionModes[number];
+
+export const taskRuntimeIds = ["docker", "local-disposable"] as const;
+export type TaskRuntimeId = typeof taskRuntimeIds[number];
+
+export const implementationExecutorContract = {
+  id: "local-coding-agent",
+  modes: ["implementation", "repair"] as const,
+  runtimes: ["local-disposable"] as const,
+  defaultRuntime: "local-disposable" as const
+};
+
+export function defaultRuntimeForMode(mode: TaskExecutionMode): TaskRuntimeId {
+  return implementationExecutorContract.modes.includes(mode as "implementation" | "repair")
+    ? implementationExecutorContract.defaultRuntime
+    : "docker";
+}
+
+export function runtimeCompatibleWithImplementationExecutor(runtime: string): runtime is typeof implementationExecutorContract.runtimes[number] {
+  return implementationExecutorContract.runtimes.includes(runtime as "local-disposable");
+}
+
+export const taskSpecV2Schema: Record<string, unknown> = {
+  $schema: "https://json-schema.org/draft/2020-12/schema",
+  $id: "https://runforge.local/schemas/task-spec-v2.schema.json",
+  title: "RunForge TaskSpec v2",
+  type: "object",
+  additionalProperties: false,
+  required: ["schemaVersion", "taskId", "task", "target", "execution"],
+  properties: {
+    schemaVersion: { const: taskSpecSchemaVersion },
+    taskId: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$" },
+    task: { type: "object", additionalProperties: false, required: ["text", "goal", "acceptanceCriteria"], properties: { text: { type: "string", minLength: 1 }, goal: { type: "string", minLength: 1 }, acceptanceCriteria: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } } } },
+    target: { type: "object", additionalProperties: false, required: ["repository"], properties: { repository: { type: "string", minLength: 1 }, workingDirectory: { type: "string", minLength: 1 }, expectedSha: { type: "string", minLength: 7 } } },
+    execution: { type: "object", additionalProperties: false, required: ["mode"], properties: { mode: { enum: taskExecutionModes }, maxRepairIterations: { type: "integer", minimum: 0, maximum: 3 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 1800000 }, maxChangedFiles: { type: "integer", minimum: 1, maximum: 100 }, maxPatchBytes: { type: "integer", minimum: 1000, maximum: 5000000 }, maxProviderTokens: { type: "integer", minimum: 1000, maximum: 200000 } } },
+    discovery: { type: "object", additionalProperties: false, properties: { policy: { enum: ["auto", "explicit"] } } },
+    runtime: { type: "object", additionalProperties: false, properties: { preference: { enum: taskRuntimeIds }, dockerImage: { type: "string", minLength: 1 }, prepareDependencies: { type: "boolean" }, dependencyPreparation: { enum: ["required", "if-needed", "disabled", "reuse-existing"] }, externalNetwork: { enum: ["denied", "dependency-preparation-only", "allowed"] } }, not: { required: ["prepareDependencies", "dependencyPreparation"] } },
+    validation: { type: "object", additionalProperties: false, properties: { mode: { enum: ["auto", "explicit"] }, commands: { type: "array", items: { type: "string", minLength: 1 } } } },
+    authority: { type: "object", additionalProperties: false, properties: { profile: { enum: ["read-only", "bounded-implementation"] }, envelopeFile: { type: ["string", "null"] }, forbiddenAreas: { type: "array", items: { type: "string", minLength: 1 } }, allowProviderCalls: { type: "boolean" }, allowNetwork: { type: "boolean" } } },
+    git: { type: "object", additionalProperties: false, properties: { publication: { enum: ["none", "draft-pr"] }, branch: { type: ["string", "null"] } } },
+    merge: { type: "object", additionalProperties: false, properties: { policy: { const: "never" } } },
+    deploy: { type: "object", additionalProperties: false, properties: { policy: { const: "never" } } },
+    artifacts: { type: "object", additionalProperties: false, properties: { root: { type: "string", minLength: 1 }, resultFormat: { const: "normalized-v1" } } },
+    ownerGate: { type: "object", additionalProperties: false, properties: { policy: { const: "stop-and-report" } } },
+    repair: { type: "object", additionalProperties: false, properties: { mode: { enum: ["none", "disposable", "code"] }, plan: { type: ["string", "null"] } } }
+  }
+};
+
+export function publicTaskSpecContract(): Record<string, unknown> {
+  const executor = implementationExecutorContract;
+  return {
+    contractVersion: "task-spec-v2",
+    schemaVersion: taskSpecSchemaVersion,
+    schemaUrl: taskSpecSchemaPath,
+    schema: taskSpecV2Schema,
+    executionModes: taskExecutionModes,
+    runtimeIds: taskRuntimeIds,
+    runtimeDefaults: { implementation: executor.defaultRuntime, repair: executor.defaultRuntime, inspection: "docker", validation: "docker" },
+    implementationExecutorIds: [executor.id],
+    compatibleRuntimes: { [executor.id]: executor.runtimes },
+    requiredImplementationAuthority: {
+      taskSpec: ["authority.profile=bounded-implementation", "authority.allowProviderCalls=true", "authority.allowNetwork=true"],
+      request: ["implementation=true", "providerCalls=true", "network=true", "localBranch=true", "localCommit=true"],
+      publication: ["publication=none", "remotePush=false", "draftPublication=false", "merge=false", "deploy=false"]
+    },
+    implementationRequest: {
+      projectId: "<registered-project-id>",
+      taskSpec: {
+        schemaVersion: taskSpecSchemaVersion,
+        taskId: "IMPLEMENTATION-TASK-1",
+        task: { text: "Fix the bounded defect and add a regression test.", goal: "Validation is green and a local commit is recorded.", acceptanceCriteria: ["Defect is fixed", "Regression test passes", "Local commit is recorded"] },
+        target: { repository: "<registered-project-path>", workingDirectory: "." },
+        execution: { mode: "implementation", maxRepairIterations: 2, timeoutMs: 300000, maxChangedFiles: 20, maxPatchBytes: 500000, maxProviderTokens: 100000 },
+        runtime: { preference: executor.defaultRuntime, dependencyPreparation: "if-needed", externalNetwork: "allowed" },
+        validation: { mode: "auto", commands: [] },
+        authority: { profile: "bounded-implementation", forbiddenAreas: [".env", "secrets"], allowProviderCalls: true, allowNetwork: true },
+        git: { publication: "none", branch: null },
+        merge: { policy: "never" },
+        deploy: { policy: "never" },
+        repair: { mode: "none", plan: null }
+      },
+      authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false },
+      publication: "none"
+    }
+  };
+}

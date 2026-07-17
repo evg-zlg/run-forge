@@ -5,6 +5,7 @@ import { basename, join } from "node:path";
 import { buildDoctorReport } from "../product/doctor.js";
 import { runTaskSpecFile } from "../product/task-spec-runner.js";
 import { loadTaskSpecV2 } from "../product/task-spec-v2.js";
+import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor, taskRuntimeIds } from "../product/task-spec-contract.js";
 import { continueExternalExecution, recordOwnerDecision } from "../run/external-execution.js";
 import { ControlPlaneError, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
 import { ControlPlaneStore } from "./state.js";
@@ -48,6 +49,25 @@ export class ControlPlaneManager {
     if (await this.store.getTask(taskId)) throw new ControlPlaneError(409, "task_exists", `Task already exists: ${taskId}`, undefined, false, taskId);
     if (!input.authority.inspect) throw new ControlPlaneError(403, "authority_denied", "inspect authority is required to create a task.");
     if (project) raw.target = { repository: project.repository, workingDirectory: project.workingDirectory }; if (!raw.target) throw new ControlPlaneError(422, "project_required", "Provide projectId or taskSpec.target.");
+    const requestedMode = object(raw.execution).mode;
+    if (implementationExecutorContract.modes.includes(requestedMode)) {
+      const runtime = object(raw.runtime); const requestedRuntime = runtime.preference;
+      if (requestedRuntime !== undefined && (typeof requestedRuntime !== "string" || !runtimeCompatibleWithImplementationExecutor(requestedRuntime))) {
+        const correctedTaskSpec = structuredClone(raw); correctedTaskSpec.runtime = { ...runtime, preference: implementationExecutorContract.defaultRuntime };
+        throw new ControlPlaneError(422, "runtime_incompatible", `${implementationExecutorContract.id} does not support runtime '${String(requestedRuntime)}'; use '${implementationExecutorContract.defaultRuntime}'.`, {
+          executorId: implementationExecutorContract.id,
+          requestedMode,
+          requestedRuntime,
+          allowedValues: taskRuntimeIds,
+          compatibleRuntimes: implementationExecutorContract.runtimes,
+          documentedDefault: implementationExecutorContract.defaultRuntime,
+          correctedRequest: { ...(input.projectId ? { projectId: input.projectId } : {}), taskSpec: correctedTaskSpec, authority: input.authority, publication: input.publicationRequested },
+          operation: "start_new_task",
+          newTaskRequired: true
+        }, false, taskId);
+      }
+      raw.runtime = { ...runtime, preference: requestedRuntime ?? implementationExecutorContract.defaultRuntime };
+    }
     const requestedInSpec = object(raw.git).publication; const publicationRequested = input.publicationRequested === "draft-pr" || requestedInSpec === "draft-pr" ? "draft-pr" : "none";
     raw.git = { publication: "none" }; raw.merge = { policy: "never" }; raw.deploy = { policy: "never" }; const artifactRoot = join(this.store.taskDir(taskId), "attempts", "1", "artifacts"); raw.artifacts = { ...object(raw.artifacts), root: artifactRoot, resultFormat: "normalized-v1" };
     const specPath = await this.store.writeSpec(taskId, raw); let normalized: Awaited<ReturnType<typeof loadTaskSpecV2>>; try { normalized = await loadTaskSpecV2(specPath); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error), { operation: "start_new_task", newTaskRequired: true }); }
@@ -59,7 +79,6 @@ export class ControlPlaneManager {
     if ((normalized.authority.allowNetwork || normalized.runtime.externalNetwork === "allowed") && input.authority.network !== true) throw preflightError("network_authority_denied", "TaskSpec allows network but control-plane network authority is false.", normalized, input.authority);
     if (implementation && !normalized.authority.allowProviderCalls) throw preflightError("provider_permission_denied", "The implementation executor requires TaskSpec authority.allowProviderCalls=true.", normalized, input.authority);
     if (implementation && (!normalized.authority.allowNetwork || normalized.runtime.externalNetwork !== "allowed")) throw preflightError("network_permission_denied", "The implementation executor requires authority.allowNetwork=true and runtime.externalNetwork='allowed'.", normalized, input.authority);
-    if (implementation && normalized.runtime.preference !== "local") throw preflightError("runtime_incompatible", "Implementation requires runtime.preference='local' (selected runtime local-disposable).", normalized, input.authority);
     const selected = ["implementation", "repair"].includes(normalized.execution.mode) ? await selectImplementationExecutor(normalized) : null;
     if (selected && !selected.selected) throw new ControlPlaneError(503, "implementation_executor_unavailable", selected.reason, { requestedMode: normalized.execution.mode, availableExecutors: selected.rejected.map((item) => item.id), rejectedAlternatives: selected.rejected, authorityFailures: [], operation: "start_new_task", newTaskRequired: true }, true, taskId);
     const now = new Date().toISOString(); const task: ControlTaskRecord = {
@@ -67,7 +86,7 @@ export class ControlPlaneManager {
       publicationGate: publicationRequested === "draft-pr" ? { required: true, status: "blocked_until_implementation_completes", reason: "Remote publication is a separate decision." } : { required: false, status: "not_requested" }, ownerGate: { required: false, status: "not_required" },
       createdAt: now, updatedAt: now, startedAt: null, finishedAt: null, error: null, decisions: [], events: [], progress: progress(now), recovery: null,
       execution: { attempt: 0, lease: null, attempts: [], lastRetry: null }, continuation: { schemaVersion: 1, state: "none", decisionId: null, executionId: null, sourceExecutionId: null },
-      selection: { requestedMode: normalized.execution.mode, normalizedMode: normalized.execution.mode, selectedExecutor: selected?.selected?.id ?? (normalized.execution.mode === "validation" ? "validation-lane" : "inspection-lane"), selectedRuntime: selected ? "local-disposable" : normalized.runtime.preference === "local" ? "local-disposable" : "docker", selectionReason: selected?.reason ?? `Explicit ${normalized.execution.mode} mode uses its dedicated lane.`, rejectedAlternatives: selected?.rejected ?? [], authorityChecks: { inspect: input.authority.inspect, implementation: !implementation || input.authority.implementation, providerCalls: !normalized.authority.allowProviderCalls || input.authority.providerCalls === true, network: !normalized.authority.allowNetwork || input.authority.network === true, localBranch: !implementation || input.authority.localBranch, localCommit: !implementation || input.authority.localCommit, publicationForbidden: normalized.git.publication === "none" }, providerDecision: normalized.authority.allowProviderCalls ? "allowed" : "not_requested", networkDecision: normalized.runtime.externalNetwork === "allowed" ? "allowed" : "denied", provider: selected?.selected?.providerCalls ? "configured-local-credential" : null, model: selected?.selected?.model ?? null }
+      selection: { requestedMode: normalized.execution.mode, normalizedMode: normalized.execution.mode, selectedExecutor: selected?.selected?.id ?? (normalized.execution.mode === "validation" ? "validation-lane" : "inspection-lane"), selectedRuntime: normalized.runtime.preference, selectionReason: selected?.reason ?? `Explicit ${normalized.execution.mode} mode uses its dedicated lane.`, rejectedAlternatives: selected?.rejected ?? [], authorityChecks: { inspect: input.authority.inspect, implementation: !implementation || input.authority.implementation, providerCalls: !normalized.authority.allowProviderCalls || input.authority.providerCalls === true, network: !normalized.authority.allowNetwork || input.authority.network === true, localBranch: !implementation || input.authority.localBranch, localCommit: !implementation || input.authority.localCommit, publicationForbidden: normalized.git.publication === "none" }, providerDecision: normalized.authority.allowProviderCalls ? "allowed" : "not_requested", networkDecision: normalized.runtime.externalNetwork === "allowed" ? "allowed" : "denied", provider: selected?.selected?.providerCalls ? "configured-local-credential" : null, model: selected?.selected?.model ?? null }
     };
     await this.persist(task, "task_created"); if (publicationRequested === "draft-pr") await this.persist(task, "publication_gate_created", "blocked_until_implementation_completes"); await this.beginAttempt(task, "execution"); return task;
   }

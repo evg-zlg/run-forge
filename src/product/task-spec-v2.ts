@@ -3,11 +3,12 @@ import { dirname, join, resolve } from "node:path";
 import { blockedCommandReports } from "../run/external-command-check-helpers.js";
 import { loadCodeRepairPlan } from "../run/code-repair.js";
 import { defaultArtifactRoot, inspectProject, isPathInside } from "./project-inspection.js";
+import { defaultRuntimeForMode, implementationExecutorContract, runtimeCompatibleWithImplementationExecutor, taskExecutionModes, taskRuntimeIds, taskSpecSchemaVersion, type TaskExecutionMode, type TaskRuntimeId } from "./task-spec-contract.js";
 
-export const taskSpecSchemaVersion = 2;
+export { taskSpecSchemaVersion } from "./task-spec-contract.js";
 const topKeys = ["schemaVersion", "taskId", "task", "target", "execution", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
 
-export type TaskExecutionMode = "inspection" | "implementation" | "validation" | "repair";
+export type { TaskExecutionMode } from "./task-spec-contract.js";
 
 export type TaskSpecV2 = {
   schemaVersion: 2;
@@ -16,7 +17,7 @@ export type TaskSpecV2 = {
   target: { repository: string; workingDirectory: string; expectedSha: string };
   execution: { mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number };
   discovery: { policy: "auto" | "explicit" };
-  runtime: { preference: "docker" | "local"; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" | "allowed" };
+  runtime: { preference: TaskRuntimeId; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" | "allowed" };
   validation: { mode: "auto" | "explicit"; commands: string[] };
   authority: { profile: "read-only" | "bounded-implementation"; envelopeFile: string | null; forbiddenAreas: string[]; allowProviderCalls: boolean; allowNetwork: boolean };
   git: { publication: "none" | "draft-pr"; branch: string | null };
@@ -94,13 +95,17 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const profile = choice(authorityRaw.profile ?? "read-only", ["read-only", "bounded-implementation"], "authority.profile");
   const forbiddenAreas = strings(authorityRaw.forbiddenAreas ?? defaultForbidden(), "authority.forbiddenAreas");
   const repairMode = choice(repairRaw.mode ?? "none", ["none", "disposable", "code"], "repair.mode");
-  const executionMode = choice(executionRaw.mode, ["inspection", "implementation", "validation", "repair"], "execution.mode");
+  const executionMode = choice(executionRaw.mode, taskExecutionModes, "execution.mode");
   if (["implementation", "repair"].includes(executionMode) !== (profile === "bounded-implementation")) throw new Error(`execution.mode='${executionMode}' is inconsistent with authority.profile='${profile}'.`);
   const authorityFile = authorityRaw.envelopeFile === undefined || authorityRaw.envelopeFile === null ? null : resolve(baseDir, string(authorityRaw.envelopeFile, "authority.envelopeFile"));
   const repairPlan = repairRaw.plan === undefined || repairRaw.plan === null ? null : resolve(baseDir, string(repairRaw.plan, "repair.plan"));
   if (runtimeRaw.prepareDependencies !== undefined && runtimeRaw.dependencyPreparation !== undefined) throw new Error("Use runtime.dependencyPreparation or legacy runtime.prepareDependencies, not both.");
   const legacyPrepare = runtimeRaw.prepareDependencies === undefined ? undefined : boolean(runtimeRaw.prepareDependencies, "runtime.prepareDependencies");
   const dependencyPreparation = choice(runtimeRaw.dependencyPreparation ?? (legacyPrepare === true ? "required" : legacyPrepare === false ? "disabled" : "if-needed"), ["required", "if-needed", "disabled", "reuse-existing"], "runtime.dependencyPreparation");
+  const runtimePreference = choice(runtimeRaw.preference ?? defaultRuntimeForMode(executionMode), taskRuntimeIds, "runtime.preference");
+  if (implementationExecutorContract.modes.includes(executionMode as "implementation" | "repair") && !runtimeCompatibleWithImplementationExecutor(runtimePreference)) {
+    throw new Error(`runtime.preference='${runtimePreference}' is incompatible with ${implementationExecutorContract.id}; supported: ${implementationExecutorContract.runtimes.join(", ")}.`);
+  }
   if (profile === "read-only" && repairMode !== "none") throw new Error("authority.profile='read-only' requires repair.mode='none'.");
   if (repairMode === "code" && !repairRaw.plan) throw new Error("repair.mode='code' requires repair.plan.");
   const publication = choice(gitRaw.publication ?? "none", ["none", "draft-pr"], "git.publication");
@@ -124,7 +129,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
     execution: { mode: executionMode, maxRepairIterations: integer(executionRaw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(executionRaw.timeoutMs, "execution.timeoutMs", 1_000, 1_800_000, 300_000), maxChangedFiles: integer(executionRaw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(executionRaw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: integer(executionRaw.maxProviderTokens, "execution.maxProviderTokens", 1_000, 200_000, 100_000) },
     discovery: { policy: choice(discoveryRaw.policy ?? "auto", ["auto", "explicit"], "discovery.policy") },
     runtime: {
-      preference: choice(runtimeRaw.preference ?? "docker", ["docker", "local"], "runtime.preference"),
+      preference: runtimePreference,
       dockerImage: optionalString(runtimeRaw.dockerImage, "runtime.dockerImage") ?? "runforge:local",
       dependencyPreparation,
       externalNetwork
