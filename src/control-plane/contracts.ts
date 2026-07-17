@@ -34,6 +34,22 @@ export type DecisionRecord = {
   response: Record<string, unknown>;
 };
 
+export type TaskProgress = {
+  phase: string;
+  operation: string;
+  startedAt: string | null;
+  updatedAt: string;
+  lastHeartbeatAt: string | null;
+  executionId: string | null;
+  workerStatus: "idle" | "starting" | "active" | "slow" | "finished" | "failed" | "lost" | "stalled" | "cancelled";
+  timeoutMs: number;
+  deadlineAt: string | null;
+  summary: string;
+  diagnostic: string | null;
+};
+
+export type TaskRecovery = { reason: string; lastPhase: string; lastHeartbeatAt: string | null; actions: string[]; operation?: string } | null;
+
 export type ControlTaskRecord = {
   id: string;
   projectId: string | null;
@@ -51,6 +67,9 @@ export type ControlTaskRecord = {
   error: string | null;
   decisions: DecisionRecord[];
   events: Array<{ at: string; type: string; detail?: string }>;
+  progress: TaskProgress;
+  recovery: TaskRecovery;
+  continuation: { schemaVersion: 1; state: "none" | "available" | "consumed" | "unrecoverable"; decisionId: string | null; executionId: string | null };
 };
 
 export function defaultAuthority(value: unknown): ControlAuthority {
@@ -94,7 +113,7 @@ export function parseDecisionRequest(value: unknown, kind: "owner" | "publicatio
 }
 
 export class ControlPlaneError extends Error {
-  constructor(public readonly status: number, public readonly code: string, message: string, public readonly details?: unknown) { super(message); }
+  constructor(public readonly status: number, public readonly code: string, message: string, public readonly details?: unknown, public readonly retryable = false, public readonly taskId?: string) { super(message); }
 }
 
 function asObject(value: unknown, name: string, optional = false): Record<string, unknown> {

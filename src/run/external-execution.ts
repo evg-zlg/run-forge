@@ -11,7 +11,7 @@ import { evaluatePatchAuthority, loadAuthority, recordAuthorityDecision, writeAu
 import { createLocalBranchWorktree, evaluateLocalBranchAuthority, withIsolatedGitMetadata, writeLocalBranchPrPackage } from "./local-branch-apply.js";
 import { runPublication } from "./publication.js";
 import { applyCodeRepairPlan, createBoundedPatch, loadCodeRepairPlan, renderCodeRepairReport, reviewBoundedPatch, scopeCodeRepairPlan, type CodeRepairPlan } from "./code-repair.js";
-import { externalResultContract, readExternalValidationResults, validateTaskResultContract } from "../product/task-result-contract.js";
+import { externalResultContract, readExternalValidationResults, validateTaskResultContract } from "../product/task-result-contract.js"; import { writeJsonAtomic } from "../core/artifact-store.js";
 export const reviewPatchText = (patch: string): boolean => reviewBoundedPatch(patch, ["README.md"]);
 const execFileAsync = promisify(execFile); const defaultCommands = ["npm run typecheck", "npm test", "npm run build"];
 const validationStages = ["baseline", "after-repair", "after-apply", "after-branch-apply", "after-commit", "after-push"] as const;
@@ -40,7 +40,7 @@ export type OwnerDecision = {
   patch_package_hash: string; patch_diff_hash: string; target_mode: "controlled-worktree";
   target_branch_or_worktree: string; owner_note: string; created_at: string;
 };
-export type ContinuationState = { taskId?: string; repo: string; sourceBranch: string; disposable: string; controlled: string; dockerImage: string; runtime?: "docker" | "local"; workingDirectory?: string; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork?: "denied" | "dependency-preparation-only"; commands: string[]; timeoutMs: number; patchPackageHash: string; patchDiffHash: string; sourceBefore: RepoState; repairFiles?: string[]; repairSummary?: string; repairMode?: string; authorityClassification?: AuthorityClassification };
+export type ContinuationState = { schemaVersion?: 1; taskId?: string; repo: string; sourceBranch: string; disposable: string; controlled: string; dockerImage: string; runtime?: "docker" | "local"; workingDirectory?: string; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork?: "denied" | "dependency-preparation-only"; commands: string[]; timeoutMs: number; patchPackageHash: string; patchDiffHash: string; sourceBefore: RepoState; repairFiles?: string[]; repairSummary?: string; repairMode?: string; authorityClassification?: AuthorityClassification };
 export async function runExternalExecution(input: Input): Promise<ExternalExecutionResult> {
   validateExternalExecutionModes(input);
   const workingDirectory = input.workingDirectory ?? ".";
@@ -101,8 +101,8 @@ export async function runExternalExecution(input: Input): Promise<ExternalExecut
   const patchPackageHash = await hashPatchPackage(join(outDir, "patch-package"));
   await writeFile(join(outDir, "patch-package", "owner-decision-template.json"), JSON.stringify(decisionTemplate(runId, patchPackageHash, patchDiffHash), null, 2) + "\n", "utf8");
   const sourceBranch = (await execFileAsync("git", ["-C", repo, "branch", "--show-current"])).stdout.trim();
-  const state: ContinuationState = { taskId: input.taskId, repo, sourceBranch, disposable, controlled, dockerImage: input.dockerImage, runtime: input.runtime as "docker" | "local", workingDirectory, dependencyPreparation: strategy, externalNetwork: input.externalNetwork ?? "denied", commands, timeoutMs: input.timeoutMs, patchPackageHash, patchDiffHash, sourceBefore: before, repairFiles: repair.files, repairSummary: repair.summary, repairMode: input.repairMode, authorityClassification: authority.classification };
-  await writeFile(join(outDir, "continuation-state.json"), JSON.stringify(state, null, 2) + "\n", "utf8");
+  const state: ContinuationState = { schemaVersion: 1, taskId: input.taskId, repo, sourceBranch, disposable, controlled, dockerImage: input.dockerImage, runtime: input.runtime as "docker" | "local", workingDirectory, dependencyPreparation: strategy, externalNetwork: input.externalNetwork ?? "denied", commands, timeoutMs: input.timeoutMs, patchPackageHash, patchDiffHash, sourceBefore: before, repairFiles: repair.files, repairSummary: repair.summary, repairMode: input.repairMode, authorityClassification: authority.classification };
+  await writeJsonAtomic(join(outDir, "continuation-state.json"), state);
   const applied: ExecutorResult[] | null = null;
   const controlledApply: ExternalExecutionResult["controlledApply"] = "skipped-awaiting-owner-approval";
   await writeOwnerAndApplyReports(outDir, input, controlledApply, applied, controlled, patchPath);

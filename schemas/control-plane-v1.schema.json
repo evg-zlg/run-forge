@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://runforge.local/schemas/control-plane-v1.schema.json",
   "title": "RunForge Local Control Plane v1 requests",
-  "oneOf": [{ "$ref": "#/$defs/projectInspection" }, { "$ref": "#/$defs/taskSubmission" }, { "$ref": "#/$defs/ownerDecision" }, { "$ref": "#/$defs/publicationDecision" }],
+  "oneOf": [{ "$ref": "#/$defs/projectInspection" }, { "$ref": "#/$defs/taskSubmission" }, { "$ref": "#/$defs/ownerDecision" }, { "$ref": "#/$defs/publicationDecision" }, { "$ref": "#/$defs/emptyOperation" }],
   "$defs": {
     "authority": { "type": "object", "additionalProperties": false, "properties": {
       "inspect": { "type": "boolean" }, "implementation": { "type": "boolean" }, "localBranch": { "type": "boolean" }, "localCommit": { "type": "boolean" },
@@ -20,6 +20,7 @@
     } },
     "publicationDecision": { "type": "object", "additionalProperties": false, "required": ["decision", "note"], "properties": {
       "decisionId": { "type": "string", "minLength": 1 }, "decision": { "enum": ["approve", "reject", "hold"] }, "note": { "type": "string", "minLength": 1 }
-    } }
+    } },
+    "emptyOperation": { "type": "object", "additionalProperties": false, "description": "Body for continue, retry, and cancel lifecycle operations." }
   }
 }
