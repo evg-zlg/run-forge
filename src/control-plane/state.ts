@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
+import { appendFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import type { ControlTaskRecord, ProjectRecord } from "./contracts.js";
 
@@ -28,6 +28,15 @@ export class ControlPlaneStore {
   taskPath(id: string): string { return join(this.taskDir(id), "state.json"); }
   async getTask(id: string): Promise<ControlTaskRecord | null> { return this.readJson<ControlTaskRecord | null>(this.taskPath(id), null); }
   async saveTask(task: ControlTaskRecord): Promise<void> { await this.writeJson(this.taskPath(task.id), task); }
+  async appendEvent(id: string, event: { at: string; type: string; detail?: string; executionId?: string }): Promise<void> {
+    const path = join(this.taskDir(id), "journal.jsonl");
+    await mkdir(dirname(path), { recursive: true });
+    await appendFile(path, JSON.stringify({ schemaVersion: 1, taskId: id, ...event }) + "\n", { encoding: "utf8", mode: 0o600 });
+  }
+  continuationPath(id: string): string { return join(this.taskDir(id), "continuation-state.json"); }
+  async saveContinuation(id: string, value: Record<string, unknown>): Promise<void> { await this.writeJson(this.continuationPath(id), value); }
+  async readContinuation(id: string): Promise<Record<string, unknown> | null> { return this.readJson(this.continuationPath(id), null); }
+  async readSpec(id: string): Promise<Record<string, unknown> | null> { return this.readJson(join(this.taskDir(id), "task-spec.json"), null); }
   async listTasks(): Promise<ControlTaskRecord[]> {
     const names = await readdir(join(this.root, "tasks"), { withFileTypes: true }).catch(() => []);
     const tasks = await Promise.all(names.filter((item) => item.isDirectory()).map((item) => this.getTask(item.name)));
@@ -54,7 +63,10 @@ export class ControlPlaneStore {
       task.updatedAt = new Date().toISOString();
       task.ownerGate = { required: true, status: "awaiting_owner_decision", reason: "The service restarted while execution was in progress; success was not inferred." };
       task.events.push({ at: task.updatedAt, type: "recovered_interrupted" });
+      task.progress = { ...(task.progress ?? fallbackProgress(task)), updatedAt: task.updatedAt, workerStatus: "lost", diagnostic: "Worker identity was lost during control-plane restart." };
+      task.recovery = { reason: "service_restart", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, actions: ["retry", "cancel"], operation: `/v1/tasks/${task.id}/retry` };
       await this.saveTask(task);
+      await this.appendEvent(task.id, { at: task.updatedAt, type: "task_interrupted", detail: "service_restart", executionId: task.progress.executionId ?? undefined });
     }
   }
 
@@ -68,4 +80,8 @@ export class ControlPlaneStore {
     await writeFile(temp, JSON.stringify(value, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
     await rename(temp, path);
   }
+}
+
+function fallbackProgress(task: ControlTaskRecord): ControlTaskRecord["progress"] {
+  return { phase: "unknown", operation: "execution", startedAt: task.startedAt, updatedAt: task.updatedAt, lastHeartbeatAt: task.updatedAt, executionId: null, workerStatus: "lost", timeoutMs: 300_000, deadlineAt: null, summary: "Execution interrupted by service restart.", diagnostic: null };
 }

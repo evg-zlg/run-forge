@@ -1,5 +1,7 @@
+import { randomUUID } from "node:crypto";
+import { readFile, rename, writeFile } from "node:fs/promises";
 import { realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { buildDoctorReport } from "../product/doctor.js";
 import { runTaskSpecFile } from "../product/task-spec-runner.js";
 import { loadTaskSpecV2 } from "../product/task-spec-v2.js";
@@ -7,142 +9,107 @@ import { continueExternalExecution, recordOwnerDecision } from "../run/external-
 import { ControlPlaneError, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
 import { ControlPlaneStore } from "./state.js";
 
+const executionTimeoutMs = 300_000;
+const heartbeatIntervalMs = 1_000;
+const staleHeartbeatMs = 15_000;
+
 export class ControlPlaneManager {
-  private readonly active = new Set<string>();
+  private readonly active = new Map<string, { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController }>();
+  private readonly locks = new Map<string, Promise<void>>();
+  private readonly journalHeartbeats = new Map<string, number>();
+  private watchdog: NodeJS.Timeout | null = null;
   constructor(
     public readonly store: ControlPlaneStore,
-    private readonly operations: {
-      runTaskSpec: typeof runTaskSpecFile;
-      recordOwnerDecision: typeof recordOwnerDecision;
-      continueExecution: typeof continueExternalExecution;
-    } = { runTaskSpec: runTaskSpecFile, recordOwnerDecision, continueExecution: continueExternalExecution }
+    private readonly operations: { runTaskSpec: typeof runTaskSpecFile; recordOwnerDecision: typeof recordOwnerDecision; continueExecution: typeof continueExternalExecution } = { runTaskSpec: runTaskSpecFile, recordOwnerDecision, continueExecution: continueExternalExecution },
+    private readonly timing = { heartbeatIntervalMs, staleHeartbeatMs, executionTimeoutMs }
   ) {}
 
-  async initialize(): Promise<void> { await this.store.initialize(); }
+  async initialize(): Promise<void> { await this.store.initialize(); this.watchdog ??= setInterval(() => void this.watchdogTick(), Math.min(this.timing.staleHeartbeatMs, 5_000)); this.watchdog.unref(); }
+  close(): void { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; }
 
   async inspectProject(input: { path: string; workingDirectory: string; register: boolean; runtime?: "local" | "docker"; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing" }): Promise<Record<string, unknown>> {
     const report = await buildDoctorReport({ repo: input.path, workingDirectory: input.workingDirectory, runtime: input.runtime, dependencyPreparation: input.dependencyPreparation, publication: "none" });
     let project: ProjectRecord | null = null;
     if (input.register && report.targetRepository?.repositoryRoot && report.targetRepository.workingDirectory) {
-      const now = new Date().toISOString();
-      const repository = await realpath(report.targetRepository.repositoryRoot);
+      const now = new Date().toISOString(); const repository = await realpath(report.targetRepository.repositoryRoot);
       const existing = (await this.store.listProjects()).find((item) => item.repository === repository && item.workingDirectory === report.targetRepository!.workingDirectory);
-      project = { id: this.store.projectId(repository, report.targetRepository.workingDirectory), repository, workingDirectory: report.targetRepository.workingDirectory, createdAt: existing?.createdAt ?? now, updatedAt: now };
-      await this.store.saveProject(project);
+      project = { id: this.store.projectId(repository, report.targetRepository.workingDirectory), repository, workingDirectory: report.targetRepository.workingDirectory, createdAt: existing?.createdAt ?? now, updatedAt: now }; await this.store.saveProject(project);
     }
     return { project, readiness: report };
   }
 
   async createTask(input: { projectId?: string; taskSpec: Record<string, unknown>; authority: ControlAuthority; publicationRequested: "none" | "draft-pr" }): Promise<ControlTaskRecord> {
-    const raw = structuredClone(input.taskSpec);
-    const project = input.projectId ? await this.requireProject(input.projectId) : null;
-    const taskId = requiredString(raw.taskId, "taskSpec.taskId");
-    if (await this.store.getTask(taskId)) throw new ControlPlaneError(409, "task_exists", `Task already exists: ${taskId}`);
+    const raw = structuredClone(input.taskSpec); const project = input.projectId ? await this.requireProject(input.projectId) : null; const taskId = requiredString(raw.taskId, "taskSpec.taskId");
+    if (await this.store.getTask(taskId)) throw new ControlPlaneError(409, "task_exists", `Task already exists: ${taskId}`, undefined, false, taskId);
     if (!input.authority.inspect) throw new ControlPlaneError(403, "authority_denied", "inspect authority is required to create a task.");
-    if (project) raw.target = { repository: project.repository, workingDirectory: project.workingDirectory };
-    if (!raw.target) throw new ControlPlaneError(422, "project_required", "Provide projectId or taskSpec.target.");
-    const authorityRaw = object(raw.authority);
-    const profile = authorityRaw.profile ?? "read-only";
-    if (profile === "bounded-implementation" && !input.authority.implementation) throw new ControlPlaneError(403, "authority_denied", "TaskSpec requests implementation but control-plane implementation authority is false.");
-    const requestedInSpec = object(raw.git).publication;
-    const publicationRequested = input.publicationRequested === "draft-pr" || requestedInSpec === "draft-pr" ? "draft-pr" : "none";
-    raw.git = { publication: "none" };
-    raw.merge = { policy: "never" };
-    raw.deploy = { policy: "never" };
-    const artifactRoot = join(this.store.taskDir(taskId), "artifacts");
-    raw.artifacts = { ...object(raw.artifacts), root: artifactRoot, resultFormat: "normalized-v1" };
-    const specPath = await this.store.writeSpec(taskId, raw);
-    try { await loadTaskSpecV2(specPath); }
-    catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", error instanceof Error ? error.message : String(error)); }
-    const now = new Date().toISOString();
-    const task: ControlTaskRecord = {
+    if (project) raw.target = { repository: project.repository, workingDirectory: project.workingDirectory }; if (!raw.target) throw new ControlPlaneError(422, "project_required", "Provide projectId or taskSpec.target.");
+    if (object(raw.authority).profile === "bounded-implementation" && !input.authority.implementation) throw new ControlPlaneError(403, "authority_denied", "TaskSpec requests implementation but control-plane implementation authority is false.");
+    const requestedInSpec = object(raw.git).publication; const publicationRequested = input.publicationRequested === "draft-pr" || requestedInSpec === "draft-pr" ? "draft-pr" : "none";
+    raw.git = { publication: "none" }; raw.merge = { policy: "never" }; raw.deploy = { policy: "never" }; const artifactRoot = join(this.store.taskDir(taskId), "artifacts"); raw.artifacts = { ...object(raw.artifacts), root: artifactRoot, resultFormat: "normalized-v1" };
+    const specPath = await this.store.writeSpec(taskId, raw); try { await loadTaskSpecV2(specPath); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error)); }
+    const now = new Date().toISOString(); const task: ControlTaskRecord = {
       id: taskId, projectId: project?.id ?? null, status: "queued", specPath, artifactRoot, authority: input.authority, publicationRequested,
-      publicationGate: publicationRequested === "draft-pr" ? { required: true, status: "blocked_until_implementation_completes", reason: "Remote publication is a separate decision and was removed from implementation execution." } : { required: false, status: "not_requested" },
-      ownerGate: { required: false, status: "not_required" }, createdAt: now, updatedAt: now, startedAt: null, finishedAt: null, error: null, decisions: [], events: [{ at: now, type: "accepted" }]
+      publicationGate: publicationRequested === "draft-pr" ? { required: true, status: "blocked_until_implementation_completes", reason: "Remote publication is a separate decision." } : { required: false, status: "not_requested" }, ownerGate: { required: false, status: "not_required" },
+      createdAt: now, updatedAt: now, startedAt: null, finishedAt: null, error: null, decisions: [], events: [], progress: progress(now), recovery: null, continuation: { schemaVersion: 1, state: "none", decisionId: null, executionId: null }
     };
-    await this.store.saveTask(task);
-    this.start(task.id);
-    return task;
+    await this.persist(task, "task_created"); if (publicationRequested === "draft-pr") await this.persist(task, "publication_gate_created", "blocked_until_implementation_completes"); this.start(task.id, "execution"); return task;
   }
 
-  async getTask(id: string): Promise<ControlTaskRecord> { const task = await this.store.getTask(id); if (!task) throw new ControlPlaneError(404, "task_not_found", `Task not found: ${id}`); return task; }
+  async getTask(id: string): Promise<ControlTaskRecord> { const task = await this.store.getTask(id); if (!task) throw new ControlPlaneError(404, "task_not_found", `Task not found: ${id}`, undefined, false, id); return normalizeTask(task); }
+  async getResult(id: string): Promise<Record<string, unknown>> { const task = await this.getTask(id); const result = await this.store.readResult(task); if (!result) throw new ControlPlaneError(404, "result_not_ready", `Result is not available for task ${id}.`, undefined, true, id); return { ...result, controlPlane: { status: task.status, progress: task.progress, recovery: task.recovery, ownerGate: task.ownerGate, publicationGate: task.publicationGate, authority: task.authority } }; }
 
-  async getResult(id: string): Promise<Record<string, unknown>> {
-    const task = await this.getTask(id);
-    const result = await this.store.readResult(task);
-    if (!result) throw new ControlPlaneError(404, "result_not_ready", `Result is not available for task ${id}.`);
-    return { ...result, controlPlane: { status: task.status, ownerGate: task.ownerGate, publicationGate: task.publicationGate, authority: task.authority, events: task.events } };
+  async ownerDecision(id: string, input: { decisionId: string; decision: string; targetBranch?: string; note: string }): Promise<Record<string, unknown>> { return this.withLock(id, async () => {
+    const task = await this.getTask(id); const duplicate = task.decisions.find((item) => item.kind === "owner" && item.decisionId === input.decisionId);
+    if (duplicate) { if (duplicate.decision !== input.decision) throw new ControlPlaneError(409, "idempotency_conflict", "The decision ID was already used for a different decision.", undefined, false, id); return { idempotentReplay: true, ...duplicate.response }; }
+    if (task.decisions.some((item) => item.kind === "owner")) throw new ControlPlaneError(409, "owner_decision_conflict", "An owner decision is already recorded.", undefined, false, id);
+    if (!task.ownerGate.required) throw new ControlPlaneError(409, "owner_gate_not_open", "This task has no open implementation owner gate.", undefined, false, id);
+    if (["approve", "continue"].includes(input.decision) && !task.authority.implementation) throw new ControlPlaneError(403, "authority_denied", "Implementation authority is required.", undefined, false, id);
+    await this.ensureContinuationSnapshot(task); if (task.continuation.state === "unrecoverable") { await this.interrupt(task, "continuation_state_unrecoverable", ["retry", "cancel"]); throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Owner decision was not recorded because continuation state cannot be safely reconstructed.", { recoveryActions: task.recovery?.actions }, false, id); } const targetBranch = input.targetBranch ?? `runforge/${task.id.toLowerCase()}`;
+    let recorded: { decisionId: string; path: string }; try { recorded = await this.operations.recordOwnerDecision({ run: task.artifactRoot, decision: input.decision, targetMode: "controlled-worktree", targetBranch, ownerNote: input.note }); } catch (error) { throw continuationError(task, error); }
+    const response = { decisionId: input.decisionId, runforgeDecisionId: recorded.decisionId, artifact: basename(recorded.path), decision: input.decision, targetBranch };
+    task.decisions.push(decisionRecord(input.decisionId, "owner", input.decision, response)); task.continuation.decisionId = input.decisionId; const snapshot = await this.store.readContinuation(id); if (snapshot) await this.store.saveContinuation(id, { ...snapshot, decisionId: input.decisionId }); task.ownerGate = { required: ["approve", "continue"].includes(input.decision), status: input.decision === "reject" ? "rejected" : input.decision === "hold" ? "on_hold" : "decision_recorded" }; task.updatedAt = new Date().toISOString(); await this.persist(task, "owner_decision_recorded", input.decision); return response;
+  }); }
+
+  async continueTask(id: string): Promise<ControlTaskRecord> { return this.withLock(id, async () => {
+    const task = await this.getTask(id); if (task.continuation.state === "consumed" || task.status === "completed") return task;
+    const live = this.active.get(id); if (live?.operation === "continuation" || live && ["running", "continuing"].includes(task.status)) return task; if (live) this.active.delete(id);
+    if (!["awaiting_owner_decision", "interrupted"].includes(task.status)) throw new ControlPlaneError(409, "task_not_continuable", `Task status '${task.status}' cannot be continued.`, undefined, false, id);
+    if (!task.decisions.some((item) => item.kind === "owner" && ["approve", "continue"].includes(item.decision))) throw new ControlPlaneError(409, "owner_decision_required", "An approving owner decision is required.", undefined, false, id);
+    if (!(await this.restoreContinuation(task))) { await this.interrupt(task, "continuation_state_unrecoverable", ["retry", "cancel"]); throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Continuation state is missing or corrupt and could not be safely reconstructed.", { recoveryActions: task.recovery?.actions }, false, id); }
+    await this.persist(task, "continuation_requested"); this.start(id, "continuation"); return await this.getTask(id);
+  }); }
+
+  async retryTask(id: string): Promise<ControlTaskRecord> { return this.withLock(id, async () => { const task = await this.getTask(id); if (this.active.has(id)) throw new ControlPlaneError(409, "task_active", "Task execution is active.", undefined, true, id); if (task.status !== "interrupted") throw new ControlPlaneError(409, "task_not_retryable", "Only interrupted tasks can be retried.", undefined, false, id); if (task.continuation.decisionId) { if (!(await this.restoreContinuation(task))) throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Interrupted continuation cannot be reconstructed safely.", undefined, false, id); this.start(id, "continuation"); } else this.start(id, "execution"); return await this.getTask(id); }); }
+  async cancelTask(id: string): Promise<ControlTaskRecord> { return this.withLock(id, async () => { const task = await this.getTask(id); if (task.progress.workerStatus === "cancelled" || task.status === "interrupted" && task.recovery?.reason === "cancelled_by_operator") return task; const worker = this.active.get(id); if (worker) { worker.cancelled = true; worker.controller.abort(); } task.status = "interrupted"; task.finishedAt = new Date().toISOString(); task.updatedAt = task.finishedAt; task.progress = { ...task.progress, updatedAt: task.updatedAt, workerStatus: "cancelled", summary: "Cancelled by operator.", diagnostic: "The worker lease was revoked; late isolated-workspace results are ignored." }; task.recovery = { reason: "cancelled_by_operator", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, actions: ["retry"], operation: `/v1/tasks/${id}/retry` }; await this.persist(task, "task_interrupted", "cancelled_by_operator"); return task; }); }
+
+  async publicationDecision(id: string, input: { decisionId: string; decision: string; note: string }): Promise<Record<string, unknown>> { return this.withLock(id, async () => { const task = await this.getTask(id); const duplicate = task.decisions.find((item) => item.kind === "publication" && item.decisionId === input.decisionId); if (duplicate) return { idempotentReplay: true, ...duplicate.response }; if (!task.publicationGate.required) throw new ControlPlaneError(409, "publication_gate_not_open", "This task has no publication gate."); const permitted = task.authority.remotePush && task.authority.draftPublication; const status = input.decision === "approve" ? permitted ? "approved_adapter_required" : "blocked_missing_authority" : input.decision === "reject" ? "rejected" : "on_hold"; const response = { decisionId: input.decisionId, decision: input.decision, status, executed: false, providerCalls: false, reason: status === "blocked_missing_authority" ? "remotePush and draftPublication authority are required." : "Publication execution is separate." }; task.decisions.push(decisionRecord(input.decisionId, "publication", input.decision, response)); task.publicationGate = { required: status !== "rejected", status, reason: response.reason }; task.updatedAt = new Date().toISOString(); await this.persist(task, "publication_gate_created", status); return response; }); }
+
+  async health(): Promise<Record<string, unknown>> { await this.watchdogTick(); const tasks = await this.store.listTasks(); const now = Date.now(); const active = tasks.filter((t) => ["queued", "running", "continuing"].includes(t.status)); const ages = active.map((t) => now - Date.parse(normalizeTask(t).progress.lastHeartbeatAt ?? t.updatedAt)); const stalled = tasks.filter((t) => normalizeTask(t).progress.workerStatus === "stalled"); return { schemaVersion: 1, service: { status: "healthy", localOnly: true }, readiness: { acceptingNewTasks: true, status: stalled.length ? "ready_with_degraded_tasks" : "ready" }, tasks: { active: active.length, awaitingOwnerDecisions: tasks.filter((t) => t.status === "awaiting_owner_decision").length, interrupted: tasks.filter((t) => t.status === "interrupted").length, stalled: stalled.length, oldestHeartbeatAgeMs: ages.length ? Math.max(...ages) : 0 } }; }
+
+  private start(id: string, operation: "execution" | "continuation"): void { const executionId = randomUUID(); this.active.set(id, { executionId, operation, cancelled: false, controller: new AbortController() }); void this.execute(id, operation, executionId).finally(() => { if (this.active.get(id)?.executionId === executionId) this.active.delete(id); }); }
+  private async execute(id: string, operation: "execution" | "continuation", executionId: string): Promise<void> {
+    let task!: ControlTaskRecord; const began = await this.withLock(id, async () => { const worker = this.active.get(id); if (!worker || worker.executionId !== executionId || worker.cancelled) return false; task = await this.getTask(id); const now = new Date(); task.status = operation === "continuation" ? "continuing" : "running"; task.startedAt ??= now.toISOString(); task.updatedAt = now.toISOString(); task.finishedAt = null; task.error = null; task.recovery = null; task.progress = { phase: operation === "continuation" ? "continuation" : "task_execution", operation, startedAt: now.toISOString(), updatedAt: now.toISOString(), lastHeartbeatAt: now.toISOString(), executionId, workerStatus: "active", timeoutMs: this.timing.executionTimeoutMs, deadlineAt: new Date(now.getTime() + this.timing.executionTimeoutMs).toISOString(), summary: `${operation} worker active`, diagnostic: "Worker promise is live." }; if (operation === "continuation") task.continuation.executionId = executionId; await this.persist(task, operation === "continuation" ? "continuation_started" : "task_started"); await this.persist(task, "phase_started", task.progress.phase); return true; }); if (!began) return;
+    const heartbeat = setInterval(() => void this.heartbeat(id, executionId), this.timing.heartbeatIntervalMs); heartbeat.unref();
+    try { const worker = this.active.get(id)!; const work: Promise<unknown> = operation === "continuation" ? this.operations.continueExecution({ run: task.artifactRoot, timeoutMs: this.timing.executionTimeoutMs }) : this.operations.runTaskSpec(task.specPath); await abortable(work, worker.controller.signal); if (worker.cancelled) return; await this.withLock(id, async () => this.refreshFromResult(await this.getTask(id))); }
+    catch (error) { const worker = this.active.get(id); if (worker && !worker.cancelled) await this.withLock(id, async () => this.failTask(id, error)); } finally { clearInterval(heartbeat); }
   }
-
-  async ownerDecision(id: string, input: { decisionId: string; decision: string; targetBranch?: string; note: string }): Promise<Record<string, unknown>> {
-    const task = await this.getTask(id);
-    const duplicate = task.decisions.find((item) => item.kind === "owner" && item.decisionId === input.decisionId);
-    if (duplicate) return { idempotentReplay: true, ...duplicate.response };
-    if (!task.ownerGate.required) throw new ControlPlaneError(409, "owner_gate_not_open", "This task has no open implementation owner gate.");
-    if (["approve", "continue"].includes(input.decision) && !task.authority.implementation) throw new ControlPlaneError(403, "authority_denied", "Implementation authority is required for an approving owner decision.");
-    const targetBranch = input.targetBranch ?? `runforge/${task.id.toLowerCase()}`;
-    const recorded = await this.operations.recordOwnerDecision({ run: task.artifactRoot, decision: input.decision, targetMode: "controlled-worktree", targetBranch, ownerNote: input.note });
-    const response = { decisionId: input.decisionId, runforgeDecisionId: recorded.decisionId, artifact: recorded.path, decision: input.decision, targetBranch };
-    task.decisions.push(decisionRecord(input.decisionId, "owner", input.decision, response));
-    task.ownerGate = { required: input.decision === "approve" || input.decision === "continue", status: input.decision === "reject" ? "rejected" : input.decision === "hold" ? "on_hold" : "decision_recorded" };
-    task.updatedAt = new Date().toISOString(); task.events.push({ at: task.updatedAt, type: "owner_decision", detail: input.decision });
-    await this.store.saveTask(task);
-    return response;
-  }
-
-  async continueTask(id: string): Promise<ControlTaskRecord> {
-    const task = await this.getTask(id);
-    if (this.active.has(id)) throw new ControlPlaneError(409, "task_active", "Task execution is already active.");
-    if (!["awaiting_owner_decision", "interrupted"].includes(task.status)) throw new ControlPlaneError(409, "task_not_continuable", `Task status '${task.status}' cannot be continued.`);
-    if (!task.decisions.some((item) => item.kind === "owner" && ["approve", "continue"].includes(item.decision))) throw new ControlPlaneError(409, "owner_decision_required", "An approving owner decision is required before continuation.");
-    task.status = "continuing"; task.updatedAt = new Date().toISOString(); task.events.push({ at: task.updatedAt, type: "continuation_started" });
-    await this.store.saveTask(task); this.active.add(id);
-    void this.operations.continueExecution({ run: task.artifactRoot, timeoutMs: 300_000 }).then(async () => {
-      const current = await this.getTask(id); await this.refreshFromResult(current, "continuation_completed");
-    }).catch(async (error) => this.failTask(id, error)).finally(() => this.active.delete(id));
-    return task;
-  }
-
-  async publicationDecision(id: string, input: { decisionId: string; decision: string; note: string }): Promise<Record<string, unknown>> {
-    const task = await this.getTask(id);
-    const duplicate = task.decisions.find((item) => item.kind === "publication" && item.decisionId === input.decisionId);
-    if (duplicate) return { idempotentReplay: true, ...duplicate.response };
-    if (!task.publicationGate.required) throw new ControlPlaneError(409, "publication_gate_not_open", "This task has no publication gate.");
-    const permitted = task.authority.remotePush && task.authority.draftPublication;
-    const status = input.decision === "approve" ? permitted ? "approved_adapter_required" : "blocked_missing_authority" : input.decision === "reject" ? "rejected" : "on_hold";
-    const response = { decisionId: input.decisionId, decision: input.decision, status, executed: false, providerCalls: false, reason: status === "blocked_missing_authority" ? "remotePush and draftPublication authority are required." : "Publication execution is intentionally separate from implementation." };
-    task.decisions.push(decisionRecord(input.decisionId, "publication", input.decision, response));
-    task.publicationGate = { required: status !== "rejected", status, reason: response.reason };
-    task.updatedAt = new Date().toISOString(); task.events.push({ at: task.updatedAt, type: "publication_decision", detail: status });
-    await this.store.saveTask(task);
-    return response;
-  }
-
-  private start(id: string): void {
-    this.active.add(id);
-    void this.execute(id).finally(() => this.active.delete(id));
-  }
-
-  private async execute(id: string): Promise<void> {
-    const task = await this.getTask(id); task.status = "running"; task.startedAt = new Date().toISOString(); task.updatedAt = task.startedAt; task.events.push({ at: task.startedAt, type: "execution_started" }); await this.store.saveTask(task);
-    try { await this.operations.runTaskSpec(task.specPath); await this.refreshFromResult(await this.getTask(id), "execution_completed"); }
-    catch (error) { await this.failTask(id, error); }
-  }
-
-  private async refreshFromResult(task: ControlTaskRecord, event: string): Promise<void> {
-    const result = await this.store.readResult(task);
-    if (!result) return this.failTask(task.id, new Error("RunForge execution finished without results.json."));
-    const status = String(result.status ?? "failed");
-    task.status = status === "awaiting_owner_decision" || status === "blocked" ? "awaiting_owner_decision" : status === "completed" ? "completed" : "failed";
-    const gate = object(result.ownerGate); task.ownerGate = { required: gate.required === true, status: String(gate.status ?? "unknown"), ...(typeof gate.reason === "string" ? { reason: gate.reason } : {}) };
-    if (task.status === "completed" && task.publicationRequested === "draft-pr") task.publicationGate = { required: true, status: "awaiting_owner_decision", reason: "Implementation completed locally; remote push and draft publication require a separate decision and authority." };
-    task.finishedAt = new Date().toISOString(); task.updatedAt = task.finishedAt; task.events.push({ at: task.finishedAt, type: event, detail: task.status }); await this.store.saveTask(task);
-  }
-
-  private async failTask(id: string, error: unknown): Promise<void> { const task = await this.getTask(id); task.status = "failed"; task.error = error instanceof Error ? error.message : String(error); task.finishedAt = new Date().toISOString(); task.updatedAt = task.finishedAt; task.events.push({ at: task.finishedAt, type: "execution_failed", detail: task.error }); await this.store.saveTask(task); }
+  private async heartbeat(id: string, executionId: string): Promise<void> { await this.withLock(id, async () => { const worker = this.active.get(id); if (!worker || worker.executionId !== executionId || worker.cancelled) return; const task = await this.getTask(id); if (!["running", "continuing"].includes(task.status)) return; const now = new Date().toISOString(); task.updatedAt = now; task.progress.updatedAt = now; task.progress.lastHeartbeatAt = now; task.progress.workerStatus = "active"; task.progress.summary = `${task.progress.operation} worker active`; await this.store.saveTask(task); const last = this.journalHeartbeats.get(id) ?? 0; if (Date.now() - last >= 30_000) { await this.store.appendEvent(id, { at: now, type: "heartbeat", detail: task.progress.phase, executionId }); this.journalHeartbeats.set(id, Date.now()); } }); }
+  private async refreshFromResult(task: ControlTaskRecord): Promise<void> { const result = await this.store.readResult(task); if (!result) return this.failTask(task.id, new Error("RunForge execution finished without results.json.")); const status = String(result.status ?? "failed"); task.status = status === "awaiting_owner_decision" || status === "blocked" ? "awaiting_owner_decision" : status === "completed" ? "completed" : "failed"; const gate = object(result.ownerGate); task.ownerGate = { required: gate.required === true, status: String(gate.status ?? "unknown"), ...(typeof gate.reason === "string" ? { reason: gate.reason } : {}) }; if (task.status === "awaiting_owner_decision") await this.ensureContinuationSnapshot(task); if (task.status === "completed" && task.continuation.decisionId) task.continuation.state = "consumed"; if (task.status === "completed" && task.publicationRequested === "draft-pr") task.publicationGate = { required: true, status: "awaiting_owner_decision", reason: "Remote publication requires a separate decision." }; task.finishedAt = new Date().toISOString(); task.updatedAt = task.finishedAt; task.progress = { ...task.progress, updatedAt: task.updatedAt, lastHeartbeatAt: task.updatedAt, workerStatus: "finished", summary: `Task ${task.status}.`, diagnostic: "Worker completed and results.json was read." }; await this.persist(task, task.status === "completed" ? "task_completed" : task.status === "awaiting_owner_decision" ? "owner_gate_created" : "task_failed", task.status); }
+  private async failTask(id: string, error: unknown): Promise<void> { const task = await this.getTask(id); task.status = "failed"; task.error = safeMessage(error); task.finishedAt = new Date().toISOString(); task.updatedAt = task.finishedAt; task.progress = { ...task.progress, updatedAt: task.updatedAt, workerStatus: "failed", diagnostic: task.error, summary: "Worker failed." }; task.recovery = { reason: "worker_failed", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, actions: ["start_new_task", "cancel"] }; await this.persist(task, "task_failed", task.error); }
+  private async interrupt(task: ControlTaskRecord, reason: string, actions: string[]): Promise<void> { task.status = "interrupted"; task.finishedAt = new Date().toISOString(); task.updatedAt = task.finishedAt; task.progress = { ...task.progress, updatedAt: task.updatedAt, workerStatus: "stalled", summary: "Task interrupted by watchdog or recovery guard.", diagnostic: reason }; task.recovery = { reason, lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, actions, operation: `/v1/tasks/${task.id}/retry` }; await this.persist(task, "task_interrupted", reason); }
+  private async watchdogTick(): Promise<void> { const now = Date.now(); for (const raw of await this.store.listTasks()) await this.withLock(raw.id, async () => { const task = await this.getTask(raw.id); if (!["running", "continuing"].includes(task.status)) return; const heartbeatAge = now - Date.parse(task.progress.lastHeartbeatAt ?? task.updatedAt); const live = this.active.get(task.id); if (!live || live.executionId !== task.progress.executionId) await this.interrupt(task, "worker_lost", ["retry", "cancel"]); else if (heartbeatAge > this.timing.staleHeartbeatMs) await this.interrupt(task, "stale_heartbeat", ["retry", "cancel"]); else if (task.progress.deadlineAt && now > Date.parse(task.progress.deadlineAt)) await this.interrupt(task, "execution_deadline_exceeded", ["retry", "cancel"]); }); }
+  private async ensureContinuationSnapshot(task: ControlTaskRecord): Promise<void> { if (task.continuation.state === "available") { try { if (await this.store.readContinuation(task.id)) return; } catch { /* reconstruct from the official native artifact below */ } } let native: unknown; try { native = JSON.parse(await readFile(join(task.artifactRoot, "continuation-state.json"), "utf8")); } catch { task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return; } const spec = await this.store.readSpec(task.id); await this.store.saveContinuation(task.id, { schemaVersion: 1, taskId: task.id, projectId: task.projectId, authority: task.authority, executionIdentity: task.progress.executionId, taskSpec: spec, specPath: basename(task.specPath), workingDirectory: object(object(spec).target).workingDirectory ?? ".", runtime: object(spec).runtime ?? null, native }); task.continuation.state = "available"; await this.store.saveTask(task); }
+  private async restoreContinuation(task: ControlTaskRecord): Promise<boolean> { let snapshot: Record<string, unknown> | null = null; try { snapshot = await this.store.readContinuation(task.id); } catch { snapshot = null; } if (!snapshot || snapshot.schemaVersion !== 1 || snapshot.taskId !== task.id || snapshot.projectId !== task.projectId || snapshot.decisionId !== task.continuation.decisionId || snapshot.executionIdentity !== task.progress.executionId || JSON.stringify(snapshot.authority) !== JSON.stringify(task.authority) || object(snapshot.taskSpec).taskId !== task.id || !object(snapshot.native).repo) { task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return false; } try { const path = join(task.artifactRoot, "continuation-state.json"); const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`; await writeFile(temporary, JSON.stringify(snapshot.native, null, 2) + "\n", { encoding: "utf8", mode: 0o600 }); await rename(temporary, path); task.continuation.state = "available"; await this.store.saveTask(task); return true; } catch { return false; } }
+  private async persist(task: ControlTaskRecord, type: string, detail?: string): Promise<void> { const event = { at: new Date().toISOString(), type, ...(detail ? { detail } : {}) }; if (task.events.at(-1)?.type !== type || type !== "heartbeat") task.events.push(event); await this.store.saveTask(task); if (type !== "heartbeat") await this.store.appendEvent(task.id, { ...event, executionId: task.progress.executionId ?? undefined }); }
+  private async withLock<T>(id: string, action: () => Promise<T>): Promise<T> { const previous = this.locks.get(id) ?? Promise.resolve(); let release!: () => void; const next = new Promise<void>((done) => { release = done; }); const tail = previous.then(() => next); this.locks.set(id, tail); await previous; try { return await action(); } finally { release(); if (this.locks.get(id) === tail) this.locks.delete(id); } }
   private async requireProject(id: string): Promise<ProjectRecord> { const project = await this.store.getProject(id); if (!project) throw new ControlPlaneError(404, "project_not_found", `Project not found: ${id}`); return project; }
 }
 
-function object(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
+function progress(now: string): ControlTaskRecord["progress"] { return { phase: "queued", operation: "execution", startedAt: null, updatedAt: now, lastHeartbeatAt: null, executionId: null, workerStatus: "idle", timeoutMs: executionTimeoutMs, deadlineAt: null, summary: "Queued for execution.", diagnostic: null }; }
+function normalizeTask(task: ControlTaskRecord): ControlTaskRecord { task.progress ??= progress(task.updatedAt); task.recovery ??= null; task.continuation ??= { schemaVersion: 1, state: "none", decisionId: null, executionId: null }; return task; }
+function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} is required.`); return value.trim(); }
 function decisionRecord(decisionId: string, kind: "owner" | "publication", decision: string, response: Record<string, unknown>): DecisionRecord { return { decisionId, kind, decision, response, createdAt: new Date().toISOString() }; }
+function safeMessage(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return message.replace(/(?:\/[\w.@-]+){2,}/g, "[internal path]").slice(0, 500); }
+function continuationError(task: ControlTaskRecord, error: unknown): ControlPlaneError { return new ControlPlaneError(409, "continuation_state_unavailable", "Owner decision could not be safely bound to continuation state.", { reason: safeMessage(error), recoveryActions: ["retry", "cancel"] }, false, task.id); }
+async function abortable<T>(work: Promise<T>, signal: AbortSignal): Promise<T> { if (signal.aborted) throw new Error("cancelled"); return new Promise<T>((resolve, reject) => { const cancel = () => reject(new Error("cancelled")); signal.addEventListener("abort", cancel, { once: true }); work.then(resolve, reject).finally(() => signal.removeEventListener("abort", cancel)); }); }

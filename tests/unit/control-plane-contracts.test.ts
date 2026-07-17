@@ -24,7 +24,7 @@ describe("control-plane contracts", () => {
     const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-control-store-"))) - 1]!;
     const store = new ControlPlaneStore(root); await store.initialize();
     const now = new Date().toISOString();
-    await store.saveTask({ id: "RECOVERY-1", projectId: null, status: "running", specPath: "/tmp/spec", artifactRoot: "/tmp/artifacts", authority: defaultAuthority(undefined), publicationRequested: "none", publicationGate: { required: false, status: "not_requested" }, ownerGate: { required: false, status: "not_required" }, createdAt: now, updatedAt: now, startedAt: now, finishedAt: null, error: null, decisions: [], events: [] });
+    await store.saveTask({ id: "RECOVERY-1", projectId: null, status: "running", specPath: "/tmp/spec", artifactRoot: "/tmp/artifacts", authority: defaultAuthority(undefined), publicationRequested: "none", publicationGate: { required: false, status: "not_requested" }, ownerGate: { required: false, status: "not_required" }, createdAt: now, updatedAt: now, startedAt: now, finishedAt: null, error: null, decisions: [], events: [], progress: { phase: "execution", operation: "execution", startedAt: now, updatedAt: now, lastHeartbeatAt: now, executionId: "old-worker", workerStatus: "active", timeoutMs: 300000, deadlineAt: null, summary: "active", diagnostic: null }, recovery: null, continuation: { schemaVersion: 1, state: "none", decisionId: null, executionId: null } });
     await new ControlPlaneStore(root).initialize();
     expect(await store.getTask("RECOVERY-1")).toMatchObject({ status: "interrupted", ownerGate: { required: true, status: "awaiting_owner_decision" } });
   });
