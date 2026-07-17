@@ -58,7 +58,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   if (!inspection.head) throw new Error(`target.repository must have a valid committed HEAD: ${repository}`);
   const expectedSha = optionalString(target.expectedSha, "target.expectedSha") ?? inspection.head;
   if (expectedSha !== inspection.head) throw new Error(`target.expectedSha mismatch: expected ${expectedSha}, current ${inspection.head}.`);
-  const executionRaw = optionalObject(raw.execution, "execution");
+  const executionRaw = object(raw.execution, "execution is required and must be an object.");
   rejectUnknown(executionRaw, ["mode", "maxRepairIterations", "timeoutMs", "maxChangedFiles", "maxPatchBytes", "maxProviderTokens"], "execution");
   const artifactsRaw = optionalObject(raw.artifacts, "artifacts");
   rejectUnknown(artifactsRaw, ["root", "resultFormat"], "artifacts");
@@ -94,8 +94,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const profile = choice(authorityRaw.profile ?? "read-only", ["read-only", "bounded-implementation"], "authority.profile");
   const forbiddenAreas = strings(authorityRaw.forbiddenAreas ?? defaultForbidden(), "authority.forbiddenAreas");
   const repairMode = choice(repairRaw.mode ?? "none", ["none", "disposable", "code"], "repair.mode");
-  const inferredMode: TaskExecutionMode = profile === "bounded-implementation" ? (repairMode === "none" ? "implementation" : "repair") : "validation";
-  const executionMode = choice(executionRaw.mode ?? inferredMode, ["inspection", "implementation", "validation", "repair"], "execution.mode");
+  const executionMode = choice(executionRaw.mode, ["inspection", "implementation", "validation", "repair"], "execution.mode");
   if (["implementation", "repair"].includes(executionMode) !== (profile === "bounded-implementation")) throw new Error(`execution.mode='${executionMode}' is inconsistent with authority.profile='${profile}'.`);
   const authorityFile = authorityRaw.envelopeFile === undefined || authorityRaw.envelopeFile === null ? null : resolve(baseDir, string(authorityRaw.envelopeFile, "authority.envelopeFile"));
   const repairPlan = repairRaw.plan === undefined || repairRaw.plan === null ? null : resolve(baseDir, string(repairRaw.plan, "repair.plan"));

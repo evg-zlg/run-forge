@@ -1,8 +1,9 @@
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { redactJson } from "../admin/redaction.js";
-import { getRunForgeVersionInfo } from "../core/version.js";
+import { getRunForgeVersionInfo, runForgeRoot } from "../core/version.js";
 import { ControlPlaneError, controlPlaneApiVersion, defaultControlPlaneHost, defaultControlPlanePort, defaultMaxRequestBytes, parseDecisionRequest, parseProjectRequest, parseTaskRequest } from "./contracts.js";
 import { ControlPlaneManager } from "./manager.js";
 import { ControlPlaneStore } from "./state.js";
@@ -33,6 +34,7 @@ export async function handleControlPlaneRequest(request: IncomingMessage, respon
   if (method === "GET" && path === "/readyz") return sendJson(response, 200, await context.manager.health());
   if (method === "GET" && path === "/.well-known/runforge") return sendJson(response, 200, await discoveryManifest(request, context.host));
   if (method === "GET" && path === "/v1/capabilities") return sendJson(response, 200, await capabilities(context.manager.store.root));
+  if (method === "GET" && path === "/schemas/task-spec-v2.schema.json") return sendJson(response, 200, await taskSpecSchema());
   if (method === "POST" && path === "/v1/projects/inspect") return sendJson(response, 200, await context.manager.inspectProject(parseProjectRequest(await readJson(request, context.maxRequestBytes))));
   if (method === "GET" && path === "/v1/projects") return sendJson(response, 200, { projects: await context.manager.store.listProjects() });
   if (method === "POST" && path === "/v1/tasks") { const task = await context.manager.createTask(parseTaskRequest(await readJson(request, context.maxRequestBytes))); return sendJson(response, 202, publicTask(task)); }
@@ -52,8 +54,40 @@ export async function handleControlPlaneRequest(request: IncomingMessage, respon
 
 export function isLoopbackHost(host: string): boolean { return host === "127.0.0.1" || host === "localhost" || host === "::1"; }
 
-async function discoveryManifest(request: IncomingMessage, host: string): Promise<Record<string, unknown>> { const version = getRunForgeVersionInfo(); const authority = request.headers.host && isLocalHostHeader(request.headers.host) ? request.headers.host : `${host}:${defaultControlPlanePort}`; return { product: "RunForge", discoveryVersion: 3, apiVersion: controlPlaneApiVersion, version, localOnly: true, baseUrl: `http://${authority}`, implementationExecutors: await discoverImplementationExecutors(), endpoints: { health: "/healthz", readiness: "/readyz", capabilities: "/v1/capabilities", projectInspection: "/v1/projects/inspect", tasks: "/v1/tasks", task: "/v1/tasks/{id}", result: "/v1/tasks/{id}/result", ownerDecisions: "/v1/tasks/{id}/owner-decisions", continuation: "/v1/tasks/{id}/continue", retry: "/v1/tasks/{id}/retry", cancellation: "/v1/tasks/{id}/cancel", publicationDecisions: "/v1/tasks/{id}/publication-decisions" }, lifecycle: { poll: "GET /v1/tasks/{id}", heartbeatField: "progress.lastHeartbeatAt", executionIdentityField: "progress.executionId", attemptField: "progress.attempt", phaseValues: ["understand_task", "implement", "validate", "repair", "finalize"], stalledAfterMs: 15000, terminal: ["completed", "failed", "interrupted"], recoveryAvailabilityField: "recovery.retryAvailable", ownerGate: "awaiting_owner_decision" }, bootstrap: "Inspect discovery and capabilities, register the project, submit TaskSpec v2, poll progress, and follow only advertised recovery actions." }; }
-async function capabilities(_stateRoot: string): Promise<Record<string, unknown>> { return { schemaVersion: 3, apiVersion: controlPlaneApiVersion, transports: ["localhost-http"], projectLocators: ["absolute-path", "registration-id"], taskModes: ["inspection", "implementation", "validation", "repair"], implementationExecutors: await discoverImplementationExecutors(), execution: { engine: "TaskSpec v2", runtimes: ["docker", "local-disposable"], dependencyPreparation: ["required", "if-needed", "disabled", "reuse-existing"], persistentState: true, restartRecovery: true, heartbeat: true, watchdog: true, cancellation: true, executionGenerations: true, boundedCleanup: true, interruptedResult: true, journalSchemaVersion: 1, continuationSchemaVersion: 1 }, authority: { semantics: "explicit upper bounds; TaskSpec may request a safer subset", inspect: true, implementation: true, providerCalls: "explicit", network: "explicit", localBranch: "owner-and-rails-gated", localCommit: "rails-gated result evidence", remotePush: "separate-publication-decision", draftPublication: "separate-publication-decision", merge: false, deploy: false }, safety: { defaultBind: defaultControlPlaneHost, maxRequestBytes: defaultMaxRequestBytes, secretsInResponses: false, providerCallsByDefault: false, networkByDefault: false, sharedCheckoutMutation: false }, schemas: { taskSpec: "schemas/task-spec-v2.schema.json", result: "schemas/task-result-v1.schema.json", controlPlane: "schemas/control-plane-v1.schema.json" } }; }
+async function discoveryManifest(request: IncomingMessage, host: string): Promise<Record<string, unknown>> {
+  const version = getRunForgeVersionInfo();
+  const authority = request.headers.host && isLocalHostHeader(request.headers.host) ? request.headers.host : `${host}:${defaultControlPlanePort}`;
+  return {
+    product: "RunForge", discoveryVersion: 4, apiVersion: controlPlaneApiVersion, version, localOnly: true, baseUrl: `http://${authority}`,
+    implementationExecutors: await discoverImplementationExecutors(), taskSpecContract: await publicTaskSpecContract(),
+    endpoints: { health: "/healthz", readiness: "/readyz", capabilities: "/v1/capabilities", taskSpecSchema: "/schemas/task-spec-v2.schema.json", projectInspection: "/v1/projects/inspect", tasks: "/v1/tasks", task: "/v1/tasks/{id}", result: "/v1/tasks/{id}/result", ownerDecisions: "/v1/tasks/{id}/owner-decisions", continuation: "/v1/tasks/{id}/continue", retry: "/v1/tasks/{id}/retry", cancellation: "/v1/tasks/{id}/cancel", publicationDecisions: "/v1/tasks/{id}/publication-decisions" },
+    lifecycle: { poll: "GET /v1/tasks/{id}", heartbeatField: "progress.lastHeartbeatAt", executionIdentityField: "progress.executionId", attemptField: "progress.attempt", phaseValues: ["understand_task", "implement", "validate", "repair", "finalize"], stalledAfterMs: 15000, terminal: ["completed", "failed", "interrupted"], recoveryAvailabilityField: "recovery.retryAvailable", ownerGate: "awaiting_owner_decision" },
+    bootstrap: "Inspect discovery and capabilities, register the project, copy the published implementationRequest, poll progress, and follow only advertised recovery actions."
+  };
+}
+async function capabilities(_stateRoot: string): Promise<Record<string, unknown>> {
+  return {
+    schemaVersion: 4, apiVersion: controlPlaneApiVersion, transports: ["localhost-http"], projectLocators: ["absolute-path", "registration-id"], taskModes: ["inspection", "implementation", "validation", "repair"],
+    implementationExecutors: await discoverImplementationExecutors(), taskSpecContract: await publicTaskSpecContract(),
+    execution: { engine: "TaskSpec v2", runtimes: ["docker", "local-disposable"], dependencyPreparation: ["required", "if-needed", "disabled", "reuse-existing"], persistentState: true, restartRecovery: true, heartbeat: true, watchdog: true, cancellation: true, executionGenerations: true, boundedCleanup: true, interruptedResult: true, journalSchemaVersion: 1, continuationSchemaVersion: 1 },
+    authority: { semantics: "explicit upper bounds; implementation requires implementation/providerCalls/network/localBranch/localCommit", inspect: true, implementation: true, providerCalls: "required-for-local-coding-agent", network: "required-for-provider-transport", localBranch: "required-for-disposable-worktree", localCommit: "required-for-local-result", remotePush: "separate-publication-decision", draftPublication: "separate-publication-decision", merge: false, deploy: false },
+    safety: { defaultBind: defaultControlPlaneHost, maxRequestBytes: defaultMaxRequestBytes, secretsInResponses: false, providerCallsByDefault: false, networkByDefault: false, sharedCheckoutMutation: false },
+    schemas: { taskSpec: "/schemas/task-spec-v2.schema.json", result: "schemas/task-result-v1.schema.json", controlPlane: "schemas/control-plane-v1.schema.json" }
+  };
+}
+
+async function taskSpecSchema(): Promise<Record<string, unknown>> {
+  return JSON.parse(await readFile(join(runForgeRoot(), "schemas", "task-spec-v2.schema.json"), "utf8")) as Record<string, unknown>;
+}
+
+async function publicTaskSpecContract(): Promise<Record<string, unknown>> {
+  return {
+    contractVersion: "task-spec-v2", schemaVersion: 2, schemaUrl: "/schemas/task-spec-v2.schema.json", schema: await taskSpecSchema(),
+    executionModes: ["inspection", "implementation", "validation", "repair"], implementationExecutorIds: ["local-coding-agent"], compatibleRuntimes: { "local-coding-agent": ["local-disposable"] },
+    requiredImplementationAuthority: { taskSpec: ["authority.profile=bounded-implementation", "authority.allowProviderCalls=true", "authority.allowNetwork=true"], request: ["implementation=true", "providerCalls=true", "network=true", "localBranch=true", "localCommit=true"], publication: ["publication=none", "remotePush=false", "draftPublication=false", "merge=false", "deploy=false"] },
+    implementationRequest: { projectId: "<registered-project-id>", taskSpec: { schemaVersion: 2, taskId: "IMPLEMENTATION-TASK-1", task: { text: "Fix the bounded defect and add a regression test.", goal: "Validation is green and a local commit is recorded.", acceptanceCriteria: ["Defect is fixed", "Regression test passes", "Local commit is recorded"] }, execution: { mode: "implementation", maxRepairIterations: 2, timeoutMs: 300000, maxChangedFiles: 20, maxPatchBytes: 500000, maxProviderTokens: 100000 }, runtime: { preference: "local", dependencyPreparation: "if-needed", externalNetwork: "allowed" }, validation: { mode: "auto", commands: [] }, authority: { profile: "bounded-implementation", forbiddenAreas: [".env", "secrets"], allowProviderCalls: true, allowNetwork: true }, git: { publication: "none", branch: null }, merge: { policy: "never" }, deploy: { policy: "never" }, repair: { mode: "none", plan: null } }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, publication: "none" }
+  };
+}
 
 async function readJson(request: IncomingMessage, limit: number): Promise<unknown> {
   const type = request.headers["content-type"] ?? ""; if (!String(type).toLowerCase().startsWith("application/json")) throw new ControlPlaneError(415, "content_type_required", "Use application/json.");

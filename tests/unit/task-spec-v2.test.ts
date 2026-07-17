@@ -12,6 +12,13 @@ const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 
 describe("TaskSpec v2", () => {
+  it("requires an explicit supported execution mode", async () => {
+    const repo = await gitRepo();
+    const value = minimal(repo) as Record<string, any>;
+    delete value.execution;
+    await expect(normalizeTaskSpecV2(value)).rejects.toThrow("execution is required");
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), execution: { mode: "guess" } })).rejects.toThrow("execution.mode must be one of");
+  });
   it("normalizes auto-discovery deterministically", async () => {
     const repo = await gitRepo();
     const first = await normalizeTaskSpecV2(minimal(repo));
@@ -62,6 +69,7 @@ describe("TaskSpec v2", () => {
     const repo = await gitRepo();
     await expect(normalizeTaskSpecV2({
       ...minimal(repo),
+      execution: { mode: "implementation" },
       authority: { profile: "bounded-implementation", envelopeFile: "/tmp/authority.json", allowProviderCalls: false },
       git: { publication: "draft-pr", branch: "codex/test" }
     })).rejects.toThrow("Draft PR publication requires a bounded repair task");
@@ -75,6 +83,7 @@ describe("TaskSpec v2", () => {
     await writeFile(plan, JSON.stringify({ schema_version: "runforge.code-repair.v1", candidate_id: "TEST", task: "Change value", allowed_files: ["src/private.ts"], max_changed_files: 1, validation_commands: ["npm test"], changes: [{ file: "src/private.ts", replacements: [{ find: "1", replace: "2" }] }] }));
     await expect(normalizeTaskSpecV2({
       ...minimal(repo), runtime: { preference: "docker", prepareDependencies: true },
+      execution: { mode: "repair" },
       authority: { profile: "bounded-implementation", forbiddenAreas: ["src/private.ts"] }, repair: { mode: "code", plan }
     })).rejects.toThrow("forbidden by authority.forbiddenAreas");
   });
@@ -165,7 +174,7 @@ describe("TaskSpec v2", () => {
 });
 
 function minimal(repo: string): Record<string, unknown> {
-  return { schemaVersion: 2, taskId: "TEST-TASK-1", task: { text: "Validate safely", goal: "Evidence", acceptanceCriteria: ["Checks run"] }, target: { repository: repo } };
+  return { schemaVersion: 2, taskId: "TEST-TASK-1", task: { text: "Validate safely", goal: "Evidence", acceptanceCriteria: ["Checks run"] }, target: { repository: repo }, execution: { mode: "validation" } };
 }
 
 async function gitRepo(): Promise<string> {

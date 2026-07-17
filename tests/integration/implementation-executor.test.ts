@@ -64,11 +64,15 @@ describe("implementation executor", () => {
       const capabilities = await fetch(`${server.url}/v1/capabilities`).then((response) => response.json()) as Record<string, any>;
       expect(capabilities.implementationExecutors).toMatchObject([{ status: "ready" }]);
       expect(capabilities.implementationExecutors[0].command).toBeUndefined();
+      expect(capabilities.taskSpecContract).toMatchObject({ contractVersion: "task-spec-v2", schemaVersion: 2, schemaUrl: "/schemas/task-spec-v2.schema.json", schema: { required: expect.arrayContaining(["execution"]) }, implementationRequest: { taskSpec: { execution: { mode: "implementation" }, runtime: { preference: "local" } }, authority: { localBranch: true, localCommit: true } } });
+      const discovery = await fetch(`${server.url}/.well-known/runforge`).then((response) => response.json()) as Record<string, any>;
+      expect(discovery.taskSpecContract).toMatchObject({ implementationExecutorIds: ["local-coding-agent"], compatibleRuntimes: { "local-coding-agent": ["local-disposable"] } });
+      expect(await fetch(`${server.url}${discovery.endpoints.taskSpecSchema}`).then((response) => response.json())).toMatchObject({ title: "RunForge TaskSpec v2", required: expect.arrayContaining(["execution"]) });
       const project = await fetch(`${server.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repo, register: true, runtime: "local" }) }).then((response) => response.json()) as Record<string, any>;
       const request: Record<string, any> = spec(repo, "EXECUTOR-HTTP-1", "ADD_TEST fix add", ["node test.js", "node added.test.js"]); delete request.target;
-      const created = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: project.project.id, taskSpec: request, authority: { implementation: true, providerCalls: true, network: true } }) });
+      const created = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: project.project.id, taskSpec: request, authority: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true } }) });
       expect(created.status).toBe(202);
-      const accepted = await created.json() as Record<string, any>; expect(accepted.selection).toMatchObject({ requestedMode: "implementation", selectedExecutor: "local-coding-agent" });
+      const accepted = await created.json() as Record<string, any>; expect(accepted.selection).toMatchObject({ requestedMode: "implementation", normalizedMode: "implementation", selectedExecutor: "local-coding-agent", selectedRuntime: "local-disposable", authorityChecks: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true }, providerDecision: "allowed", networkDecision: "allowed" });
       const terminal = await poll(`${server.url}/v1/tasks/EXECUTOR-HTTP-1`); expect(terminal.status).toBe("completed");
       expect(terminal.events.map((item: any) => item.detail).join(" ")).toContain("implement:");
       const result = await fetch(`${server.url}/v1/tasks/EXECUTOR-HTTP-1/result`).then((response) => response.json()) as Record<string, any>;
@@ -81,12 +85,34 @@ describe("implementation executor", () => {
     const server = await startControlPlaneServer({ port: 0, stateRoot: state });
     try {
       process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
-      const denied = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec(repo, "EXECUTOR-DENIED-1", "fix", ["node test.js"]), authority: { implementation: true } }) });
+      const denied = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec(repo, "EXECUTOR-DENIED-1", "fix", ["node test.js"]), authority: { implementation: true, localBranch: true, localCommit: true } }) });
       expect(denied.status).toBe(403); expect(await denied.json()).toMatchObject({ error: { code: "provider_authority_denied" } });
       process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = "/definitely/missing/runforge-agent";
-      const unavailable = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec(repo, "EXECUTOR-UNAVAILABLE-1", "fix", ["node test.js"]), authority: { implementation: true, providerCalls: true, network: true } }) });
-      expect(unavailable.status).toBe(503); expect(await unavailable.json()).toMatchObject({ error: { code: "executor_unavailable" } });
+      const unavailable = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec(repo, "EXECUTOR-UNAVAILABLE-1", "fix", ["node test.js"]), authority: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true } }) });
+      expect(unavailable.status).toBe(503); expect(await unavailable.json()).toMatchObject({ error: { code: "implementation_executor_unavailable" } });
       expect((await server.manager.store.listTasks()).map((item) => item.id)).not.toContain("EXECUTOR-UNAVAILABLE-1");
+    } finally { await server.close(); }
+  });
+
+  it("returns specific preflight errors without creating downgraded tasks", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository(); const state = await mkdtemp(join(tmpdir(), "runforge-implementation-contract-"));
+    const server = await startControlPlaneServer({ port: 0, stateRoot: state });
+    const fullAuthority = { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true };
+    const cases: Array<[string, (value: Record<string, any>) => void, Record<string, boolean>, string]> = [
+      ["PROVIDER", (value) => { value.authority.allowProviderCalls = false; }, fullAuthority, "provider_permission_denied"],
+      ["NETWORK", (value) => { value.authority.allowNetwork = false; value.runtime.externalNetwork = "denied"; }, fullAuthority, "network_permission_denied"],
+      ["MUTATION", () => undefined, { ...fullAuthority, localBranch: false, localCommit: false }, "mutation_authority_denied"],
+      ["COMMIT", () => undefined, { ...fullAuthority, localCommit: false }, "local_commit_authority_denied"],
+      ["RUNTIME", (value) => { value.runtime.preference = "docker"; }, fullAuthority, "runtime_incompatible"]
+    ];
+    try {
+      for (const [name, mutate, authority, code] of cases) {
+        const value = spec(repo, `EXECUTOR-${name}-PREFLIGHT`, "fix", ["node test.js"]); mutate(value);
+        const response = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: value, authority }) });
+        expect(response.status).toBeGreaterThanOrEqual(400); expect(await response.json()).toMatchObject({ error: { code, details: { operation: "start_new_task", newTaskRequired: true } } });
+      }
+      expect(await server.manager.store.listTasks()).toHaveLength(0);
     } finally { await server.close(); }
   });
 
@@ -95,7 +121,7 @@ describe("implementation executor", () => {
     const repo = await repository(); const state = await mkdtemp(join(tmpdir(), "runforge-implementation-cancel-"));
     const server = await startControlPlaneServer({ port: 0, stateRoot: state });
     try {
-      const created = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec(repo, "EXECUTOR-CANCEL-1", "CANCEL_FOREVER", ["node test.js"]), authority: { implementation: true, providerCalls: true, network: true } }) });
+      const created = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec(repo, "EXECUTOR-CANCEL-1", "CANCEL_FOREVER", ["node test.js"]), authority: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true } }) });
       expect(created.status).toBe(202); await pollPhase(`${server.url}/v1/tasks/EXECUTOR-CANCEL-1`, "implement");
       const cancelled = await fetch(`${server.url}/v1/tasks/EXECUTOR-CANCEL-1/cancel`, { method: "POST" }).then((response) => response.json()) as Record<string, any>;
       expect(cancelled).toMatchObject({ status: "interrupted", progress: { workerStatus: "cancelled" }, execution: { lease: { state: "revoked" } } });
