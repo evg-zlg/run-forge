@@ -21,6 +21,6 @@
     "publicationDecision": { "type": "object", "additionalProperties": false, "required": ["decision", "note"], "properties": {
       "decisionId": { "type": "string", "minLength": 1 }, "decision": { "enum": ["approve", "reject", "hold"] }, "note": { "type": "string", "minLength": 1 }
     } },
-    "emptyOperation": { "type": "object", "additionalProperties": false, "description": "Body for continue, retry, and cancel lifecycle operations." }
+    "emptyOperation": { "type": "object", "additionalProperties": false, "description": "Body for continue, retry, and cancel lifecycle operations. Retry is accepted only when recovery.retryAvailable is true; cleanup-pending retries return HTTP 409 recovery_pending with retryAfter and a polling action, while failed bounded cleanup returns non-retryable worker_cleanup_failed." }
   }
 }
