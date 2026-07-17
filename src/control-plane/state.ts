@@ -72,15 +72,19 @@ export class ControlPlaneStore {
     for (const task of tasks) {
       const journal = await this.readJournal(task.id);
       const lastInterrupted = [...journal].reverse().find((event) => event.type === "task_interrupted");
-      const journalWins = ["queued", "running", "continuing"].includes(task.status) && lastInterrupted &&
-        !journal.slice(journal.indexOf(lastInterrupted) + 1).some((event) => ["task_started", "continuation_started", "task_completed", "task_failed"].includes(event.type));
-      if (!["queued", "running", "continuing"].includes(task.status) && task.status !== "interrupted") continue;
+      const afterInterruption = lastInterrupted ? journal.slice(journal.lastIndexOf(lastInterrupted) + 1) : [];
+      const replacementStarted = Boolean(lastInterrupted && afterInterruption.some((event) => ["retry_requested", "task_started", "continuation_started"].includes(event.type) && event.executionId !== lastInterrupted.executionId));
+      const lateTerminal = Boolean(lastInterrupted && ["completed", "failed"].includes(task.status) && !replacementStarted && afterInterruption.some((event) => ["task_completed", "task_failed"].includes(event.type) && event.executionId === lastInterrupted.executionId));
+      const lateTerminalStatus = task.status;
+      const journalWins = lateTerminal || Boolean(["queued", "running", "continuing"].includes(task.status) && lastInterrupted && !afterInterruption.some((event) => ["task_started", "continuation_started", "task_completed", "task_failed"].includes(event.type)));
+      if (!journalWins && !["queued", "running", "continuing", "interrupted"].includes(task.status)) continue;
       const wasInFlight = ["queued", "running", "continuing"].includes(task.status);
-      const reason = journalWins ? String(lastInterrupted.detail ?? "journal_reconstruction") : wasInFlight ? "service_restart" : task.recovery?.reason ?? "service_restart";
+      const reason = journalWins ? String(lastInterrupted?.detail ?? "journal_reconstruction") : wasInFlight ? "service_restart" : task.recovery?.reason ?? "service_restart";
       task.status = "interrupted";
       task.updatedAt = new Date().toISOString();
       task.events ??= [];
       if (wasInFlight) task.events.push({ at: task.updatedAt, type: "recovered_interrupted" });
+      if (lateTerminal) task.events.push({ at: task.updatedAt, type: "late_worker_terminal_ignored", detail: `Ignored ${lateTerminalStatus} from revoked execution ${lastInterrupted?.executionId ?? "unknown"}.` });
       task.progress = { ...(task.progress ?? fallbackProgress(task)), attempt: task.progress?.attempt ?? task.execution?.attempt ?? 1, updatedAt: task.updatedAt, workerStatus: "lost", diagnostic: "Worker identity was lost during control-plane restart." };
       task.execution ??= { attempt: task.progress.attempt, lease: null, attempts: [], lastRetry: null };
       if (task.execution.lease) {
@@ -92,10 +96,11 @@ export class ControlPlaneStore {
       await this.saveTask(task);
       await this.writePublishedResult(task.id, task.progress.executionId ?? "unknown", interruptedResult(task));
       if (wasInFlight && !journalWins) await this.appendEvent(task.id, { at: task.updatedAt, type: "task_interrupted", detail: reason, executionId: task.progress.executionId ?? undefined });
+      if (lateTerminal) await this.appendEvent(task.id, { at: task.updatedAt, type: "late_worker_terminal_ignored", detail: reason, executionId: task.progress.executionId ?? undefined });
     }
   }
 
-  private async readJournal(id: string): Promise<Array<{ type: string; detail?: string }>> {
+  private async readJournal(id: string): Promise<Array<{ type: string; detail?: string; executionId?: string }>> {
     try { return (await readFile(join(this.taskDir(id), "journal.jsonl"), "utf8")).split("\n").filter(Boolean).flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } }); }
     catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
   }
