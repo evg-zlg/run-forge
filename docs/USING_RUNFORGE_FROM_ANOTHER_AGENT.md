@@ -45,7 +45,7 @@ Implementation adds explicit mode and independent provider/network authority:
 ```json
 {
   "taskSpec": {
-    "execution": { "mode": "implementation", "maxRepairIterations": 2, "maxProviderTokens": 30000 },
+    "execution": { "mode": "implementation", "maxRepairIterations": 2, "maxProviderTokens": 100000 },
     "runtime": { "preference": "local", "externalNetwork": "allowed" },
     "authority": {
       "profile": "bounded-implementation",

@@ -122,7 +122,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
     taskId,
     task: { text: string(task.text, "task.text"), goal: string(task.goal, "task.goal"), acceptanceCriteria: strings(task.acceptanceCriteria, "task.acceptanceCriteria", true) },
     target: { repository: await realpath(inspection.path), workingDirectory: inspection.workingDirectory ?? ".", expectedSha },
-    execution: { mode: executionMode, maxRepairIterations: integer(executionRaw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(executionRaw.timeoutMs, "execution.timeoutMs", 1_000, 1_800_000, 300_000), maxChangedFiles: integer(executionRaw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(executionRaw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: integer(executionRaw.maxProviderTokens, "execution.maxProviderTokens", 1_000, 200_000, 30_000) },
+    execution: { mode: executionMode, maxRepairIterations: integer(executionRaw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(executionRaw.timeoutMs, "execution.timeoutMs", 1_000, 1_800_000, 300_000), maxChangedFiles: integer(executionRaw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(executionRaw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: integer(executionRaw.maxProviderTokens, "execution.maxProviderTokens", 1_000, 200_000, 100_000) },
     discovery: { policy: choice(discoveryRaw.policy ?? "auto", ["auto", "explicit"], "discovery.policy") },
     runtime: {
       preference: choice(runtimeRaw.preference ?? "docker", ["docker", "local"], "runtime.preference"),
