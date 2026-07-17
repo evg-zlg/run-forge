@@ -41,14 +41,46 @@ export type TaskProgress = {
   updatedAt: string;
   lastHeartbeatAt: string | null;
   executionId: string | null;
-  workerStatus: "idle" | "starting" | "active" | "slow" | "finished" | "failed" | "lost" | "stalled" | "cancelled";
+  attempt: number;
+  workerStatus: "idle" | "starting" | "active" | "slow" | "finished" | "failed" | "lost" | "stalled" | "cancelled" | "revoked";
   timeoutMs: number;
   deadlineAt: string | null;
   summary: string;
   diagnostic: string | null;
 };
 
-export type TaskRecovery = { reason: string; lastPhase: string; lastHeartbeatAt: string | null; actions: string[]; operation?: string } | null;
+export type TaskRecovery = {
+  reason: string;
+  lastPhase: string;
+  lastHeartbeatAt: string | null;
+  originalExecutionId: string | null;
+  actions: string[];
+  retryAvailable: boolean;
+  retryAfter?: string;
+  cleanupStatus: "not_required" | "pending" | "completed" | "detached";
+  operation?: string;
+} | null;
+
+export type ExecutionLease = {
+  executionId: string;
+  attempt: number;
+  operation: "execution" | "continuation";
+  state: "active" | "revoked" | "finished";
+  startedAt: string;
+  revokedAt: string | null;
+  cleanupDeadlineAt: string | null;
+};
+
+export type ExecutionAttempt = {
+  executionId: string;
+  attempt: number;
+  operation: "execution" | "continuation";
+  artifactRoot: string;
+  specPath: string;
+  startedAt: string;
+  finishedAt: string | null;
+  outcome: "active" | "completed" | "failed" | "interrupted";
+};
 
 export type ControlTaskRecord = {
   id: string;
@@ -69,7 +101,13 @@ export type ControlTaskRecord = {
   events: Array<{ at: string; type: string; detail?: string }>;
   progress: TaskProgress;
   recovery: TaskRecovery;
-  continuation: { schemaVersion: 1; state: "none" | "available" | "consumed" | "unrecoverable"; decisionId: string | null; executionId: string | null };
+  execution: {
+    attempt: number;
+    lease: ExecutionLease | null;
+    attempts: ExecutionAttempt[];
+    lastRetry: { sourceExecutionId: string; executionId: string; requestedAt: string } | null;
+  };
+  continuation: { schemaVersion: 1; state: "none" | "available" | "consumed" | "unrecoverable"; decisionId: string | null; executionId: string | null; sourceExecutionId: string | null };
 };
 
 export function defaultAuthority(value: unknown): ControlAuthority {

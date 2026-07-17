@@ -37,6 +37,11 @@ export class ControlPlaneStore {
   async saveContinuation(id: string, value: Record<string, unknown>): Promise<void> { await this.writeJson(this.continuationPath(id), value); }
   async readContinuation(id: string): Promise<Record<string, unknown> | null> { return this.readJson(this.continuationPath(id), null); }
   async readSpec(id: string): Promise<Record<string, unknown> | null> { return this.readJson(join(this.taskDir(id), "task-spec.json"), null); }
+  async writeAttemptSpec(id: string, attempt: number, spec: Record<string, unknown>): Promise<string> {
+    const path = join(this.taskDir(id), "attempts", String(attempt), "task-spec.json");
+    await this.writeJson(path, spec);
+    return path;
+  }
   async listTasks(): Promise<ControlTaskRecord[]> {
     const names = await readdir(join(this.root, "tasks"), { withFileTypes: true }).catch(() => []);
     const tasks = await Promise.all(names.filter((item) => item.isDirectory()).map((item) => this.getTask(item.name)));
@@ -52,22 +57,47 @@ export class ControlPlaneStore {
   async readResult(task: ControlTaskRecord): Promise<Record<string, unknown> | null> {
     return this.readJson<Record<string, unknown> | null>(join(task.artifactRoot, "results.json"), null);
   }
+  async writePublishedResult(id: string, executionId: string, result: Record<string, unknown>): Promise<void> {
+    await this.writeJson(join(this.taskDir(id), "result.json"), { executionId, result });
+  }
+  async readPublishedResult(id: string): Promise<{ executionId: string; result: Record<string, unknown> } | null> {
+    return this.readJson(join(this.taskDir(id), "result.json"), null);
+  }
 
   async writeServiceInfo(value: Record<string, unknown>): Promise<void> { await this.writeJson(join(this.root, "service.json"), value); }
   async readServiceInfo(): Promise<Record<string, unknown> | null> { return this.readJson(join(this.root, "service.json"), null); }
 
   private async recoverInterruptedTasks(): Promise<void> {
     const tasks = await this.listTasks();
-    for (const task of tasks.filter((item) => ["queued", "running", "continuing"].includes(item.status))) {
+    for (const task of tasks) {
+      const journal = await this.readJournal(task.id);
+      const lastInterrupted = [...journal].reverse().find((event) => event.type === "task_interrupted");
+      const journalWins = ["queued", "running", "continuing"].includes(task.status) && lastInterrupted &&
+        !journal.slice(journal.indexOf(lastInterrupted) + 1).some((event) => ["task_started", "continuation_started", "task_completed", "task_failed"].includes(event.type));
+      if (!["queued", "running", "continuing"].includes(task.status) && task.status !== "interrupted") continue;
+      const wasInFlight = ["queued", "running", "continuing"].includes(task.status);
+      const reason = journalWins ? String(lastInterrupted.detail ?? "journal_reconstruction") : wasInFlight ? "service_restart" : task.recovery?.reason ?? "service_restart";
       task.status = "interrupted";
       task.updatedAt = new Date().toISOString();
-      task.ownerGate = { required: true, status: "awaiting_owner_decision", reason: "The service restarted while execution was in progress; success was not inferred." };
-      task.events.push({ at: task.updatedAt, type: "recovered_interrupted" });
-      task.progress = { ...(task.progress ?? fallbackProgress(task)), updatedAt: task.updatedAt, workerStatus: "lost", diagnostic: "Worker identity was lost during control-plane restart." };
-      task.recovery = { reason: "service_restart", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, actions: ["retry", "cancel"], operation: `/v1/tasks/${task.id}/retry` };
+      task.events ??= [];
+      if (wasInFlight) task.events.push({ at: task.updatedAt, type: "recovered_interrupted" });
+      task.progress = { ...(task.progress ?? fallbackProgress(task)), attempt: task.progress?.attempt ?? task.execution?.attempt ?? 1, updatedAt: task.updatedAt, workerStatus: "lost", diagnostic: "Worker identity was lost during control-plane restart." };
+      task.execution ??= { attempt: task.progress.attempt, lease: null, attempts: [], lastRetry: null };
+      if (task.execution.lease) {
+        task.execution.lease.state = "revoked";
+        task.execution.lease.revokedAt ??= task.updatedAt;
+        task.execution.lease.cleanupDeadlineAt = task.updatedAt;
+      }
+      task.recovery = { reason, lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, originalExecutionId: task.progress.executionId, actions: ["retry", "cancel"], retryAvailable: true, cleanupStatus: "not_required", operation: `/v1/tasks/${task.id}/retry` };
       await this.saveTask(task);
-      await this.appendEvent(task.id, { at: task.updatedAt, type: "task_interrupted", detail: "service_restart", executionId: task.progress.executionId ?? undefined });
+      await this.writePublishedResult(task.id, task.progress.executionId ?? "unknown", interruptedResult(task));
+      if (wasInFlight && !journalWins) await this.appendEvent(task.id, { at: task.updatedAt, type: "task_interrupted", detail: reason, executionId: task.progress.executionId ?? undefined });
     }
+  }
+
+  private async readJournal(id: string): Promise<Array<{ type: string; detail?: string }>> {
+    try { return (await readFile(join(this.taskDir(id), "journal.jsonl"), "utf8")).split("\n").filter(Boolean).flatMap((line) => { try { return [JSON.parse(line)]; } catch { return []; } }); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; throw error; }
   }
 
   private async readJson<T>(path: string, fallback: T): Promise<T> {
@@ -83,5 +113,15 @@ export class ControlPlaneStore {
 }
 
 function fallbackProgress(task: ControlTaskRecord): ControlTaskRecord["progress"] {
-  return { phase: "unknown", operation: "execution", startedAt: task.startedAt, updatedAt: task.updatedAt, lastHeartbeatAt: task.updatedAt, executionId: null, workerStatus: "lost", timeoutMs: 300_000, deadlineAt: null, summary: "Execution interrupted by service restart.", diagnostic: null };
+  return { phase: "unknown", operation: "execution", startedAt: task.startedAt, updatedAt: task.updatedAt, lastHeartbeatAt: task.updatedAt, executionId: null, attempt: 1, workerStatus: "lost", timeoutMs: 300_000, deadlineAt: null, summary: "Execution interrupted by service restart.", diagnostic: null };
+}
+
+function interruptedResult(task: ControlTaskRecord): Record<string, unknown> {
+  return {
+    schemaVersion: 1, taskId: task.id, status: "interrupted", lastCompletedPhase: task.recovery?.lastPhase ?? task.progress.phase,
+    interruption: { reason: task.recovery?.reason, originalExecutionId: task.progress.executionId, lastHeartbeatAt: task.progress.lastHeartbeatAt, deadlineAt: task.progress.deadlineAt },
+    targetMutation: { status: "not_inferred", assertion: "Service restart never infers mutation completion." }, artifacts: { root: task.artifactRoot, created: [] },
+    validations: { incomplete: ["Execution did not reach a trusted terminal result."] }, recovery: task.recovery,
+    safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true, providerCallsInferred: false }, nextAction: task.recovery?.operation
+  };
 }
