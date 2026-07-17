@@ -27,8 +27,8 @@ task
 
 - `runforge onboarding [--repo] [--format json]` publishes the stable discovery contract, supported/unsupported interfaces, safe defaults, commands, and next action.
 - `runforge doctor --repo ... --format json` distinguishes blockers, warnings, and optional integrations while reporting Git state, package manager, validation discovery, and safe artifact placement.
-- TaskSpec v2 provides strict, deterministic, redacted task intake with unknown-field/version/path validation and preserves legacy task-run flags.
-- TaskSpec runs standardize `summary.md` and normalized task-result-v1 `results.json` as the only required entry artifacts.
+- TaskSpec v2 provides strict, deterministic, redacted task intake with unknown-field/version/path validation, nested `target.workingDirectory`, Docker or authority-bounded local disposable runtimes, four dependency-preparation strategies, and preserved legacy task-run flags/boolean preparation migration.
+- TaskSpec runs standardize `summary.md` and normalized task-result-v1 `results.json` as the only required entry artifacts. Results expose repository and execution roots separately; implementation intent cannot complete from inspection alone, and runtime/dependency/authority/strategy blocks create an official owner gate with a continuation command.
 - Explicit `--write-project-file` creates a compact, uncommitted `RUNFORGE.md`; discovery remains read-only by default.
 - Repeatable `task-run start` harness for local providerless task-runs.
 - Deterministic task classification for docs review, code inspection, and general review.

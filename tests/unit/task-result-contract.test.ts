@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { externalResultContract } from "../../src/product/task-result-contract.js";
+import { completionStatusForIntent, externalResultContract } from "../../src/product/task-result-contract.js";
 import type { ExternalExecutionResult } from "../../src/run/external-execution.js";
 
 describe("normalized external result classification", () => {
+  it("does not complete implementation intent after inspection only", () => {
+    expect(completionStatusForIntent({ executionStatus: "completed", implementationExpected: true, targetChanged: false })).toBe("implementation_not_started");
+    expect(completionStatusForIntent({ executionStatus: "completed", implementationExpected: false, targetChanged: false })).toBe("completed");
+    expect(completionStatusForIntent({ executionStatus: "completed", implementationExpected: true, targetChanged: false, patch: "patch.diff" })).toBe("completed");
+  });
   it.each(["failed", "committed-not-pushed", "pushed-no-pr"] as const)("classifies %s publication as a publication failure", (publication) => {
     const result = {
       runId: "PUBLICATION-FAILURE", source: { before: { path: "/repo", head: "abc", status: "" }, after: { path: "/repo", head: "abc", status: "" }, unchanged: true },

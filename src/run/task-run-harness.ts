@@ -30,6 +30,8 @@ type TaskRunInput = {
   taskId?: string;
   executionRoot?: string;
   forceExternal?: boolean;
+  workingDirectory?: string;
+  allowDisposableLocal?: boolean;
   task: string;
   out: string;
   tmpRoot?: string;
@@ -103,6 +105,7 @@ export type TaskRunResult = {
 export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunResult> {
   const repoRoot = resolve(input.executionRoot ?? process.cwd());
   const sourceRoot = input.repo ? resolve(input.repo) : repoRoot;
+  const workingDirectory = input.workingDirectory ?? ".";
   const external = input.forceExternal === true || sourceRoot !== repoRoot;
   const outDir = resolve(repoRoot, input.out);
   const runId = basename(outDir);
@@ -113,12 +116,12 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
   const dockerImage = input.dockerImage ?? "runforge:local";
   const prepareRuntime = input.prepareRuntime ?? "none";
   const externalCommands = input.commands ?? [];
-  if (external) await assertExternalTaskPolicy({ repo: sourceRoot, runtime, delegatedReview: input.delegatedReview, commands: externalCommands });
+  if (external) await assertExternalTaskPolicy({ repo: sourceRoot, runtime, delegatedReview: input.delegatedReview, commands: externalCommands, allowDisposableLocal: input.allowDisposableLocal });
   if (prepareRuntime === "explicit" && (!external || runtime !== "docker")) {
     throw new Error("--prepare-runtime explicit requires --repo and --runtime docker.");
   }
   const preparationWorkspace = join(tmpRoot, "prepared-workspace");
-  const plan = external ? planExternalValidationTaskRun(input.task, await detectLockfileName(sourceRoot), externalCommands) : planTaskRun(input.task);
+  const plan = external ? planExternalValidationTaskRun(input.task, await detectLockfileName(join(sourceRoot, workingDirectory)), externalCommands) : planTaskRun(input.task);
   if (external) {
     await assertExternalPathsOutsideTarget(sourceRoot, [
       outDir,
@@ -129,7 +132,7 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
   }
   const sourceBefore = external ? await inspectRepoState(sourceRoot) : null;
   const readonlyDependencies = external && prepareRuntime === "none" && sourceBefore?.path
-    ? await access(join(sourceBefore.path, "node_modules")).then(() => join(sourceBefore.path, "node_modules"), () => undefined)
+    ? await access(join(sourceBefore.path, workingDirectory, "node_modules")).then(() => join(sourceBefore.path, workingDirectory, "node_modules"), () => undefined)
     : undefined;
   const executor: TaskRunExecutor = runtime === "docker" ? new DockerShellExecutor(repoRoot, dockerImage, external, readonlyDependencies) : new LocalShellExecutor(repoRoot);
 
@@ -140,7 +143,7 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
   await mkdir(tmpRoot, { recursive: true });
 
   const preparation = prepareRuntime === "explicit"
-    ? await prepareExternalRuntime({ repo: sourceRoot, workspace: preparationWorkspace, outDir, image: dockerImage }) : null;
+    ? await prepareExternalRuntime({ repo: sourceRoot, workingDirectory, workspace: preparationWorkspace, outDir, image: dockerImage }) : null;
   const planPath = join(outDir, "plan.md");
   await writeFile(planPath, renderPlan(runId, input.task, tmpRoot, checkCommand, plan, runtime, runtime === "docker" ? dockerImage : undefined, external, prepareRuntime), "utf8");
 
@@ -151,14 +154,14 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
     await mkdir(subtaskDir, { recursive: true });
     if (!preparation) {
       await copyTaskRunWorkspace(sourceRoot, workspace, external ? "" : relative(repoRoot, outDir));
-      if (external) await prepareUnpreparedExternalWorkspace(sourceRoot, workspace);
+      if (external) await prepareUnpreparedExternalWorkspace(sourceRoot, workspace, workingDirectory);
     }
     await writeFile(join(subtaskDir, "brief.md"), renderBrief(planned, workspace), "utf8");
     const executorRequest = createExecutorRequest({
       runId,
       subtaskId: planned.id,
       command: planned.evidenceCommand,
-      cwd: workspace,
+      cwd: join(workspace, workingDirectory),
       artifactDir: subtaskDir,
       lane: executor.lane,
       timeoutMs: external ? (input.timeoutMs ?? 300_000) : undefined

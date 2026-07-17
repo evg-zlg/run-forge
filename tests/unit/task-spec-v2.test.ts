@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -93,7 +93,7 @@ describe("TaskSpec v2", () => {
     await expect(normalizeTaskSpecV2({ ...minimal(repo), ...override })).rejects.toThrow("must be a non-empty string");
   });
 
-  it("rejects unborn repositories and unsupported dependency preparation", async () => {
+  it("rejects unborn repositories but defers unavailable dependency preparation to execution", async () => {
     const unborn = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-unborn-spec-"))) - 1]!;
     await execFileAsync("git", ["init", "-b", "main", unborn]);
     await expect(normalizeTaskSpecV2(minimal(unborn))).rejects.toThrow("valid committed HEAD");
@@ -101,7 +101,33 @@ describe("TaskSpec v2", () => {
     const repo = await gitRepo();
     await rm(join(repo, "package-lock.json"));
     await expect(normalizeTaskSpecV2({ ...minimal(repo), runtime: { preference: "docker", prepareDependencies: true } }))
-      .rejects.toThrow("supported npm, pnpm, or yarn lockfile");
+      .resolves.toMatchObject({ runtime: { dependencyPreparation: "required" } });
+  });
+
+  it("discovers a nested yarn application while preserving repository identity", async () => {
+    const repo = await gitRepo();
+    await rm(join(repo, "package.json")); await rm(join(repo, "package-lock.json"));
+    await mkdir(join(repo, "frontend"));
+    await writeFile(join(repo, "frontend", "package.json"), JSON.stringify({ scripts: { test: "node --test", typecheck: "node -e \"\"" } }));
+    await writeFile(join(repo, "frontend", "yarn.lock"), "# yarn\n");
+    const spec = await normalizeTaskSpecV2({ ...minimal(repo), target: { repository: repo, workingDirectory: "frontend" } });
+    expect(spec.target).toEqual({ repository: await realpath(repo), workingDirectory: "frontend" });
+    expect(spec.validation.commands).toEqual(["corepack yarn run typecheck", "corepack yarn test"]);
+  });
+
+  it("rejects invalid, traversing, and symlink-escaping execution roots", async () => {
+    const repo = await gitRepo();
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), target: { repository: repo, workingDirectory: "missing" } })).rejects.toThrow("existing directory");
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), target: { repository: repo, workingDirectory: "../outside" } })).rejects.toThrow("path traversal");
+    const outside = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-outside-"))) - 1]!;
+    await symlink(outside, join(repo, "escaped"));
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), target: { repository: repo, workingDirectory: "escaped" } })).rejects.toThrow("escapes target.repository");
+  });
+
+  it.each(["required", "if-needed", "disabled", "reuse-existing"])("normalizes dependency strategy %s", async (strategy) => {
+    const repo = await gitRepo();
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), runtime: { preference: "local", dependencyPreparation: strategy } }))
+      .resolves.toMatchObject({ runtime: { preference: "local", dependencyPreparation: strategy } });
   });
 
   it("includes decisive post-apply stages in normalized validation", async () => {

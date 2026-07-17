@@ -4,6 +4,11 @@ import type { ExternalExecutionResult } from "../run/external-execution.js";
 import type { TaskRunResult } from "../run/task-run-harness.js";
 import type { ExecutorResult } from "../run/task-run-executor.js";
 
+export function completionStatusForIntent(input: { executionStatus: string; implementationExpected: boolean; targetChanged: boolean; patch?: string | null; commit?: string | null; pullRequest?: string | null }): string {
+  if (input.executionStatus !== "completed" || !input.implementationExpected) return input.executionStatus;
+  return input.targetChanged || input.patch || input.commit || input.pullRequest ? "completed" : "implementation_not_started";
+}
+
 export function taskRunResultContract(result: TaskRunResult, taskId: string): Record<string, unknown> {
   const initialSha = result.sourceRepository.before?.head ?? null;
   return {

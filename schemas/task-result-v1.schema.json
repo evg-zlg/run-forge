@@ -6,8 +6,8 @@
   "required": ["schemaVersion", "contract", "taskId", "status", "targetRepository", "completedWork", "validation", "artifacts", "ownerGate", "nextAction", "safetyAssertions", "errors", "limitations"],
   "properties": {
     "schemaVersion": { "const": 1 }, "contract": { "const": "runforge-task-result" }, "taskId": { "type": "string", "minLength": 1 },
-    "status": { "enum": ["completed", "failed", "awaiting_owner_decision", "blocked"] },
-    "targetRepository": { "type": "object", "required": ["path", "initialSha", "finalSha", "changed"], "properties": { "path": { "type": ["string", "null"] }, "initialSha": { "type": ["string", "null"] }, "finalSha": { "type": ["string", "null"] }, "changed": { "type": "boolean" } } },
+    "status": { "enum": ["completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required"] },
+    "targetRepository": { "type": "object", "required": ["path", "initialSha", "finalSha", "changed"], "properties": { "path": { "type": ["string", "null"] }, "repositoryRoot": { "type": ["string", "null"] }, "executionRoot": { "type": ["string", "null"] }, "initialSha": { "type": ["string", "null"] }, "finalSha": { "type": ["string", "null"] }, "changed": { "type": "boolean" } } },
     "completedWork": { "type": "array", "items": { "type": "object" } }, "validation": { "type": "array", "items": { "type": "object", "required": ["command"], "properties": { "command": { "type": "string", "minLength": 1 } } } },
     "artifacts": { "type": "object", "required": ["summary", "results"], "properties": { "summary": { "type": "string", "minLength": 1 }, "results": { "type": "string", "minLength": 1 } } },
     "git": { "type": "object" },

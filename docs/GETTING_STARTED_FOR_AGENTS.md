@@ -10,8 +10,8 @@
 RunForge is a local CLI, not a remote service. You do not need to inspect its internal code or choose between legacy rails.
 
 ```bash
-runforge onboarding --repo /absolute/path/to/project --format json
-runforge doctor --repo /absolute/path/to/project --runtime docker --format json
+runforge onboarding --repo /absolute/path/to/project --working-directory frontend --format json
+runforge doctor --repo /absolute/path/to/project --working-directory frontend --runtime local --dependency-preparation reuse-existing --format json
 runforge task-run start --spec /absolute/path/to/task.runforge.json
 ```
 
@@ -31,8 +31,8 @@ When running from the source checkout, use `corepack pnpm dev` in place of `runf
       "The target HEAD and worktree remain unchanged"
     ]
   },
-  "target": { "repository": "/absolute/path/to/project" },
-  "runtime": { "preference": "docker", "prepareDependencies": true },
+  "target": { "repository": "/absolute/path/to/project", "workingDirectory": "frontend" },
+  "runtime": { "preference": "local", "dependencyPreparation": "reuse-existing", "externalNetwork": "denied" },
   "validation": { "mode": "auto", "commands": [] },
   "authority": { "profile": "read-only", "allowProviderCalls": false },
   "git": { "publication": "none" },
@@ -42,6 +42,10 @@ When running from the source checkout, use `corepack pnpm dev` in place of `runf
 ```
 
 Use `validation.mode: "explicit"` with a non-empty command list if doctor cannot discover commands. Artifact output defaults to a sibling `.runforge-artifacts/<project>/<task-id>` directory and is rejected if it resolves inside the target. An existing output is replaced only when it contains an identical normalized TaskSpec.
+
+`target.workingDirectory` is optional and defaults to the repository root. It must be a relative existing directory whose canonical path remains inside the Git repository; traversal and symlink escapes are rejected. Git safety and identity remain repository-scoped, while package manager, lockfile, dependency preparation, validation, and repair commands are execution-root scoped.
+
+TaskSpec v2 supports Docker and explicitly authorized local disposable repair runtimes. Dependency preparation uses `required`, `if-needed`, `disabled`, or `reuse-existing`; legacy `prepareDependencies` remains accepted and migrates to `required`/`disabled`. Missing preparation prerequisites become a normalized blocked result with an owner gate instead of a schema rejection. Local repair requires a clean source, external artifacts, an explicit authority envelope, a disposable workspace, a controlled environment, source immutability checks, and an explicit external-network policy.
 
 The full contract is [task-spec-v2.schema.json](../schemas/task-spec-v2.schema.json). Unknown fields and unsupported versions are errors. Runtime provider calls, secrets, target-main writes, PR merge, deploy, DB, and production access are denied by default.
 

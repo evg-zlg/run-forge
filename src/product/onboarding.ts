@@ -25,8 +25,8 @@ export type OnboardingReport = {
   nextAction: { command: string; purpose: string };
 };
 
-export async function buildOnboardingReport(input: { repo?: string; writeProjectFile?: boolean }): Promise<OnboardingReport> {
-  const target = input.repo ? await inspectProject(input.repo) : null;
+export async function buildOnboardingReport(input: { repo?: string; workingDirectory?: string; writeProjectFile?: boolean }): Promise<OnboardingReport> {
+  const target = input.repo ? await inspectProject(input.repo, input.workingDirectory ?? ".") : null;
   const projectPath = target?.path ? join(target.path, "RUNFORGE.md") : null;
   let written = false;
   if (input.writeProjectFile) {
@@ -38,7 +38,7 @@ export async function buildOnboardingReport(input: { repo?: string; writeProject
     written = true;
   }
   const exists = projectPath ? await access(projectPath).then(() => true, () => false) : false;
-  const doctor = target?.path ? `runforge doctor --repo ${shellQuote(target.path)} --runtime docker --format json` : "runforge doctor --repo /absolute/path/to/project --runtime docker --format json";
+  const doctor = target?.path ? `runforge doctor --repo ${shellQuote(target.path)} --working-directory ${shellQuote(target.workingDirectory ?? ".")} --runtime docker --format json` : "runforge doctor --repo /absolute/path/to/project --working-directory . --runtime docker --format json";
   return {
     schemaVersion: 1,
     product: "RunForge",
@@ -67,7 +67,7 @@ export async function buildOnboardingReport(input: { repo?: string; writeProject
     },
     artifactContract: { schemaVersion: 1, primaryFiles: ["summary.md", "results.json"], resultSchema: "schemas/task-result-v1.schema.json" },
     safetyDefaults: { targetMainMutation: false, targetMainPush: false, targetPrMerge: false, deploy: false, databaseAccess: false, productionAccess: false, secretAccess: false, providerCalls: false, artifactsOutsideTarget: true, ownerGateRequiredForApply: true },
-    taskSpecTemplate: minimalTaskSpec(target?.path ?? "/absolute/path/to/project"),
+    taskSpecTemplate: minimalTaskSpec(target?.path ?? "/absolute/path/to/project", target?.workingDirectory ?? "."),
     targetRepository: target,
     projectFile: { path: projectPath, exists, writeRequested: input.writeProjectFile === true, written },
     nextAction: { command: doctor, purpose: target ? "Verify target readiness, then create TaskSpec v2." : "Supply a target repository and verify readiness." }
@@ -76,11 +76,11 @@ export async function buildOnboardingReport(input: { repo?: string; writeProject
 
 function shellQuote(value: string): string { return `'${value.replaceAll("'", `'"'"'`)}'`; }
 
-function minimalTaskSpec(repository: string): Record<string, unknown> {
+function minimalTaskSpec(repository: string, workingDirectory: string): Record<string, unknown> {
   return {
     schemaVersion: 2, taskId: "PROJECT-TASK-1",
     task: { text: "Describe the engineering task.", goal: "Describe the product outcome.", acceptanceCriteria: ["State one observable acceptance criterion."] },
-    target: { repository }, runtime: { preference: "docker", prepareDependencies: true },
+    target: { repository, workingDirectory }, runtime: { preference: "docker", dependencyPreparation: "if-needed", externalNetwork: "denied" },
     validation: { mode: "auto", commands: [] }, authority: { profile: "read-only", allowProviderCalls: false },
     git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" }, ownerGate: { policy: "stop-and-report" }
   };
@@ -93,7 +93,8 @@ export function renderOnboarding(report: OnboardingReport): string {
     "Workflow: onboarding → doctor → TaskSpec v2 → task-run → results.json/summary.md → owner gate if needed.",
     `Supported: ${report.supportedInterfaces.slice(0, 5).join(", ")}.`,
     `Not available: ${report.unsupportedInterfaces.join(", ")}.`,
-    `Target: ${report.targetRepository?.path ?? "not supplied"}`,
+    `Repository root: ${report.targetRepository?.repositoryRoot ?? "not supplied"}`,
+    `Execution root: ${report.targetRepository?.executionRoot ?? "not supplied"}`,
     `Artifacts: ${report.targetRepository?.path ? defaultArtifactRoot(report.targetRepository.path) : "outside the target repository"}`,
     `Owner gate: only when results.json reports awaiting_owner_decision, record an explicit decision and then use '${report.commands.continueTask}'; otherwise follow nextAction.`,
     `Next: ${report.nextAction.command}`

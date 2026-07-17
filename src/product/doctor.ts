@@ -4,7 +4,7 @@ import { runForgeVersion } from "../core/version.js";
 import { runningInContainer, unsafeMountWarnings } from "../security/docker-policy.js";
 import { commandVersion, defaultArtifactRoot, inspectProject, isPathInside, type ReadinessCheck } from "./project-inspection.js";
 
-export type DoctorOptions = { repo?: string; artifactRoot?: string; runtime?: "local" | "docker"; dockerImage?: string; publication?: "none" | "draft-pr" };
+export type DoctorOptions = { repo?: string; workingDirectory?: string; artifactRoot?: string; runtime?: "local" | "docker"; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing"; dockerImage?: string; publication?: "none" | "draft-pr" };
 export type DoctorReport = {
   schemaVersion: 1;
   product: "RunForge";
@@ -29,7 +29,7 @@ export async function buildDoctorReport(options: DoctorOptions): Promise<DoctorR
     check("node", nodeMajor >= 20, true, nodeMajor >= 20 ? `Node ${process.version} satisfies >=20.` : `Node ${process.version} is unsupported; >=20 is required.`),
     pnpm ? check("pnpm", true, false, `pnpm ${pnpm} is available.`) : { id: "pnpm", status: "warning", required: false, summary: "pnpm is unavailable; installed CLI use remains ready, but source-checkout commands require corepack/pnpm." }
   ];
-  const target = options.repo ? await inspectProject(options.repo) : null;
+  const target = options.repo ? await inspectProject(options.repo, options.workingDirectory ?? ".") : null;
   if (target) {
     checks.push(check("target_path", target.exists, true, target.exists ? `Target path exists: ${target.path}` : `Target path does not exist: ${target.requestedPath}`));
     checks.push(check("target_git", target.isGitRepository, true, target.isGitRepository ? "Target is a Git repository." : "Target is not a Git repository."));
@@ -47,9 +47,10 @@ export async function buildDoctorReport(options: DoctorOptions): Promise<DoctorR
       checks.push(target.validationCommands.length
         ? check("validation_commands", true, false, `Discovered: ${target.validationCommands.join(", ")}.`)
         : { id: "validation_commands", status: "warning", required: false, summary: "No standard validation commands were discovered; provide them in TaskSpec v2." });
-      checks.push(dockerRequired
-        ? check("dependency_preparation", target.dependencyPreparation.supported, true, target.dependencyPreparation.supported ? `Dependency preparation is supported by ${target.dependencyPreparation.lockfile}.` : "Docker preparation requires package-lock.json, pnpm-lock.yaml, or yarn.lock.")
-        : { id: "dependency_preparation", status: target.dependencyPreparation.supported ? "passed" : "warning", required: false, summary: target.dependencyPreparation.supported ? `Dependency preparation is supported by ${target.dependencyPreparation.lockfile}.` : "No supported dependency-preparation lockfile was detected." });
+      const preparationRequired = options.dependencyPreparation === "required";
+      checks.push(preparationRequired
+        ? check("dependency_preparation", target.dependencyPreparation.supported, true, target.dependencyPreparation.supported ? `Dependency preparation is supported by ${target.dependencyPreparation.lockfile}.` : "Required dependency preparation needs package-lock.json, pnpm-lock.yaml, or yarn.lock in the execution root.")
+        : { id: "dependency_preparation", status: target.dependencyPreparation.supported ? "passed" : "warning", required: false, summary: target.dependencyPreparation.supported ? `Dependency preparation is available from ${target.dependencyPreparation.lockfile}; strategy is ${options.dependencyPreparation ?? "if-needed"}.` : `No supported lockfile was detected in the execution root; strategy ${options.dependencyPreparation ?? "if-needed"} can still run when validation does not need installation.` });
     }
   }
   const artifactPath = target?.path ? resolve(options.artifactRoot ?? defaultArtifactRoot(target.path)) : options.artifactRoot ? resolve(options.artifactRoot) : null;
@@ -84,7 +85,7 @@ export async function buildDoctorReport(options: DoctorOptions): Promise<DoctorR
 
 export function renderDoctor(report: DoctorReport): string {
   const lines = [`RunForge doctor: ${report.status}`, `Version: ${report.runforgeVersion}`, `Node: ${report.runtime.node}`, `pnpm: ${report.runtime.pnpm ?? "not available"}`];
-  if (report.targetRepository) lines.push(`Target: ${report.targetRepository.path ?? report.targetRepository.requestedPath}`, `Git: ${report.targetRepository.isGitRepository ? `${report.targetRepository.branch ?? "detached"} @ ${report.targetRepository.head}` : "not a repository"}`, `Worktree: ${report.targetRepository.worktree.clean === false ? "dirty (preserved; warning)" : report.targetRepository.worktree.clean === true ? "clean" : "unknown"}`, `Validation: ${report.targetRepository.validationCommands.join(", ") || "provide explicitly"}`, `Artifacts: ${report.artifactRoot.path ?? "not resolved"}`);
+  if (report.targetRepository) lines.push(`Repository root: ${report.targetRepository.repositoryRoot ?? report.targetRepository.requestedPath}`, `Execution root: ${report.targetRepository.executionRoot ?? "not resolved"}`, `Git: ${report.targetRepository.isGitRepository ? `${report.targetRepository.branch ?? "detached"} @ ${report.targetRepository.head}` : "not a repository"}`, `Worktree: ${report.targetRepository.worktree.clean === false ? "dirty (preserved; warning)" : report.targetRepository.worktree.clean === true ? "clean" : "unknown"}`, `Package manager: ${report.targetRepository.packageManager ?? "not detected"}`, `Lockfile: ${report.targetRepository.dependencyPreparation.lockfile ?? "not detected"}`, `Validation: ${report.targetRepository.validationCommands.join(", ") || "provide explicitly"}`, `Artifacts: ${report.artifactRoot.path ?? "not resolved"}`);
   for (const item of report.checks.filter((value) => ["warning", "blocked"].includes(value.status))) lines.push(`${item.status.toUpperCase()}: ${item.summary}`);
   if (report.nextAction.command) lines.push(`Next: ${report.nextAction.command}`);
   return lines.join("\n");

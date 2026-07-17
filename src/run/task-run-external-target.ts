@@ -8,8 +8,9 @@ export async function assertExternalTaskPolicy(input: {
   runtime: TaskRunRuntime;
   delegatedReview?: "mock" | "cli";
   commands: string[];
+  allowDisposableLocal?: boolean;
 }): Promise<void> {
-  if (input.runtime !== "docker") throw new Error("--repo requires --runtime docker.");
+  if (input.runtime !== "docker" && !input.allowDisposableLocal) throw new Error("--repo requires --runtime docker unless TaskSpec authorizes a disposable local workspace.");
   if (input.delegatedReview) throw new Error("External task-run uses providerless deterministic review; delegated review is not allowed.");
   const info = await stat(input.repo).catch(() => null);
   if (!info?.isDirectory()) throw new Error(`--repo must be an existing directory: ${input.repo}`);

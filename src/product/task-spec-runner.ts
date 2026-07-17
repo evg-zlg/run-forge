@@ -4,7 +4,7 @@ import { runForgeRoot } from "../core/version.js";
 import { runTaskRunHarness, type TaskRunResult } from "../run/task-run-harness.js";
 import { runExternalExecution, type ExternalExecutionResult } from "../run/external-execution.js";
 import { loadTaskSpecV2, redactedTaskSpec, type TaskSpecV2 } from "./task-spec-v2.js";
-import { externalResultContract, readExternalValidationResults, validateTaskResultContract } from "./task-result-contract.js";
+import { completionStatusForIntent, externalResultContract, readExternalValidationResults, validateTaskResultContract } from "./task-result-contract.js";
 import { inspectProject, type ProjectInspection } from "./project-inspection.js";
 
 export type TaskSpecExecution =
@@ -13,7 +13,7 @@ export type TaskSpecExecution =
 
 export async function runTaskSpecFile(path: string): Promise<TaskSpecExecution> {
   const spec = await loadTaskSpecV2(path);
-  const initialTarget = await inspectProject(spec.target.repository);
+  const initialTarget = await inspectProject(spec.target.repository, spec.target.workingDirectory);
   await writeNormalizedSpec(spec);
   if (spec.repair.mode === "none") {
     const result = await preserveSpecOnFailure(spec, initialTarget, () => runTaskRunHarness({
@@ -23,25 +23,31 @@ export async function runTaskSpecFile(path: string): Promise<TaskSpecExecution> 
       task: `${spec.task.text}\nGoal: ${spec.task.goal}\nAcceptance: ${spec.task.acceptanceCriteria.join("; ")}`,
       out: spec.artifacts.root,
       repo: spec.target.repository,
+      workingDirectory: spec.target.workingDirectory,
       commands: spec.validation.commands,
-      runtime: "docker",
+      runtime: spec.runtime.preference,
+      allowDisposableLocal: false,
       dockerImage: spec.runtime.dockerImage,
-      prepareRuntime: spec.runtime.prepareDependencies ? "explicit" : "none",
+      prepareRuntime: spec.runtime.dependencyPreparation === "required" ? "explicit" : "none",
       tmpRoot: join(dirname(spec.artifacts.root), ".runforge-task-runs", spec.taskId),
       checkCommand: "node --version"
     }));
     await writeNormalizedSpec(spec);
     await finalizeValidationArtifacts(spec, result);
-    return { kind: "validation", spec, result, summary: `TaskSpec ${spec.taskId}: ${result.status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: result.status === "completed" };
+    const status = completionStatusForIntent({ executionStatus: result.status, implementationExpected: spec.authority.profile === "bounded-implementation", targetChanged: false });
+    return { kind: "validation", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: status === "completed" };
   }
   const result = await preserveSpecOnFailure(spec, initialTarget, () => runExternalExecution({
     taskId: spec.taskId,
     task: spec.task.text,
     out: spec.artifacts.root,
     repo: spec.target.repository,
-    runtime: "docker",
+    workingDirectory: spec.target.workingDirectory,
+    runtime: spec.runtime.preference,
     dockerImage: spec.runtime.dockerImage,
-    prepareRuntime: spec.runtime.prepareDependencies ? "explicit" : "none",
+    prepareRuntime: spec.runtime.dependencyPreparation === "required" ? "explicit" : "none",
+    dependencyPreparation: spec.runtime.dependencyPreparation,
+    externalNetwork: spec.runtime.externalNetwork,
     repairMode: spec.repair.mode,
     repairPlan: spec.repair.plan ?? undefined,
     existingCandidates: [],
@@ -63,29 +69,31 @@ async function preserveSpecOnFailure<T>(spec: TaskSpecV2, initialTarget: Project
   try { return await execute(); }
   catch (error) {
     await writeNormalizedSpec(spec);
-    await writeFailureArtifacts(spec, initialTarget);
+    await writeFailureArtifacts(spec, initialTarget, error);
     throw error;
   }
 }
 
-async function writeFailureArtifacts(spec: TaskSpecV2, initialTarget: ProjectInspection): Promise<void> {
-  const finalTarget = await inspectProject(spec.target.repository);
+async function writeFailureArtifacts(spec: TaskSpecV2, initialTarget: ProjectInspection, error: unknown): Promise<void> {
+  const finalTarget = await inspectProject(spec.target.repository, spec.target.workingDirectory);
   const changed = initialTarget.head !== finalTarget.head || initialTarget.worktree.summary !== finalTarget.worktree.summary;
+  const reason = error instanceof Error ? error.message : String(error);
+  const continuation = `runforge task-run start --spec '${join(spec.artifacts.root, "task-spec.normalized.json").replaceAll("'", `'"'"'`)}'`;
   const document = {
-    schemaVersion: 1, contract: "runforge-task-result", taskId: spec.taskId, status: "failed",
-    targetRepository: { path: spec.target.repository, initialSha: initialTarget.head, finalSha: finalTarget.head, changed },
+    schemaVersion: 1, contract: "runforge-task-result", taskId: spec.taskId, status: "blocked",
+    targetRepository: { path: spec.target.repository, repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory), initialSha: initialTarget.head, finalSha: finalTarget.head, changed },
     completedWork: [], validation: [],
     artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json" },
     git: { branch: null, commit: null, pullRequest: null, merge: null },
-    ownerGate: { required: false, status: "not_available_failed_orchestration" },
-    nextAction: { recommendation: "Inspect runtime logs under the artifact root, correct the orchestration or environment failure, then retry the identical TaskSpec." },
+    ownerGate: { required: true, status: "awaiting_owner_decision", reason, options: ["Adjust runtime policy", "Adjust dependency preparation strategy", "Provide or expand authority", "Correct the bounded execution strategy"], continuationCommand: continuation },
+    nextAction: { recommendation: `Owner decision required: ${reason} After resolving the gate, continue with: ${continuation}` },
     safetyAssertions: { targetUnchanged: !changed, targetMainMutation: false, targetMainPush: false, targetPrMerge: false, deploy: false, databaseAccess: false, productionAccess: false, secretAccess: false, providerCalls: false },
-    errors: ["TaskSpec execution stopped before normal result finalization."],
+    errors: [reason],
     limitations: ["Validation evidence was unavailable at failure finalization."]
   };
   validateTaskResultContract(document);
   await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
-  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} result\n\nStatus: **failed**\n\nExecution stopped before normal result finalization. Target main push, PR merge, deploy, DB, production, secrets, and provider calls were not performed.\n\n## Next action\n\n${document.nextAction.recommendation}\n`, "utf8");
+  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} result\n\nStatus: **blocked**\n\n## Owner gate\n\n${reason}\n\nAllowed owner choices: adjust runtime, dependency preparation, authority, or the bounded execution strategy.\n\nContinuation command:\n\n\`${continuation}\`\n\nTarget main push, PR merge, deploy, DB, production, secrets, and provider calls were not performed.\n`, "utf8");
 }
 
 async function writeNormalizedSpec(spec: TaskSpecV2): Promise<void> {
@@ -96,12 +104,16 @@ async function writeNormalizedSpec(spec: TaskSpecV2): Promise<void> {
 async function finalizeValidationArtifacts(spec: TaskSpecV2, result: TaskRunResult): Promise<void> {
   const resultsPath = join(spec.artifacts.root, "results.json");
   const current = JSON.parse(await readFile(resultsPath, "utf8")) as Record<string, unknown>;
-  const completed = result.status === "completed";
+  const implementationExpected = spec.authority.profile === "bounded-implementation";
+  const completed = result.status === "completed" && !implementationExpected;
+  const normalizedStatus = completionStatusForIntent({ executionStatus: result.status, implementationExpected, targetChanged: false });
   const normalized = {
     ...current,
+    status: normalizedStatus,
+    targetRepository: { ...asRecord(current.targetRepository), repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory) },
     artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", details: { plan: "plan.md", review: "review/review.md", subtasks: "subtasks/" } },
-    ownerGate: { required: false, status: "not_required" },
-    nextAction: { recommendation: completed ? "Task completed. Read summary.md and preserve results.json as evidence." : "Inspect failed validation and safety evidence, resolve the cause, then start a new run." },
+    ownerGate: implementationExpected ? { required: true, status: "awaiting_owner_decision", reason: "Implementation intent was inspected without producing a patch, commit, or PR.", continuationCommand: `runforge task-run start --spec '${join(spec.artifacts.root, "task-spec.normalized.json")}'` } : { required: false, status: "not_required" },
+    nextAction: { recommendation: completed ? "Task completed. Read summary.md and preserve results.json as evidence." : implementationExpected ? "Choose a bounded repair strategy and continue the normalized TaskSpec; inspection alone cannot complete implementation intent." : "Inspect failed validation and safety evidence, resolve the cause, then start a new run." },
     limitations: completed ? [] : [...array(current.limitations), "The read-only task did not satisfy all validation and safety checks."],
     review: { ...asRecord(current.review), humanDecisionRequired: false, recommendedNextAction: completed ? "No owner decision is required for this completed read-only task." : "Inspect failures and rerun after correction; owner approval does not convert failed evidence into success." },
     recommendedNextStep: completed ? "Task completed; preserve the official result artifacts." : "Resolve failed evidence and start a new TaskSpec run.",
@@ -115,7 +127,7 @@ async function finalizeValidationArtifacts(spec: TaskSpecV2, result: TaskRunResu
   ].join("\n");
   await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} result
 
-Status: **${result.status}**
+Status: **${normalizedStatus}**
 
 ## Task
 
@@ -137,7 +149,7 @@ ${validations}
 
 ## Owner gate
 
-Not required for this read-only task. ${completed ? "The task completed." : "The task failed and must be corrected and rerun; approval cannot override failed evidence."}
+${implementationExpected ? "Required: implementation intent produced no patch, commit, or PR; inspection is not completion." : `Not required for this read-only task. ${completed ? "The task completed." : "The task failed and must be corrected and rerun; approval cannot override failed evidence."}`}
 
 ## Next action
 
@@ -153,6 +165,7 @@ function array(value: unknown): unknown[] { return Array.isArray(value) ? value 
 
 async function finalizeRepairArtifacts(spec: TaskSpecV2, result: ExternalExecutionResult): Promise<string> {
   const document: Record<string, unknown> = { ...externalResultContract({ taskId: spec.taskId, targetBranch: spec.git.branch ?? undefined }, result, spec.validation.commands), validation: await readExternalValidationResults(spec.artifacts.root, spec.validation.commands), ...result };
+  document.targetRepository = { ...asRecord(document.targetRepository), repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory) };
   validateTaskResultContract(document);
   await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
   const status = String(document.status);
