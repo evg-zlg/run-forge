@@ -30,6 +30,19 @@ describe("TaskSpec v2", () => {
     expect(redactedTaskSpec(first)).toEqual(first);
   });
 
+  it("defaults omitted implementation runtime to the compatible public runtime id", async () => {
+    const repo = await gitRepo();
+    const implementation = {
+      ...minimal(repo),
+      execution: { mode: "implementation" },
+      authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true },
+      runtime: { externalNetwork: "allowed" }
+    };
+    await expect(normalizeTaskSpecV2(implementation)).resolves.toMatchObject({ runtime: { preference: "local-disposable" } });
+    await expect(normalizeTaskSpecV2({ ...implementation, runtime: { ...implementation.runtime, preference: "docker" } }))
+      .rejects.toThrow("incompatible with local-coding-agent; supported: local-disposable");
+  });
+
   it.each([
     [{ ...minimal("/missing"), schemaVersion: 1 }, "Unsupported TaskSpec schemaVersion"],
     [{ ...minimal("/missing"), surprise: true }, "unknown field"],
@@ -82,7 +95,7 @@ describe("TaskSpec v2", () => {
     const plan = join(repo, "repair.json");
     await writeFile(plan, JSON.stringify({ schema_version: "runforge.code-repair.v1", candidate_id: "TEST", task: "Change value", allowed_files: ["src/private.ts"], max_changed_files: 1, validation_commands: ["npm test"], changes: [{ file: "src/private.ts", replacements: [{ find: "1", replace: "2" }] }] }));
     await expect(normalizeTaskSpecV2({
-      ...minimal(repo), runtime: { preference: "docker", prepareDependencies: true },
+      ...minimal(repo), runtime: { preference: "local-disposable", prepareDependencies: true },
       execution: { mode: "repair" },
       authority: { profile: "bounded-implementation", forbiddenAreas: ["src/private.ts"] }, repair: { mode: "code", plan }
     })).rejects.toThrow("forbidden by authority.forbiddenAreas");
@@ -135,8 +148,8 @@ describe("TaskSpec v2", () => {
 
   it.each(["required", "if-needed", "disabled", "reuse-existing"])("normalizes dependency strategy %s", async (strategy) => {
     const repo = await gitRepo();
-    await expect(normalizeTaskSpecV2({ ...minimal(repo), runtime: { preference: "local", dependencyPreparation: strategy } }))
-      .resolves.toMatchObject({ runtime: { preference: "local", dependencyPreparation: strategy } });
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), runtime: { preference: "local-disposable", dependencyPreparation: strategy } }))
+      .resolves.toMatchObject({ runtime: { preference: "local-disposable", dependencyPreparation: strategy } });
   });
 
   it("includes decisive post-apply stages in normalized validation", async () => {

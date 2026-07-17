@@ -42,11 +42,13 @@ The default backend is the locally available `codex` CLI. It can instead be set 
 
 Implementation adds explicit mode and independent provider/network authority:
 
+The public runtime ID for `local-coding-agent` is exactly `local-disposable`. If `runtime.preference` is omitted from an implementation or repair TaskSpec, normalization uses that documented compatible default. An explicit incompatible value such as `docker` is rejected with `runtime_incompatible`, the allowed values, compatible runtimes, and a corrected request; RunForge never substitutes an incompatible runtime.
+
 ```json
 {
   "taskSpec": {
     "execution": { "mode": "implementation", "maxRepairIterations": 2, "maxProviderTokens": 100000 },
-    "runtime": { "preference": "local", "externalNetwork": "allowed" },
+    "runtime": { "preference": "local-disposable", "externalNetwork": "allowed" },
     "authority": {
       "profile": "bounded-implementation",
       "allowProviderCalls": true,
