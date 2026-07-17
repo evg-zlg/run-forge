@@ -10,7 +10,8 @@ export const implementationExecutorContract = {
   id: "local-coding-agent",
   modes: ["implementation", "repair"] as const,
   runtimes: ["local-disposable"] as const,
-  defaultRuntime: "local-disposable" as const
+  defaultRuntime: "local-disposable" as const,
+  maxLimits: { timeoutMs: 1_800_000, repairIterations: 3, changedFiles: 100, patchBytes: 5_000_000, providerTokens: 200_000 }
 };
 
 export function defaultRuntimeForMode(mode: TaskExecutionMode): TaskRuntimeId {
@@ -73,7 +74,7 @@ export function publicTaskSpecContract(): Record<string, unknown> {
         taskId: "IMPLEMENTATION-TASK-1",
         task: { text: "Fix the bounded defect and add a regression test.", goal: "Validation is green and a local commit is recorded.", acceptanceCriteria: ["Defect is fixed", "Regression test passes", "Local commit is recorded"] },
         target: { repository: "<registered-project-path>", workingDirectory: "." },
-        execution: { mode: "implementation", maxRepairIterations: 2, timeoutMs: 300000, maxChangedFiles: 20, maxPatchBytes: 500000, maxProviderTokens: 100000 },
+        execution: { mode: "implementation", maxRepairIterations: 2, timeoutMs: 300000, maxChangedFiles: 20, maxPatchBytes: 500000, maxProviderTokens: executor.maxLimits.providerTokens },
         runtime: { preference: executor.defaultRuntime, dependencyPreparation: "if-needed", externalNetwork: "allowed" },
         validation: { mode: "auto", commands: [] },
         authority: { profile: "bounded-implementation", forbiddenAreas: [".env", "secrets"], allowProviderCalls: true, allowNetwork: true },

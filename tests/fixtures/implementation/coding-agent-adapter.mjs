@@ -1,7 +1,8 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 const prompt = process.env.RUNFORGE_IMPLEMENTATION_PROMPT ?? "";
-if (prompt.includes("CANCEL_FOREVER")) setInterval(() => {}, 1000);
+if (!prompt.includes("Do not create a Git commit; leave changes uncommitted")) { console.error("missing RunForge-owned commit instruction"); process.exit(2); }
+else if (prompt.includes("CANCEL_FOREVER")) setInterval(() => {}, 1000);
 else if (prompt.includes("AMBIGUOUS_CHANGE")) console.log("ambiguous product decision");
 else if (prompt.includes("FALSE_POSITIVE")) console.log("no change required: current behavior already satisfies the criterion");
 else if (prompt.includes("FORBIDDEN_CHANGE")) { writeFileSync("secrets.txt", "forbidden\n"); console.log("changed forbidden fixture path"); }
