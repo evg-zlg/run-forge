@@ -1,8 +1,9 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
 import { createExecutorRequest, dockerRunArgs, LocalShellExecutor } from "../../src/run/task-run-executor.js";
+import { prepareUnpreparedExternalWorkspace } from "../../src/run/task-run-workspace.js";
 
 const tempRoots: string[] = [];
 
@@ -11,6 +12,16 @@ afterEach(async () => {
 });
 
 describe("DockerShellExecutor policy", () => {
+  it("creates the writable temp mount under a nested execution root", async () => {
+    const source = await tempRoot();
+    const workspace = await tempRoot();
+    await mkdir(join(source, "frontend"));
+
+    await prepareUnpreparedExternalWorkspace(source, workspace, "frontend");
+
+    await expect(access(join(workspace, "frontend", ".runforge-tmp"))).resolves.toBeUndefined();
+  });
+
   it("builds an offline, read-only, capability-dropped container command", async () => {
     const root = await tempRoot();
     const request = createExecutorRequest({

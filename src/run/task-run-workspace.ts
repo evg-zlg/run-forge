@@ -27,6 +27,7 @@ export function isSensitiveWorkspacePath(path: string): boolean {
 
 export async function prepareUnpreparedExternalWorkspace(sourceRepo: string, workspace: string, workingDirectory = "."): Promise<void> {
   await mkdir(`${workspace}/.runforge-tmp`, { recursive: true });
+  await mkdir(`${workspace}/${workingDirectory}/.runforge-tmp`, { recursive: true });
   const dependenciesExist = await access(`${sourceRepo}/${workingDirectory}/node_modules`).then(() => true).catch(() => false);
   if (dependenciesExist) await symlink("/source/node_modules", `${workspace}/${workingDirectory}/node_modules`, "dir");
 }
