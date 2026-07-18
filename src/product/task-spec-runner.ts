@@ -4,15 +4,30 @@ import { runForgeRoot } from "../core/version.js";
 import { runTaskRunHarness, type TaskRunResult } from "../run/task-run-harness.js";
 import { runExternalExecution, type ExternalExecutionResult } from "../run/external-execution.js";
 import { loadTaskSpecV2, redactedTaskSpec, type TaskSpecV2 } from "./task-spec-v2.js";
-import { completionStatusForIntent, externalResultContract, readExternalValidationResults, validateTaskResultContract } from "./task-result-contract.js";
+import {
+  buildAgreementAwareTaskResult,
+  completionStatusForAgreement,
+  completionStatusForIntent,
+  externalResultContract,
+  readExternalValidationResults,
+  validateTaskResultContract,
+  type NormalizedHandoffInput,
+  type ResultNextAction,
+  type RunForgeCompletionStatus,
+} from "./task-result-contract.js";
 import { inspectProject, type ProjectInspection } from "./project-inspection.js";
 import { runImplementationExecutor, type ImplementationExecutorResult } from "../implementation/executor.js";
+import {
+  completeExecutionPhase,
+  negotiateExecutionAgreement,
+  type ExecutionAgreement,
+  type ExecutionPhaseId,
+} from "./execution-agreement.js";
 
 export type TaskSpecExecution =
   | { kind: "validation"; spec: TaskSpecV2; result: TaskRunResult; summary: string; success: boolean }
   | { kind: "repair"; spec: TaskSpecV2; result: ExternalExecutionResult; summary: string; success: boolean }
   | { kind: "implementation"; spec: TaskSpecV2; result: ImplementationExecutorResult; summary: string; success: boolean };
-
 export async function runTaskSpecFile(path: string, context: { signal?: AbortSignal; attempt?: number; executionId?: string; onProgress?: (phase: string, detail: string) => void | Promise<void> } = {}): Promise<TaskSpecExecution> {
   const spec = await loadTaskSpecV2(path);
   const initialTarget = await inspectProject(spec.target.repository, spec.target.workingDirectory);
@@ -25,8 +40,9 @@ export async function runTaskSpecFile(path: string, context: { signal?: AbortSig
       runtimePolicy: spec.runtime, validationProfile: spec.validation, artifactRoot: spec.artifacts.root,
       attempt: context.attempt ?? 1, generation: context.executionId ?? "standalone", signal: context.signal, onProgress: context.onProgress
     }));
-    await finalizeImplementationArtifacts(spec, result);
-    return { kind: "implementation", spec, result, summary: `TaskSpec ${spec.taskId}: ${result.status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: ["implemented_and_validated", "no_change_required"].includes(result.status) };
+    clearRepairedFindings(result);
+    const status = await finalizeImplementationArtifacts(spec, result, context.executionId !== undefined);
+    return { kind: "implementation", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: ["implemented_and_validated", "no_change_required"].includes(result.status) };
   }
   if (spec.repair.mode === "none") {
     const result = await preserveSpecOnFailure(spec, initialTarget, () => runTaskRunHarness({
@@ -78,12 +94,20 @@ export async function runTaskSpecFile(path: string, context: { signal?: AbortSig
   return { kind: "repair", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: ["completed", "awaiting_owner_decision"].includes(status) };
 }
 
-async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: ImplementationExecutorResult): Promise<void> {
+async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: ImplementationExecutorResult, legacySettlement: boolean): Promise<RunForgeCompletionStatus> {
   const completed = ["implemented_and_validated", "no_change_required"].includes(result.status);
   const ownerRequired = result.status === "blocked_with_owner_gate";
-  const status = completed ? "completed" : ownerRequired ? "awaiting_owner_decision" : "failed";
+  const agreement = implementationAgreement(spec, result, completed);
+  const status: RunForgeCompletionStatus = completed
+    ? completionStatusForAgreement(agreement)
+    : ownerRequired ? "awaiting_owner" : "failed";
+  const next = implementationNextAction(status, agreement); const handoff = implementationHandoff(spec, result, status, next);
+  const agreementAware = buildAgreementAwareTaskResult({ taskId: spec.taskId, status, agreement, handoff, next });
+  const settlement = legacySettlement
+    ? { schemaVersion: 1 as const, contract: "runforge-task-result" as const, taskId: spec.taskId, status: completed ? "completed" : ownerRequired ? "awaiting_owner_decision" : "failed", workflow: agreementAware }
+    : agreementAware;
   const document = {
-    schemaVersion: 1, contract: "runforge-task-result", taskId: spec.taskId, status,
+    ...settlement,
     requestedIntent: spec.execution.mode, actualExecutorMode: "implementation", selectedExecutor: result.selectedExecutor,
     implementation: { status: result.status, performed: result.changedFiles.length > 0, plan: result.plan, changedFiles: result.changedFiles, localCommit: result.localCommit, patchPackage: result.patchPackage, unresolvedAcceptanceCriteria: result.unresolvedFindings },
     targetRepository: { path: spec.target.repository, repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory), initialSha: spec.target.expectedSha, finalSha: spec.target.expectedSha, changed: false },
@@ -100,7 +124,104 @@ async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: Impleme
   };
   validateTaskResultContract(document);
   await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
-  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} implementation result\n\nOutcome: **${result.status}**\n\nExecutor: **${result.selectedExecutor.id}**${result.selectedExecutor.model ? ` / ${result.selectedExecutor.model}` : ""}\n\nChanged files: ${result.changedFiles.length ? result.changedFiles.map((file) => `\`${file}\``).join(", ") : "none"}\n\nValidation: ${result.validationResults.every((item) => item.exitCode === 0) ? "passed" : "not green"}\n\nLocal commit: ${result.localCommit ?? "none"}\nPatch package: ${result.patchPackage ?? "none"}\n\nPublication: **on hold; not performed**.\n`, "utf8");
+  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} implementation result\n\nOutcome: **${result.status}**\n\nWorkflow status: **${status}**\n\nExecutor: **${result.selectedExecutor.id}**${result.selectedExecutor.model ? ` / ${result.selectedExecutor.model}` : ""}\n\nChanged files: ${result.changedFiles.length ? result.changedFiles.map((file) => `\`${file}\``).join(", ") : "none"}\n\nValidation: ${result.validationResults.every((item) => item.exitCode === 0) ? "passed" : "not green"}\n\nLocal commit: ${result.localCommit ?? "none"}\nPatch package: ${result.patchPackage ?? "none"}\n\nPublication: **on hold; not performed**.\n`, "utf8");
+  return status;
+}
+
+const IMPLEMENTATION_PHASES = new Set<ExecutionPhaseId>([
+  "projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation",
+  "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "providerModelCalls",
+]);
+
+function implementationAgreement(spec: TaskSpecV2, result: ImplementationExecutorResult, completed: boolean): ExecutionAgreement {
+  const enabled = Object.fromEntries([...IMPLEMENTATION_PHASES].map((phase) => [phase, true]));
+  let agreement = negotiateExecutionAgreement({
+    profile: spec.executionAgreement.profile,
+    requested: spec.authority.allowProviderCalls ? undefined : { providerModelCalls: false },
+    requestedOwnership: spec.executionAgreement.phaseOwnership,
+    technicalCapability: enabled,
+    authority: { ...enabled, providerModelCalls: spec.authority.allowProviderCalls },
+    policy: enabled,
+  });
+  if (!completed) return agreement;
+  for (const phase of agreement.phases) {
+    if (!phase.requested || phase.responsibleParty !== "runforge" || phase.status === "conflict") continue;
+    agreement = completeExecutionPhase(agreement, phase.phaseId, implementationPhaseEvidence(phase.phaseId, result));
+  }
+  return agreement;
+}
+
+function implementationPhaseEvidence(phase: ExecutionPhaseId, result: ImplementationExecutorResult): string[] {
+  if (phase === "implementation") return result.changedFiles.length ? result.changedFiles : ["no_change_required"];
+  if (phase === "localValidation") return result.validationResults.length
+    ? result.validationResults.flatMap((item) => item.artifactPaths)
+    : ["no_change_required"];
+  if (phase === "patchPackage") return [result.patchPackage ?? "no_change_required"];
+  if (phase === "localCommit") return [result.localCommit ?? "no_change_required"];
+  if (phase === "providerModelCalls") return result.providerCalls.flatMap((call) =>
+    Array.isArray(call.artifactPaths) ? call.artifactPaths.filter((item): item is string => typeof item === "string") : []
+  ).concat(result.providerCalls.length ? [] : ["no_provider_call_required"]);
+  return ["implementation-plan.json"];
+}
+
+function implementationNextAction(status: RunForgeCompletionStatus, agreement: ExecutionAgreement): ResultNextAction {
+  if (status === "awaiting_owner") return {
+    party: "owner", exactAction: "Resolve the bounded owner gate, then start a new execution generation.", gates: [], evidence: [],
+  };
+  if (status === "failed" || status === "blocked_by_capability" || status === "blocked_by_policy") return {
+    party: "runforge", exactAction: "Inspect the structured diagnostics, correct the in-scope failure, and retry.", gates: [], evidence: [],
+  };
+  const awaiting = agreement.phases.find((phase) => phase.requested && phase.status !== "completed" && phase.responsibleParty !== "runforge" && phase.responsibleParty !== "nobody");
+  if (awaiting) return {
+    party: awaiting.responsibleParty as ResultNextAction["party"],
+    exactAction: `Complete the delegated ${awaiting.phaseId} phase and attach its completion evidence.`,
+    gates: awaiting.prerequisites.map((prerequisite) => ({ name: prerequisite, status: "pending", evidence: [] })),
+    evidence: [],
+  };
+  if (status === "workflow_completed") return {
+    party: "owner", exactAction: "Preserve the result artifacts; no further RunForge execution is required.", gates: [], evidence: [],
+  };
+  return {
+    party: "runforge", exactAction: "Inspect the structured diagnostics, correct the in-scope failure, and retry.", gates: [], evidence: [],
+  };
+}
+
+function implementationHandoff(
+  spec: TaskSpecV2,
+  result: ImplementationExecutorResult,
+  status: RunForgeCompletionStatus,
+  next: ResultNextAction,
+): NormalizedHandoffInput {
+  return {
+    profile: ["implemented_and_validated", "no_change_required"].includes(result.status) ? "local-ready" : "assist-only",
+    summary: `RunForge implementation finished with '${result.status}' and workflow status '${status}'.`,
+    changedFiles: result.changedFiles,
+    patch: result.patchPackage ? "implementation.patch" : null,
+    commit: result.localCommit,
+    validation: result.validationResults.map((item) => ({
+      command: item.command,
+      status: item.exitCode === 0 ? "passed" as const : "failed" as const,
+      exitCode: item.exitCode,
+      evidence: item.artifactPaths,
+    })),
+    findings: result.unresolvedFindings,
+    risks: status === "workflow_completed" ? [] : ["The remaining workflow phase is outside this completed RunForge execution."],
+    nextActions: [next],
+    publicationInstructions: ["Publication remains on hold and requires a separate authorized action."],
+    ciCommands: spec.validation.commands,
+    safety: {
+      providerCalls: result.providerCalls.length > 0,
+      notes: ["The target checkout was preserved; no push, merge, deploy, database, production, or secret access was performed."],
+    },
+    targetSha: result.localCommit ?? spec.target.expectedSha,
+    baseSha: spec.target.expectedSha,
+  };
+}
+
+function clearRepairedFindings(result: ImplementationExecutorResult): void {
+  if (result.status === "implemented_and_validated" && result.validationResults.length > 0 && result.validationResults.every((item) => item.exitCode === 0)) {
+    result.unresolvedFindings = [];
+  }
 }
 
 async function preserveSpecOnFailure<T>(spec: TaskSpecV2, initialTarget: ProjectInspection, execute: () => Promise<T>): Promise<T> {
