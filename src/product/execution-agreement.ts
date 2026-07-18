@@ -106,13 +106,25 @@ const PROFILE_OWNERSHIP: Record<Exclude<ExecutionProfile, "custom">, PhasePartyM
   }),
 };
 
+/** Canonical ownership resolver for preset defaults and custom overrides. */
+export function executionPhaseOwner(
+  profile: ExecutionProfile,
+  phaseId: ExecutionPhaseId,
+  requestedOwnership?: PhasePartyMap,
+): ExecutionParty {
+  assertProfile(profile);
+  assertPhaseId(phaseId);
+  return requestedOwnership?.[phaseId]
+    ?? (profile === "custom" ? undefined : PROFILE_OWNERSHIP[profile][phaseId])
+    ?? nobody;
+}
+
 /** Deterministically negotiates all 22 phases without conflating capability, authority, policy, or ownership. */
 export function negotiateExecutionAgreement(input: ExecutionAgreementNegotiation): ExecutionAgreement {
   assertProfile(input.profile);
   validateKeys(input);
-  const defaults = input.profile === "custom" ? {} : PROFILE_OWNERSHIP[input.profile];
   const phases = EXECUTION_PHASE_IDS.map((phaseId): ExecutionPhaseAgreement => {
-    const responsibleParty = input.requestedOwnership?.[phaseId] ?? defaults[phaseId] ?? nobody;
+    const responsibleParty = executionPhaseOwner(input.profile, phaseId, input.requestedOwnership);
     const requested = input.requested?.[phaseId] ?? responsibleParty !== nobody;
     const normalizedParty = requested ? responsibleParty : nobody;
     const available = input.technicalCapability?.[phaseId] ?? false;

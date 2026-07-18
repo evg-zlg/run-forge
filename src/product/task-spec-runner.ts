@@ -19,6 +19,7 @@ import { inspectProject, type ProjectInspection } from "./project-inspection.js"
 import { runImplementationExecutor, type ImplementationExecutorResult } from "../implementation/executor.js";
 import {
   completeExecutionPhase,
+  executionPhaseOwner,
   negotiateExecutionAgreement,
   type ExecutionAgreement,
   type ExecutionPhaseId,
@@ -109,12 +110,12 @@ async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: Impleme
   const document = {
     ...settlement,
     requestedIntent: spec.execution.mode, actualExecutorMode: "implementation", selectedExecutor: result.selectedExecutor,
-    implementation: { status: result.status, performed: result.changedFiles.length > 0, plan: result.plan, changedFiles: result.changedFiles, localCommit: result.localCommit, patchPackage: result.patchPackage, unresolvedAcceptanceCriteria: result.unresolvedFindings },
+    implementation: { status: result.status, performed: result.changedFiles.length > 0, plan: result.plan, changedFiles: result.changedFiles, localBranch: result.localBranch, localCommit: result.localCommit, patchPackage: result.patchPackage, unresolvedAcceptanceCriteria: result.unresolvedFindings },
     targetRepository: { path: spec.target.repository, repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory), initialSha: spec.target.expectedSha, finalSha: spec.target.expectedSha, changed: false },
     completedWork: result.changedFiles.map((file) => ({ file, status: "changed_in_disposable_workspace" })),
     validation: result.validationResults,
     artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", plan: "implementation-plan.json", patch: result.patchPackage ? "implementation.patch" : null },
-    git: { branch: null, commit: result.localCommit, patchPackage: result.patchPackage, pullRequest: null, merge: null },
+    git: { branch: result.localBranch, commit: result.localCommit, patchPackage: result.patchPackage, pullRequest: null, merge: null },
     publication: { status: "on_hold", ownerGate: { required: false, status: "not_requested" }, performed: false },
     providerCalls: result.providerCalls,
     ownerGate: { required: ownerRequired, status: ownerRequired ? "awaiting_owner_decision" : "not_required", ...(result.ownerGate.reason ? { reason: result.ownerGate.reason } : {}) },
@@ -124,7 +125,7 @@ async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: Impleme
   };
   validateTaskResultContract(document);
   await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
-  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} implementation result\n\nOutcome: **${result.status}**\n\nWorkflow status: **${status}**\n\nExecutor: **${result.selectedExecutor.id}**${result.selectedExecutor.model ? ` / ${result.selectedExecutor.model}` : ""}\n\nChanged files: ${result.changedFiles.length ? result.changedFiles.map((file) => `\`${file}\``).join(", ") : "none"}\n\nValidation: ${result.validationResults.every((item) => item.exitCode === 0) ? "passed" : "not green"}\n\nLocal commit: ${result.localCommit ?? "none"}\nPatch package: ${result.patchPackage ?? "none"}\n\nPublication: **on hold; not performed**.\n`, "utf8");
+  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} implementation result\n\nOutcome: **${result.status}**\n\nWorkflow status: **${status}**\n\nExecutor: **${result.selectedExecutor.id}**${result.selectedExecutor.model ? ` / ${result.selectedExecutor.model}` : ""}\n\nChanged files: ${result.changedFiles.length ? result.changedFiles.map((file) => `\`${file}\``).join(", ") : "none"}\n\nValidation: ${result.validationResults.every((item) => item.exitCode === 0) ? "passed" : "not green"}\n\nLocal branch: ${result.localBranch ?? "none"}\nLocal commit: ${result.localCommit ?? "none"}\nPatch package: ${result.patchPackage ?? "none"}\n\nPublication: **on hold; not performed**.\n`, "utf8");
   return status;
 }
 
@@ -146,7 +147,8 @@ function implementationAgreement(spec: TaskSpecV2, result: ImplementationExecuto
   if (!completed) return agreement;
   for (const phase of agreement.phases) {
     if (!phase.requested || phase.responsibleParty !== "runforge" || phase.status === "conflict") continue;
-    agreement = completeExecutionPhase(agreement, phase.phaseId, implementationPhaseEvidence(phase.phaseId, result));
+    const evidence = implementationPhaseEvidence(phase.phaseId, result);
+    if (evidence.length) agreement = completeExecutionPhase(agreement, phase.phaseId, evidence);
   }
   return agreement;
 }
@@ -157,7 +159,8 @@ function implementationPhaseEvidence(phase: ExecutionPhaseId, result: Implementa
     ? result.validationResults.flatMap((item) => item.artifactPaths)
     : ["no_change_required"];
   if (phase === "patchPackage") return [result.patchPackage ?? "no_change_required"];
-  if (phase === "localCommit") return [result.localCommit ?? "no_change_required"];
+  if (phase === "localBranch") return result.localBranch ? [result.localBranch] : [];
+  if (phase === "localCommit") return result.localCommit ? [result.localCommit] : [];
   if (phase === "providerModelCalls") return result.providerCalls.flatMap((call) =>
     Array.isArray(call.artifactPaths) ? call.artifactPaths.filter((item): item is string => typeof item === "string") : []
   ).concat(result.providerCalls.length ? [] : ["no_provider_call_required"]);
@@ -193,7 +196,7 @@ function implementationHandoff(
   next: ResultNextAction,
 ): NormalizedHandoffInput {
   return {
-    profile: ["implemented_and_validated", "no_change_required"].includes(result.status) ? "local-ready" : "assist-only",
+    profile: executionPhaseOwner(spec.executionAgreement.profile, "localCommit", spec.executionAgreement.phaseOwnership) === "runforge" ? "local-ready" : "assist-only",
     summary: `RunForge implementation finished with '${result.status}' and workflow status '${status}'.`,
     changedFiles: result.changedFiles,
     patch: result.patchPackage ? "implementation.patch" : null,

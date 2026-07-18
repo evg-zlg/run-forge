@@ -1,4 +1,4 @@
-import { cp, mkdtemp, readFile } from "node:fs/promises";
+import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,6 +8,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
 import { discoverImplementationExecutors } from "../../src/implementation/executor.js";
+import { executionPhaseOwner } from "../../src/product/execution-agreement.js";
 import { startControlPlaneServer } from "../../src/control-plane/server.js";
 
 const exec = promisify(execFile);
@@ -19,6 +20,13 @@ const previousCommand = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
 afterEach(() => { if (previousCommand === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousCommand; });
 
 describe("implementation executor", () => {
+  it("preserves approved preset ownership through the shared resolver", () => {
+    expect(executionPhaseOwner("assist-only", "localBranch")).toBe("external_session");
+    expect(executionPhaseOwner("assist-only", "localCommit")).toBe("external_session");
+    expect(executionPhaseOwner("local-ready", "localBranch")).toBe("runforge");
+    expect(executionPhaseOwner("local-ready", "localCommit")).toBe("runforge");
+  });
+
   it("discovers a real configured backend and rejects an unavailable backend", async () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     expect(await discoverImplementationExecutors()).toMatchObject([{ id: "local-coding-agent", status: "ready", supports: ["implementation", "repair"], providerCalls: true }]);
@@ -29,23 +37,61 @@ describe("implementation executor", () => {
   it("implements, repairs, validates, adds a test, commits locally, and preserves the source checkout", async () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const repo = await repository(); const before = await git(repo, ["rev-parse", "HEAD"]); const beforeStatus = await git(repo, ["status", "--porcelain"]);
+    const remote = await mkdtemp(join(tmpdir(), "runforge-implementation-remote-"));
+    await git(remote, ["init", "--bare"]); await git(repo, ["remote", "add", "origin", remote]); await git(repo, ["push", "origin", "main"]);
+    const remoteBefore = await git(repo, ["ls-remote", "origin"]);
     const result = await execute(repo, "EXECUTOR-SUCCESS-1", "REPAIR_LOOP ADD_TEST fix add", ["node test.js", "node added.test.js", "node lint.js", "node typecheck.js"]);
-    expect(result.implementation).toMatchObject({ status: "implemented_and_validated", performed: true, changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), localCommit: expect.any(String), patchPackage: expect.any(String) });
+    expect(result.implementation).toMatchObject({ status: "implemented_and_validated", performed: true, changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), localBranch: "runforge/executor-success-1", localCommit: expect.any(String), patchPackage: expect.any(String) });
     expect(result.validation).toHaveLength(4);
     expect((result.validation as Array<Record<string, unknown>>).every((item) => item.exitCode === 0 && typeof item.stdout === "string" && typeof item.stderr === "string")).toBe(true);
     expect(result.providerCalls).toMatchObject([{ providerCalls: true, networkAuthorized: true }, { providerCalls: true, networkAuthorized: true }]);
     expect(result.providerCalls).toMatchObject([{ tokenUsage: 100 }, { tokenUsage: 100 }]);
     expect(result).toMatchObject({
-      status: "workflow_completed",
-      agreement: { profile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage"]) },
-      handoff: { profile: "local-ready", changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), patch: "implementation.patch", findings: [] },
-      next: { party: "owner" },
+      status: "awaiting_external_session",
+      agreement: { profile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]), awaitingPhases: expect.arrayContaining([{ phaseId: "remotePush", responsibleParty: "external_session", prerequisites: [] }]) },
+      handoff: { profile: "local-ready", changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), patch: "implementation.patch", commit: expect.any(String), findings: [] },
+      next: { party: "external_session", exactAction: expect.stringContaining("remotePush") },
       implementation: { unresolvedAcceptanceCriteria: [] },
+      git: { branch: "runforge/executor-success-1", commit: expect.any(String) },
     });
     expect(await git(repo, ["rev-parse", "HEAD"])).toBe(before); expect(await git(repo, ["status", "--porcelain"])).toBe(beforeStatus);
+    expect((await git(repo, ["symbolic-ref", "--short", "HEAD"])).trim()).toBe("main");
+    expect((await git(repo, ["rev-parse", "refs/heads/main"])).trim()).toBe(before.trim());
+    expect((await git(repo, ["rev-parse", "refs/heads/runforge/executor-success-1"])).trim()).toBe(result.git.commit);
+    expect(await git(repo, ["ls-remote", "origin"])).toBe(remoteBefore);
     expect(await readFile(String((result.implementation as Record<string, unknown>).patchPackage), "utf8")).toContain("added.test.js");
     expect(result.publication).toMatchObject({ status: "on_hold", performed: false });
   }, 20_000);
+
+  it("returns an assist-only patch without creating an externally owned branch or commit", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository(); const before = await git(repo, ["rev-parse", "HEAD"]); const refsBefore = await git(repo, ["for-each-ref", "--format=%(refname) %(objectname)"]);
+    const { execution, result } = await executeWithExecution(
+      repo, "EXECUTOR-ASSIST-ONLY-1", "fix add", ["node test.js"], [],
+      { schemaVersion: 1, profile: "assist-only" },
+    );
+    expect(execution.success).toBe(true);
+    expect(result).toMatchObject({
+      status: "awaiting_external_session",
+      implementation: { status: "implemented_and_validated", localBranch: null, localCommit: null, patchPackage: expect.any(String) },
+      git: { branch: null, commit: null, patchPackage: expect.any(String) },
+      handoff: { profile: "assist-only", patch: "implementation.patch", commit: null },
+      next: { party: "external_session" },
+    });
+    expect(await git(repo, ["rev-parse", "HEAD"])).toBe(before);
+    expect(await git(repo, ["for-each-ref", "--format=%(refname) %(objectname)"])).toBe(refsBefore);
+    expect(await readFile(String(result.implementation.patchPackage), "utf8")).toContain("diff --git");
+  });
+
+  it("fails safely when the deterministic RunForge branch already exists", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository(); const before = await git(repo, ["rev-parse", "HEAD"]);
+    await git(repo, ["branch", "runforge/executor-collision-1", before.trim()]);
+    await expect(execute(repo, "EXECUTOR-COLLISION-1", "fix add", ["node test.js"])).rejects.toThrow("local_branch_collision");
+    expect((await git(repo, ["rev-parse", "refs/heads/runforge/executor-collision-1"])).trim()).toBe(before.trim());
+    expect(await git(repo, ["rev-parse", "HEAD"])).toBe(before);
+    expect(await git(repo, ["status", "--porcelain"])).toBe("");
+  });
 
   it.each([
     ["external_session", "awaiting_external_session"],
@@ -63,7 +109,7 @@ describe("implementation executor", () => {
         runforgeCompletedPhases: ["implementation", "localValidation"],
         awaitingPhases: [{ phaseId: "independentReview", responsibleParty: party, prerequisites: [] }],
       },
-      handoff: { profile: "local-ready", findings: [], nextActions: [{ party, exactAction: expect.stringContaining("independentReview") }] },
+      handoff: { profile: "assist-only", findings: [], nextActions: [{ party, exactAction: expect.stringContaining("independentReview") }] },
       next: { party, exactAction: expect.stringContaining("independentReview") },
     });
   });
@@ -81,19 +127,46 @@ describe("implementation executor", () => {
       workflow: {
         status: "awaiting_external_session",
         agreement: { awaitingPhases: [{ phaseId: "independentReview", responsibleParty: "external_session", prerequisites: [] }] },
-        handoff: { profile: "local-ready", findings: [], nextActions: [{ party: "external_session" }] },
+        handoff: { profile: "assist-only", findings: [], nextActions: [{ party: "external_session" }] },
       },
     });
   });
 
   it.each([
-    ["FALSE_POSITIVE", "no_change_required", "workflow_completed"],
+    ["FALSE_POSITIVE", "no_change_required", "awaiting_external_session"],
     ["AMBIGUOUS_CHANGE", "blocked_with_owner_gate", "awaiting_owner"],
     ["FORBIDDEN_CHANGE", "blocked_with_owner_gate", "awaiting_owner"]
   ])("returns explicit outcome for %s", async (task, outcome, status) => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const result = await execute(await repository(), `EXECUTOR-${task}-1`, task, ["node test.js"], task === "FORBIDDEN_CHANGE" ? ["secrets.txt"] : []);
     expect(result.status).toBe(status); expect(result.implementation).toMatchObject({ status: outcome });
+  });
+
+  it("ignores credential-like assignments that appear only as unchanged patch context", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const result = await execute(await repository(true), "EXECUTOR-SECRET-CONTEXT-1", "fix add", ["node test.js"]);
+    expect(result).toMatchObject({
+      status: "awaiting_external_session",
+      implementation: { status: "implemented_and_validated", localCommit: expect.any(String) },
+      safetyAssertions: { secretScanPassed: true },
+    });
+  });
+
+  it("rejects a credential-like assignment newly added by the implementation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-secret-agent-")); const agent = join(root, "agent.mjs");
+    await writeFile(agent, [
+      `import { appendFileSync } from "node:fs";`,
+      `appendFileSync("calculator.js", ["\\n// API", "_KEY=", "newlyaddedvalue", "\\n"].join(""));`,
+      `console.log("implemented bounded change");`,
+      `console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 10, output_tokens: 10 } }));`,
+    ].join("\n"));
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    const result = await execute(await repository(), "EXECUTOR-SECRET-ADDITION-1", "add rejected fixture line", ["node test.js"]);
+    expect(result).toMatchObject({
+      status: "awaiting_owner",
+      implementation: { status: "blocked_with_owner_gate", localCommit: null },
+      safetyAssertions: { secretScanPassed: false },
+    });
   });
 
   it("marks empty non-zero validation output as an infrastructure defect", async () => {
@@ -106,6 +179,10 @@ describe("implementation executor", () => {
   it("runs end-to-end through localhost HTTP with visible selection and publication separation", async () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const repo = await repository(); const state = await mkdtemp(join(tmpdir(), "runforge-implementation-control-"));
+    const sourceHeadBefore = await git(repo, ["rev-parse", "HEAD"]); const sourceStatusBefore = await git(repo, ["status", "--porcelain"]);
+    const remote = await mkdtemp(join(tmpdir(), "runforge-implementation-http-remote-"));
+    await git(remote, ["init", "--bare"]); await git(repo, ["remote", "add", "origin", remote]); await git(repo, ["push", "origin", "main"]);
+    const remoteBefore = await git(repo, ["ls-remote", "origin"]);
     const server = await startControlPlaneServer({ port: 0, stateRoot: state });
     try {
       const capabilities = await fetch(`${server.url}/v1/capabilities`).then((response) => response.json()) as Record<string, any>;
@@ -132,14 +209,26 @@ describe("implementation executor", () => {
       expect(result).toMatchObject({
         status: "completed",
         workflow: {
-          status: "workflow_completed",
-          agreement: { profile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage"]) },
-          handoff: { profile: "local-ready", findings: [] },
+          status: "awaiting_external_session",
+          agreement: { profile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]) },
+          handoff: { profile: "local-ready", findings: [], commit: expect.any(String) },
+          next: { party: "external_session", exactAction: expect.stringContaining("remotePush") },
         },
         requestedIntent: "implementation", actualExecutorMode: "implementation",
         implementation: { status: "implemented_and_validated", unresolvedAcceptanceCriteria: [] },
         publication: { status: "on_hold", performed: false },
       });
+      expect(result.workflow.agreement.awaitingPhases).toEqual(expect.arrayContaining([
+        expect.objectContaining({ phaseId: "remotePush", responsibleParty: "external_session" }),
+      ]));
+      expect(result).toMatchObject({
+        implementation: { localBranch: "runforge/executor-http-1", localCommit: expect.any(String) },
+        git: { branch: "runforge/executor-http-1", commit: expect.any(String) },
+      });
+      expect(await git(repo, ["rev-parse", "HEAD"])).toBe(sourceHeadBefore);
+      expect(await git(repo, ["status", "--porcelain"])).toBe(sourceStatusBefore);
+      expect((await git(repo, ["symbolic-ref", "--short", "HEAD"])).trim()).toBe("main");
+      expect(await git(repo, ["ls-remote", "origin"])).toBe(remoteBefore);
     } finally { await server.close(); }
   }, 20_000);
 
@@ -204,7 +293,7 @@ describe("implementation executor", () => {
   }, 20_000);
 });
 
-async function repository(): Promise<string> { const repo = await mkdtemp(join(tmpdir(), "runforge-implementation-repo-")); await cp(fixture, repo, { recursive: true }); await git(repo, ["init", "-b", "main"]); await git(repo, ["add", "."]); await git(repo, ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]); return repo; }
+async function repository(withSensitiveContext = false): Promise<string> { const repo = await mkdtemp(join(tmpdir(), "runforge-implementation-repo-")); await cp(fixture, repo, { recursive: true }); if (withSensitiveContext) { const path = join(repo, "calculator.js"); const source = await readFile(path, "utf8"); const context = ["// API", "_KEY=", "existingvalue", "\n"].join(""); await writeFile(path, context + source); } await git(repo, ["init", "-b", "main"]); await git(repo, ["add", "."]); await git(repo, ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]); return repo; }
 async function git(cwd: string, args: string[]): Promise<string> { return (await exec("git", args, { cwd })).stdout; }
 function spec(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []) { return { schemaVersion: 2, taskId, task: { text, goal: "Make the deterministic fixture satisfy acceptance", acceptanceCriteria: ["validation is green", "local patch evidence exists"] }, target: { repository: repo, workingDirectory: "." }, execution: { mode: "implementation", maxRepairIterations: 2 }, runtime: { preference: "local-disposable", externalNetwork: "allowed", dependencyPreparation: "disabled" }, validation: { mode: "explicit", commands }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true, forbiddenAreas }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
 async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
