@@ -183,6 +183,37 @@ describe("agreement-aware task result contract", () => {
     expect(validate(legacy), JSON.stringify(validate.errors)).toBe(true);
     expect(validate({ ...legacy, status: "runforge_scope_completed" })).toBe(false);
   });
+
+  it.each([
+    {
+      schemaVersion: 1, taskId: "PUBLIC-FAILED-1", status: "failed", lastCompletedPhase: "validate", error: "worker failed",
+      execution: { id: "execution-1", attempt: 1, operation: "execution" }, artifacts: { root: "/artifacts" },
+      recovery: { reason: "worker_failed", retryAvailable: false, cleanupStatus: "completed" },
+      safetyAssertions: { successNotInferred: true, lateWorkerResultIgnored: true },
+      nextAction: "Inspect the failed attempt evidence and start a new task.",
+    },
+    {
+      schemaVersion: 1, taskId: "PUBLIC-INTERRUPTED-1", status: "interrupted", lastCompletedPhase: "implement",
+      interruption: { reason: "execution_deadline_exceeded", originalExecutionId: "execution-2" },
+      execution: { id: "execution-2", attempt: 2, operation: "execution" }, targetMutation: { status: "not_inferred" },
+      artifacts: { root: "/artifacts", created: [] }, validations: { incomplete: ["validation is green"] },
+      recovery: { reason: "execution_deadline_exceeded", retryAvailable: true, cleanupStatus: "completed" },
+      safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true, attemptArtifactsIsolated: true, providerCallsInferred: false },
+      nextAction: "/v1/tasks/PUBLIC-INTERRUPTED-1/retry",
+    },
+    {
+      schemaVersion: 1, taskId: "PUBLIC-RESTART-INTERRUPTED-1", status: "interrupted", lastCompletedPhase: "unknown",
+      interruption: { reason: "service_restart", originalExecutionId: "execution-3" }, targetMutation: { status: "not_inferred" },
+      artifacts: { root: "/artifacts", created: [] }, validations: { incomplete: ["Execution did not reach a trusted terminal result."] },
+      recovery: { reason: "service_restart", retryAvailable: true, cleanupStatus: "completed" },
+      safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true, providerCallsInferred: false },
+    },
+  ])("validates a synthetic public $status terminal result at runtime and against result v1", async (result) => {
+    validateTaskResultContract(result);
+    const schema = JSON.parse(await readFile("schemas/task-result-v1.schema.json", "utf8"));
+    const validate = new Ajv2020({ strict: true }).compile(schema);
+    expect(validate(result), JSON.stringify(validate.errors)).toBe(true);
+  });
 });
 
 describe("legacy external result classification", () => {

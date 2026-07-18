@@ -90,7 +90,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
     "localCommit",
     request.spec.executionAgreement.phaseOwnership,
   ) === "runforge";
-  const localBranch = branchOwnedByRunForge ? localBranchName(request.spec.taskId) : null;
+  const localBranch = branchOwnedByRunForge ? localBranchName(request.spec.taskId, request.generation, request.attempt) : null;
   if (localBranch && await localRefExists(request.targetRepository, localBranch)) {
     throw new Error(`local_branch_collision: refusing to overwrite refs/heads/${localBranch}`);
   }
@@ -183,10 +183,13 @@ async function localRefExists(repository: string, branch: string): Promise<boole
       throw error;
     });
 }
-function localBranchName(taskId: string): string {
-  const slug = taskId.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "task";
-  return `runforge/${slug}`;
+function localBranchName(taskId: string, generation: string, attempt: number): string {
+  const task = refSlug(taskId, "task");
+  const execution = refSlug(generation, "standalone");
+  const retry = Number.isSafeInteger(attempt) && attempt > 0 ? attempt : 1;
+  return `runforge/${task}/${execution}-attempt-${retry}`;
 }
+function refSlug(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || fallback; }
 function addedPatchLines(patch: string): string {
   const added: string[] = [];
   let inHunk = false;

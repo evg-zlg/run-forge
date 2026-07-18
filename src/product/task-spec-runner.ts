@@ -271,7 +271,7 @@ function implementationHandoff(
   next: ResultNextAction,
 ): NormalizedHandoffInput {
   return {
-    profile: executionPhaseOwner(spec.executionAgreement.profile, "localCommit", spec.executionAgreement.phaseOwnership) === "runforge" ? "local-ready" : "assist-only",
+    profile: executionPhaseOwner(spec.executionAgreement.profile, "localBranch", spec.executionAgreement.phaseOwnership) === "runforge" ? "local-ready" : "assist-only",
     summary: `RunForge implementation finished with '${result.status}' and workflow status '${status}'.`,
     changedFiles: result.changedFiles,
     patch: result.patchPackage ? "implementation.patch" : null,

@@ -3,11 +3,12 @@
   "$id": "https://runforge.local/schemas/task-result-v1.schema.json",
   "title": "RunForge normalized task result v1",
   "type": "object",
-  "required": ["schemaVersion", "contract", "taskId", "status"],
+  "required": ["schemaVersion", "taskId", "status"],
   "anyOf": [
     {
-      "required": ["agreement", "handoff", "next"],
+      "required": ["contract", "agreement", "handoff", "next"],
       "properties": {
+        "contract": { "const": "runforge-task-result" },
         "status": { "$ref": "#/$defs/completionStatus" },
         "agreement": true,
         "handoff": true,
@@ -15,11 +16,28 @@
       }
     },
     {
-      "required": ["targetRepository", "completedWork", "validation", "artifacts", "ownerGate", "nextAction", "safetyAssertions", "errors", "limitations"],
+      "required": ["contract", "targetRepository", "completedWork", "validation", "artifacts", "ownerGate", "nextAction", "safetyAssertions", "errors", "limitations"],
       "properties": {
+        "contract": { "const": "runforge-task-result" },
         "status": { "$ref": "#/$defs/legacyStatus" },
-        "targetRepository": true, "completedWork": true, "validation": true, "artifacts": true,
-        "ownerGate": true, "nextAction": true, "safetyAssertions": true, "errors": true, "limitations": true
+        "targetRepository": true, "completedWork": true, "validation": true, "artifacts": { "$ref": "#/$defs/legacyArtifacts" },
+        "ownerGate": true, "nextAction": { "$ref": "#/$defs/legacyRecommendation" }, "safetyAssertions": { "$ref": "#/$defs/safety" }, "errors": true, "limitations": true
+      }
+    },
+    {
+      "not": { "required": ["contract"] },
+      "required": ["artifacts", "recovery", "safetyAssertions"],
+      "oneOf": [
+        { "required": ["error", "execution", "nextAction"], "properties": { "status": { "const": "failed" }, "error": { "type": "string", "minLength": 1 }, "execution": { "type": "object" }, "nextAction": { "type": "string", "minLength": 1 }, "safetyAssertions": { "$ref": "#/$defs/failedTerminalSafety" } } },
+        { "required": ["interruption", "targetMutation", "validations"], "properties": { "status": { "const": "interrupted" }, "interruption": { "type": "object" }, "targetMutation": { "type": "object" }, "validations": { "type": "object" }, "nextAction": { "anyOf": [{ "type": "string" }, { "type": "object" }] }, "safetyAssertions": { "$ref": "#/$defs/interruptedTerminalSafety" } } }
+      ],
+      "properties": {
+        "contract": false,
+        "execution": { "type": "object" },
+        "artifacts": { "type": "object" },
+        "recovery": { "type": "object" },
+        "safetyAssertions": true,
+        "nextAction": true
       }
     }
   ],
@@ -52,14 +70,7 @@
         "properties": { "command": { "type": "string", "minLength": 1 } }
       }
     },
-    "artifacts": {
-      "type": "object",
-      "required": ["summary", "results"],
-      "properties": {
-        "summary": { "type": "string", "minLength": 1 },
-        "results": { "type": "string", "minLength": 1 }
-      }
-    },
+    "artifacts": true,
     "git": { "type": "object" },
     "ownerGate": {
       "type": "object",
@@ -69,12 +80,8 @@
         "status": { "type": "string", "minLength": 1 }
       }
     },
-    "nextAction": {
-      "type": "object",
-      "required": ["recommendation"],
-      "properties": { "recommendation": { "type": "string", "minLength": 1 } }
-    },
-    "safetyAssertions": { "$ref": "#/$defs/safety" },
+    "nextAction": true,
+    "safetyAssertions": true,
     "errors": { "type": "array" },
     "limitations": { "type": "array" }
   },
@@ -92,6 +99,19 @@
     },
     "legacyStatus": {
       "enum": ["completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required"]
+    },
+    "legacyArtifacts": {
+      "type": "object",
+      "required": ["summary", "results"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "results": { "type": "string", "minLength": 1 }
+      }
+    },
+    "legacyRecommendation": {
+      "type": "object",
+      "required": ["recommendation"],
+      "properties": { "recommendation": { "type": "string", "minLength": 1 } }
     },
     "phaseId": {
       "enum": [
@@ -208,6 +228,24 @@
         "secretAccess": { "const": false },
         "providerCalls": { "type": "boolean" },
         "notes": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "failedTerminalSafety": {
+      "type": "object",
+      "required": ["successNotInferred", "lateWorkerResultIgnored"],
+      "properties": {
+        "successNotInferred": { "type": "boolean" },
+        "lateWorkerResultIgnored": { "type": "boolean" }
+      }
+    },
+    "interruptedTerminalSafety": {
+      "type": "object",
+      "required": ["staleLeaseRevoked", "lateWorkerResultIgnored", "providerCallsInferred"],
+      "properties": {
+        "staleLeaseRevoked": { "type": "boolean" },
+        "lateWorkerResultIgnored": { "type": "boolean" },
+        "attemptArtifactsIsolated": { "type": "boolean" },
+        "providerCallsInferred": { "type": "boolean" }
       }
     },
     "handoffSafety": {

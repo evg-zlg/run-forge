@@ -13,6 +13,7 @@ export const RUNFORGE_COMPLETION_STATUSES = [
 const LEGACY_TASK_RESULT_STATUSES = [
   "completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required",
 ] as const;
+const SYNTHETIC_TERMINAL_STATUSES = ["failed", "interrupted"] as const;
 
 export type RunForgeCompletionStatus = (typeof RUNFORGE_COMPLETION_STATUSES)[number];
 export type HandoffProfile = Extract<ExecutionProfile, "assist-only" | "local-ready">;
@@ -271,8 +272,13 @@ function stageResult(result: ExecutorResult | undefined): Record<string, unknown
 export function validateTaskResultContract(value: unknown): void {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Task result must be an object.");
   const result = value as Record<string, unknown>;
-  if (result.schemaVersion !== 1 || result.contract !== "runforge-task-result") throw new Error("Task result contract/version is invalid.");
+  if (result.schemaVersion !== 1) throw new Error("Task result contract/version is invalid.");
   if (typeof result.taskId !== "string" || !result.taskId.trim()) throw new Error("Task result taskId is required.");
+  if (result.contract === undefined) {
+    validateSyntheticTerminalResult(result);
+    return;
+  }
+  if (result.contract !== "runforge-task-result") throw new Error("Task result contract/version is invalid.");
   const agreementAware = result.agreement !== undefined || result.handoff !== undefined || result.next !== undefined;
   if (agreementAware) {
     if (typeof result.status !== "string" || !(RUNFORGE_COMPLETION_STATUSES as readonly string[]).includes(result.status)) throw new Error("Task result status is invalid.");
@@ -289,6 +295,25 @@ export function validateTaskResultContract(value: unknown): void {
   if (typeof target.changed !== "boolean") throw new Error("Task result targetRepository.changed must be boolean.");
   const safety = result.safetyAssertions as Record<string, unknown>;
   for (const field of ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess", "providerCalls"]) if (typeof safety[field] !== "boolean") throw new Error(`Task result safetyAssertions.${field} must be boolean.`);
+}
+
+function validateSyntheticTerminalResult(result: Record<string, unknown>): void {
+  if (typeof result.status !== "string" || !(SYNTHETIC_TERMINAL_STATUSES as readonly string[]).includes(result.status)) throw new Error("Task result status is invalid.");
+  for (const field of ["artifacts", "recovery", "safetyAssertions"]) assertObject(result[field], `Task result ${field} must be an object.`);
+  const safety = result.safetyAssertions as Record<string, unknown>;
+  if (typeof safety.lateWorkerResultIgnored !== "boolean") throw new Error("Task result safetyAssertions.lateWorkerResultIgnored must be boolean.");
+  if (result.status === "failed") {
+    assertObject(result.execution, "Task result execution must be an object.");
+    if (typeof result.error !== "string" || !result.error.trim()) throw new Error("Task result error is required.");
+    if (typeof result.nextAction !== "string" || !result.nextAction.trim()) throw new Error("Task result nextAction is required.");
+    if (typeof safety.successNotInferred !== "boolean") throw new Error("Task result safetyAssertions.successNotInferred must be boolean.");
+    return;
+  }
+  for (const field of ["interruption", "targetMutation", "validations"]) assertObject(result[field], `Task result ${field} must be an object.`);
+  if (result.execution !== undefined) assertObject(result.execution, "Task result execution must be an object.");
+  if (result.nextAction !== undefined && typeof result.nextAction !== "string") assertObject(result.nextAction, "Task result nextAction must be a string or object.");
+  for (const field of ["staleLeaseRevoked", "providerCallsInferred"]) if (typeof safety[field] !== "boolean") throw new Error(`Task result safetyAssertions.${field} must be boolean.`);
+  if (safety.attemptArtifactsIsolated !== undefined && typeof safety.attemptArtifactsIsolated !== "boolean") throw new Error("Task result safetyAssertions.attemptArtifactsIsolated must be boolean.");
 }
 
 function normalizeNextAction(input: Omit<ResultNextAction, "gates" | "evidence"> & { gates?: readonly ResultGate[]; evidence?: readonly ResultEvidence[] }, name: string): ResultNextAction {
