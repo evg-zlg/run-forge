@@ -3,9 +3,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultAuthority, parseDecisionRequest, parseTaskRequest, type ControlTaskRecord } from "../../src/control-plane/contracts.js";
-import { negotiateControlPlaneAgreement, parseExecutionAgreementNegotiationRequest, technicalCapabilitiesForExecutor } from "../../src/control-plane/execution-agreements.js";
+import { assertAgreementMatchesTask, negotiateControlPlaneAgreement, negotiateTaskAgreement, parseExecutionAgreementNegotiationRequest, technicalCapabilitiesForExecutor } from "../../src/control-plane/execution-agreements.js";
 import { boundPublicResult } from "../../src/control-plane/manager.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
+import type { TaskSpecV2 } from "../../src/product/task-spec-v2.js";
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
@@ -58,6 +59,41 @@ describe("control-plane contracts", () => {
       expect.objectContaining({ phaseId: "remotePush", responsibleParty: "external_session" }),
       expect.objectContaining({ phaseId: "draftPublication", responsibleParty: "external_session" }),
     ]));
+  });
+
+  it.each(["draft-pr", "delivery"] as const)("does not silently downgrade the %s profile when publicationTarget is none", (profile) => {
+    const agreement = negotiateControlPlaneAgreement(
+      parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile, publicationTarget: { kind: "none" } }),
+      technicalCapabilitiesForExecutor(true),
+    );
+    expect(agreement.status).toBe("conflicted");
+    expect(agreement.conflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phaseId: "remotePush", kind: "unavailable" }),
+      expect.objectContaining({ phaseId: "draftPublication", kind: "unavailable" }),
+      expect.objectContaining({ phaseId: "ciMonitoring", kind: "unavailable" }),
+      expect.objectContaining({ phaseId: "ciRepair", kind: "unavailable" }),
+    ]));
+  });
+
+  it("matches a referenced local-ready task without re-requesting phases suppressed by its none target", () => {
+    const context = {
+      project: null,
+      policy: { sources: ["installation"], hardBoundaries: [], runforgeMd: { present: false, path: null, authorityEscalationTrusted: false as const } },
+      publicationTarget: { kind: "none" as const },
+    };
+    const agreement = negotiateControlPlaneAgreement(
+      parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "local-ready", publicationTarget: { kind: "none" } }),
+      technicalCapabilitiesForExecutor(true),
+      context,
+    );
+    const spec = {
+      taskId: "LOCAL-READY-REFERENCE-1",
+      execution: { mode: "implementation" },
+      executionAgreement: { schemaVersion: 1, profile: "local-ready" },
+      authority: { allowProviderCalls: true },
+    } as TaskSpecV2;
+    const authority = defaultAuthority({ implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true });
+    expect(() => assertAgreementMatchesTask(agreement, spec, negotiateTaskAgreement(spec, authority))).not.toThrow();
   });
 
   it("bounds verbose public diagnostics while retaining compact result fields", () => {

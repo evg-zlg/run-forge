@@ -48,6 +48,8 @@ Bootstrap phrases map to profiles as follows:
 
 The phrase selects intent only. It does not grant provider, network, Git, publication, merge, or deploy authority. Always inspect the returned agreement.
 
+`publicationTarget: { "kind": "none" }` makes `assist-only`, `local-ready`, and `custom` local-only for push, draft publication, and CI. It never converts `draft-pr` or `delivery` into an adapter-ready local profile; those profiles keep their remote responsibilities and conflict while the adapters are unavailable.
+
 For a local implementation handoff, negotiate `local-ready` with no remote publication target:
 
 ```bash

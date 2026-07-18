@@ -111,13 +111,15 @@ Negotiation can bind the agreement to a registered project. Its context records 
 
 | Target | Negotiation meaning |
 | --- | --- |
-| `{ "kind": "none" }` | Remote push, draft publication, and CI phases are not requested. This is the safe default. |
+| `{ "kind": "none" }` | For `assist-only`, `local-ready`, and `custom`, remote push, draft publication, and CI phases are not requested. This is the safe local-only target. It does not downgrade `draft-pr` or `delivery`; those profiles retain their publication phases and conflict at unavailable adapters. |
 | `{ "kind": "new_branch", "branchName": "runforge/task-1" }` | Requests `localBranch`; the chosen owner must create that new local branch. |
 | `{ "kind": "existing_branch", "branchName": "work/task-1" }` | Suppresses branch creation. It does not prove that the branch exists or authorize a commit/push. |
 | `{ "kind": "existing_change", "provider": "github", "changeId": "123" }` | Requests remote push and draft publication/update. RunForge-owned handling conflicts because no existing-change adapter exists. |
 | `{ "kind": "externally_managed_existing_change", "provider": "gitlab", "changeId": "456", "responsibleParty": "external_session" }` | Requests remote push/publication but delegates both to the named external party; CI monitoring/repair default to unrequested. |
 
 For an existing branch, PR, or MR, first register the actual checkout so the agreement captures its source state. Use `existing_branch` only when another party already controls the local branch. Use `externally_managed_existing_change` for an existing PR/MR and name `external_session`, `external_system`, or `owner`; that party must perform and report publication. `existing_change` does not enable RunForge to update it.
+
+Do not combine `draft-pr` or `delivery` with `publicationTarget.kind: "none"` to try to obtain a local-only agreement. Profile intent wins: the unavailable push, publication, and CI adapters remain conflicts. Choose `local-ready` for a local branch-and-commit handoff. When a ready local profile is referenced by a TaskSpec, its explicit `none` target remains part of task matching and the suppressed publication phases are not re-requested.
 
 ## Local HTTP flow
 

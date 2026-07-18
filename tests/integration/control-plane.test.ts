@@ -39,6 +39,55 @@ describe("local control-plane HTTP lifecycle", () => {
     }
   });
 
+  it("accepts the documented local-ready agreement reference without re-requesting publication phases", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-local-ready-reference-"))) - 1]!;
+    const previous = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = process.execPath;
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), {
+      runTaskSpec: async (specPath) => {
+        const spec = JSON.parse(await readFile(specPath, "utf8"));
+        await mkdir(spec.artifacts.root, { recursive: true });
+        await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } }));
+        return {} as never;
+      },
+      recordOwnerDecision: async () => ({} as never),
+      continueExecution: async () => ({} as never),
+    });
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
+    try {
+      const inspected = await json(await fetch(`${instance.url}/v1/projects/inspect`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ path: process.cwd(), workingDirectory: ".", register: true }),
+      }));
+      const negotiationResponse = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ schemaVersion: 1, profile: "local-ready", projectId: inspected.project.id, publicationTarget: { kind: "none" } }),
+      });
+      expect(negotiationResponse.status).toBe(201);
+      const agreement = await json(negotiationResponse);
+      expect(agreement.status).toBe("ready");
+
+      const response = await fetch(`${instance.url}/v1/tasks`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          projectId: inspected.project.id,
+          agreementId: agreement.agreementId,
+          taskSpec: { ...implementationTaskSpec("CONTROL-LOCAL-READY-REFERENCE-1"), executionAgreement: { schemaVersion: 1, profile: "local-ready" } },
+          authority: implementationAuthority(),
+          publication: "none",
+        }),
+      });
+      expect(response.status).toBe(202);
+      const created = await json(response);
+      expect(created.executionAgreement.agreementId).toBe(agreement.agreementId);
+      for (const phaseId of ["remotePush", "draftPublication", "ciMonitoring", "ciRepair"]) {
+        expect(created.executionAgreement.phases).toContainEqual(expect.objectContaining({ phaseId, requested: false, responsibleParty: "nobody", status: "not_requested" }));
+      }
+    } finally {
+      if (previous === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previous;
+    }
+  });
+
   it("discovers the dynamic URL, runs a durable task, and keeps decisions idempotent", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-control-http-"))) - 1]!;
     let ownerWrites = 0;

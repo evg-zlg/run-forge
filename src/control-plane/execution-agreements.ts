@@ -123,10 +123,23 @@ export function assertAgreementMatchesTask(agreement: ExecutionAgreement, spec: 
   }
   if (expected) for (const expectedPhase of expected.phases) {
     const phase = agreement.phases.find((item) => item.phaseId === expectedPhase.phaseId);
-    if (!phase || phase.requested !== expectedPhase.requested || phase.responsibleParty !== expectedPhase.responsibleParty) {
+    const expectedRequested = taskExpectedPhaseRequested(agreement, spec, expectedPhase.phaseId, expectedPhase.requested);
+    const expectedParty = expectedRequested ? expectedPhase.responsibleParty : "nobody";
+    if (!phase || phase.requested !== expectedRequested || phase.responsibleParty !== expectedParty) {
       throw new ControlPlaneError(409, "execution_agreement_mismatch", `Stored agreement request for '${expectedPhase.phaseId}' does not match the TaskSpec.`, { agreementId: agreement.agreementId }, false, spec.taskId);
     }
   }
+}
+
+function taskExpectedPhaseRequested(
+  agreement: ExecutionAgreement,
+  spec: TaskSpecV2,
+  phaseId: ExecutionPhaseId,
+  requested: boolean,
+): boolean {
+  const target = agreement.context?.publicationTarget;
+  if (target?.kind !== "none" || !["assist-only", "local-ready"].includes(spec.executionAgreement.profile)) return requested;
+  return (["remotePush", "draftPublication", "ciMonitoring", "ciRepair"] as readonly ExecutionPhaseId[]).includes(phaseId) ? false : requested;
 }
 
 export function executionAgreementCapabilities(
@@ -173,7 +186,12 @@ function publicationRequest(request: ExecutionAgreementNegotiationRequest): { re
   const ownership = { ...(request.requestedOwnership ?? {}) };
   const target = request.publicationTarget ?? { kind: "none" };
   if (target.kind === "none") {
-    for (const phase of ["remotePush", "draftPublication", "ciMonitoring", "ciRepair"] as const) requested[phase] = false;
+    // A publication profile cannot be made adapter-ready by silently removing
+    // the phases that define it. Callers wanting local-only work must choose a
+    // local profile (or explicitly model custom ownership) instead.
+    if (request.profile !== "draft-pr" && request.profile !== "delivery") {
+      for (const phase of ["remotePush", "draftPublication", "ciMonitoring", "ciRepair"] as const) requested[phase] = false;
+    }
   } else if (target.kind === "new_branch") {
     requested.localBranch = true;
   } else if (target.kind === "existing_branch") {
