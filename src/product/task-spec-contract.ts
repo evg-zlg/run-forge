@@ -1,3 +1,5 @@
+import { EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES } from "./execution-agreement.js";
+
 export const taskSpecSchemaVersion = 2 as const;
 export const taskSpecSchemaPath = "/schemas/task-spec-v2.schema.json" as const;
 export const taskExecutionModes = ["inspection", "implementation", "validation", "repair"] as const;
@@ -37,6 +39,17 @@ export const taskSpecV2Schema: Record<string, unknown> = {
     task: { type: "object", additionalProperties: false, required: ["text", "goal", "acceptanceCriteria"], properties: { text: { type: "string", minLength: 1 }, goal: { type: "string", minLength: 1 }, acceptanceCriteria: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } } } },
     target: { type: "object", additionalProperties: false, required: ["repository"], properties: { repository: { type: "string", minLength: 1 }, workingDirectory: { type: "string", minLength: 1 }, expectedSha: { type: "string", minLength: 7 } } },
     execution: { type: "object", additionalProperties: false, required: ["mode"], properties: { mode: { enum: taskExecutionModes }, maxRepairIterations: { type: "integer", minimum: 0, maximum: 3 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 1800000 }, maxChangedFiles: { type: "integer", minimum: 1, maximum: 100 }, maxPatchBytes: { type: "integer", minimum: 1000, maximum: 5000000 }, maxProviderTokens: { type: "integer", minimum: 1000, maximum: 200000 } } },
+    executionAgreement: {
+      type: "object", additionalProperties: false, required: ["schemaVersion", "profile"],
+      properties: {
+        schemaVersion: { const: 1 }, profile: { enum: EXECUTION_PROFILES },
+        phaseOwnership: {
+          type: "object", minProperties: 1, additionalProperties: false,
+          properties: Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, { enum: EXECUTION_PARTIES.filter((party) => party !== "nobody") }]))
+        }
+      },
+      allOf: [{ if: { properties: { profile: { const: "custom" } } }, then: { required: ["phaseOwnership"] }, else: { not: { required: ["phaseOwnership"] } } }]
+    },
     discovery: { type: "object", additionalProperties: false, properties: { policy: { enum: ["auto", "explicit"] } } },
     runtime: { type: "object", additionalProperties: false, properties: { preference: { enum: taskRuntimeIds }, dockerImage: { type: "string", minLength: 1 }, prepareDependencies: { type: "boolean" }, dependencyPreparation: { enum: ["required", "if-needed", "disabled", "reuse-existing"] }, externalNetwork: { enum: ["denied", "dependency-preparation-only", "allowed"] } }, not: { required: ["prepareDependencies", "dependencyPreparation"] } },
     validation: { type: "object", additionalProperties: false, properties: { mode: { enum: ["auto", "explicit"] }, commands: { type: "array", items: { type: "string", minLength: 1 } } } },
@@ -58,6 +71,7 @@ export function publicTaskSpecContract(): Record<string, unknown> {
     schemaUrl: taskSpecSchemaPath,
     schema: taskSpecV2Schema,
     executionModes: taskExecutionModes,
+    executionAgreement: { schemaVersion: 1, profiles: EXECUTION_PROFILES, phases: EXECUTION_PHASE_IDS, phaseOwnershipParties: EXECUTION_PARTIES.filter((party) => party !== "nobody") },
     runtimeIds: taskRuntimeIds,
     runtimeDefaults: { implementation: executor.defaultRuntime, repair: executor.defaultRuntime, inspection: "docker", validation: "docker" },
     implementationExecutorIds: [executor.id],
@@ -75,6 +89,7 @@ export function publicTaskSpecContract(): Record<string, unknown> {
         task: { text: "Fix the bounded defect and add a regression test.", goal: "Validation is green and a local commit is recorded.", acceptanceCriteria: ["Defect is fixed", "Regression test passes", "Local commit is recorded"] },
         target: { repository: "<registered-project-path>", workingDirectory: "." },
         execution: { mode: "implementation", maxRepairIterations: 2, timeoutMs: 300000, maxChangedFiles: 20, maxPatchBytes: 500000, maxProviderTokens: executor.maxLimits.providerTokens },
+        executionAgreement: { schemaVersion: 1, profile: "local-ready" },
         runtime: { preference: executor.defaultRuntime, dependencyPreparation: "if-needed", externalNetwork: "allowed" },
         validation: { mode: "auto", commands: [] },
         authority: { profile: "bounded-implementation", forbiddenAreas: [".env", "secrets"], allowProviderCalls: true, allowNetwork: true },
