@@ -229,6 +229,46 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(await manager.getResult("CONTROL-ACCEPTED-SETTLEMENT-1")).toMatchObject({ workflow: { agreement: { agreementId: accepted.agreementId, awaitingPhases: [{ phaseId: "localValidation", responsibleParty: "external_system", prerequisites: ["accepted validation evidence", "result validation evidence"] }] }, next: { gates: [{ name: "accepted validation evidence", status: "pending", evidence: [] }, { name: "result validation evidence", status: "pending", evidence: [] }] } }, controlPlane: { executionAgreement: { agreementId: accepted.agreementId, context: { project: { projectId: project.id } } } } }); manager.close();
   });
 
+  it("preserves an accepted handoff omitted by executor settlement output", async () => {
+    const { manager, agreement, task, result } = await settlementScenario("CONTROL-SETTLEMENT-OMITTED-1", {
+      requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" },
+      prerequisites: { localValidation: ["accepted validation evidence"] },
+      result: { status: "workflow_completed", agreement: { status: "completed", runforgeCompletedPhases: ["taskAnalysis"], awaitingPhases: [] }, next: { party: "runforge", exactAction: "Nothing remains.", gates: [{ name: "accepted validation evidence", status: "satisfied", evidence: ["validation/report.json"] }], evidence: [{ kind: "artifact", reference: "validation/report.json", summary: "Executor evidence retained." }] } },
+    });
+    expect(task.status).toBe("completed");
+    expect(result).toMatchObject({ status: "runforge_scope_completed", agreement: { agreementId: agreement.agreementId, status: "in_progress", awaitingPhases: [{ phaseId: "localValidation", responsibleParty: "external_system", prerequisites: ["accepted validation evidence"] }] }, next: { party: "external_system", gates: [{ name: "accepted validation evidence", status: "satisfied", evidence: ["validation/report.json"] }], evidence: [{ reference: "validation/report.json" }] }, controlPlane: { agreement: { currentPhase: "localValidation", responsibleParty: "external_system", nextParty: "external_system" } } });
+    manager.close();
+  });
+
+  it("ignores contradictory executor ownership in settlement and public projection", async () => {
+    const { manager, agreement, result } = await settlementScenario("CONTROL-SETTLEMENT-OWNERSHIP-1", {
+      requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_session" },
+      result: { status: "workflow_completed", agreement: { status: "completed", phaseOwnership: [{ phaseId: "localValidation", responsibleParty: "owner" }], runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "localValidation", responsibleParty: "owner" }], awaitingPhases: [{ phaseId: "localValidation", responsibleParty: "owner", prerequisites: ["executor evidence"] }] }, next: { party: "owner", exactAction: "Owner should continue.", gates: [], evidence: [] } },
+    });
+    expect(result).toMatchObject({ status: "awaiting_external_session", agreement: { agreementId: agreement.agreementId, phaseOwnership: [{ phaseId: "taskAnalysis", responsibleParty: "runforge" }, { phaseId: "localValidation", responsibleParty: "external_session" }], delegatedPhases: [{ phaseId: "localValidation", responsibleParty: "external_session" }], awaitingPhases: [{ phaseId: "localValidation", responsibleParty: "external_session", prerequisites: ["executor evidence"] }] }, next: { party: "external_session" }, controlPlane: { agreement: { responsibleParty: "external_session", nextParty: "external_session" } } });
+    manager.close();
+  });
+
+  it("filters false RunForge completion claims and keeps mandatory RunForge work outstanding", async () => {
+    const { manager, result, task } = await settlementScenario("CONTROL-SETTLEMENT-FALSE-COMPLETION-1", {
+      requestedOwnership: { taskAnalysis: "runforge", localValidation: "runforge" },
+      result: { status: "workflow_completed", agreement: { status: "completed", runforgeCompletedPhases: ["taskAnalysis", "implementation"], delegatedPhases: [], awaitingPhases: [] }, next: { party: "external_system", exactAction: "Workflow completed.", gates: [], evidence: [] } },
+    });
+    expect(task.status).toBe("failed");
+    expect(result).toMatchObject({ status: "failed", agreement: { status: "in_progress", runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [], awaitingPhases: [] }, next: { party: "runforge" }, controlPlane: { status: "failed", agreement: { currentPhase: "localValidation", responsibleParty: "runforge", nextParty: "runforge" } } });
+    manager.close();
+  });
+
+  it("keeps a valid fully completed accepted workflow completed", async () => {
+    const { manager, result, task } = await settlementScenario("CONTROL-SETTLEMENT-COMPLETED-1", {
+      requestedOwnership: { taskAnalysis: "runforge", localValidation: "runforge" },
+      result: { status: "workflow_completed", agreement: { status: "completed", runforgeCompletedPhases: ["taskAnalysis", "localValidation"], delegatedPhases: [], awaitingPhases: [] }, next: { party: "runforge", exactAction: "Archive the completed evidence.", gates: [], evidence: [] } },
+    });
+    expect(task.status).toBe("completed");
+    expect(result).toMatchObject({ status: "workflow_completed", agreement: { status: "completed", runforgeCompletedPhases: ["taskAnalysis", "localValidation"], delegatedPhases: [], awaitingPhases: [] }, controlPlane: { status: "completed", agreement: { currentPhase: null, responsibleParty: null, nextParty: null } } });
+    manager.close();
+  });
+
   it("uses the normalized TaskSpec timeout up to the production ceiling and honors a smaller manager ceiling", async () => {
     const operations = { runTaskSpec: async (specPath: string) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) };
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-timeout-http-"))) - 1]!;
@@ -499,6 +539,18 @@ describe("local control-plane HTTP lifecycle", () => {
 });
 
 async function json(response: Response): Promise<Record<string, any>> { return response.json() as Promise<Record<string, any>>; }
+async function settlementScenario(taskId: string, input: { requestedOwnership: Record<string, "runforge" | "external_session" | "owner" | "external_system">; prerequisites?: Record<string, string[]>; result: Record<string, any> }): Promise<{ manager: ControlPlaneManager; agreement: { agreementId: string }; task: { status: string }; result: Record<string, any> }> {
+  const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-settlement-safety-"))) - 1]!;
+  const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), {
+    runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); await mkdir(spec.artifacts.root, { recursive: true }); await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify({ schemaVersion: 1, contract: "runforge-task-result", taskId: spec.taskId, ownerGate: { required: false, status: "not_required" }, ...input.result })); return {} as never; },
+    recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never),
+  });
+  await manager.initialize();
+  const agreement = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", requestedOwnership: input.requestedOwnership, authority: Object.fromEntries(Object.entries(input.requestedOwnership).filter(([, party]) => party === "runforge").map(([phase]) => [phase, true])), prerequisites: input.prerequisites } as never);
+  await manager.createTask({ taskSpec: { ...taskSpec(taskId), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: input.requestedOwnership } }, agreementId: agreement.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" });
+  await eventually(async () => ["completed", "failed", "awaiting_owner_decision"].includes((await manager.getTask(taskId)).status));
+  return { manager, agreement, task: await manager.getTask(taskId), result: await manager.getResult(taskId) };
+}
 async function expectValidPublicResult(result: Record<string, unknown>): Promise<void> { validateTaskResultContract(result); const schema = JSON.parse(await readFile("schemas/task-result-v1.schema.json", "utf8")); const validate = new Ajv2020({ strict: true }).compile(schema); expect(validate(result), JSON.stringify(validate.errors)).toBe(true); }
 async function eventually(check: () => Promise<boolean>): Promise<void> { for (let attempt = 0; attempt < 1_500; attempt += 1) { if (await check()) return; await new Promise((done) => setTimeout(done, 10)); } throw new Error("timed out"); }
 async function submit(base: string, taskId: string, repository = process.cwd()): Promise<void> { const response = await fetch(`${base}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: taskSpec(taskId, repository), authority: { implementation: true } }) }); if (response.status !== 202) throw new Error(`Task submission failed (${response.status}): ${JSON.stringify(await json(response))}`); }

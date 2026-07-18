@@ -400,12 +400,11 @@ export function projectAgreementLifecycle(task: Pick<ControlTaskRecord, "executi
   const directSummary = object(result?.agreement); const workflowSummary = object(workflow.agreement); const hasResultSummary = Object.keys(directSummary).length > 0 || Object.keys(workflowSummary).length > 0;
   const summary = Object.keys(directSummary).length ? directSummary : workflowSummary;
   const next = object(Object.keys(object(result?.next)).length ? result?.next : workflow.next);
-  const completed = phaseIds(summary.runforgeCompletedPhases ?? task.progress.agreement?.runforgeCompletedPhases);
-  const delegated = delegatedPhases(summary.delegatedPhases ?? task.progress.agreement?.delegatedPhases, agreement);
-  const awaiting = awaitingPhases(summary.awaitingPhases ?? task.progress.agreement?.awaitingPhases, agreement, completed);
-  const resultAgreementCompleted = summary.status === "completed" || ["completed", "workflow_completed"].includes(String(result?.status));
-  const current = hasResultSummary ? awaiting[0] ?? (resultAgreementCompleted ? undefined : agreement.phases.find((phase) => phase.requested && !completed.includes(phase.phaseId))) : agreement.phases.find((phase) => phase.requested && !completed.includes(phase.phaseId));
-  const nextParty = executionParty(next.party) ?? (current?.responsibleParty === "nobody" ? null : current?.responsibleParty ?? null);
+  const completed = acceptedRunforgeCompletions(agreement, summary.runforgeCompletedPhases ?? (hasResultSummary ? undefined : task.progress.agreement?.runforgeCompletedPhases));
+  const delegated = acceptedDelegatedPhases(agreement);
+  const awaiting = acceptedAwaitingPhases(agreement, summary.awaitingPhases ?? (hasResultSummary ? undefined : task.progress.agreement?.awaitingPhases));
+  const current = firstOutstandingPhase(agreement, completed);
+  const nextParty = current?.responsibleParty === "nobody" ? null : current?.responsibleParty ?? null;
   const legacyNext = object(result?.nextAction);
   const currentReason = current ? agreement.phases.find((phase) => phase.phaseId === current.phaseId)?.reason ?? null : null;
   return {
@@ -422,34 +421,38 @@ function settleAcceptedAgreement(result: Record<string, unknown>, agreement: Exe
   const workflow = object(settled.workflow);
   const direct = object(settled.agreement); const nested = object(workflow.agreement);
   const source = Object.keys(direct).length ? direct : nested;
-  if (!Object.keys(source).length) return settled;
-  const completed = new Set(phaseIds(source.runforgeCompletedPhases));
-  const sourceAwaiting = Array.isArray(source.awaitingPhases)
-    ? new Map(source.awaitingPhases.flatMap((item) => { const phase = object(item); return typeof phase.phaseId === "string" ? [[phase.phaseId, phase] as const] : []; }))
-    : null;
+  const hasDirect = Object.keys(direct).length > 0; const hasNested = Object.keys(nested).length > 0;
+  if (!hasDirect && !hasNested && !Object.keys(workflow).length) return settled;
+  const completed = acceptedRunforgeCompletions(agreement, source.runforgeCompletedPhases);
   const requested = agreement.phases.filter((phase) => phase.requested);
-  const awaiting = agreement.handoffs
-    .filter((phase) => !sourceAwaiting || sourceAwaiting.has(phase.phaseId))
-    .map(({ phaseId, responsibleParty, prerequisites }) => ({ phaseId, responsibleParty, prerequisites: mergePrerequisites(prerequisites, sourceAwaiting?.get(phaseId)?.prerequisites) }));
+  const awaiting = acceptedAwaitingPhases(agreement, source.awaitingPhases);
+  const current = firstOutstandingPhase(agreement, completed);
+  const terminalStatus = lifecycleStatus(current);
   const summary = {
     ...source,
     agreementId: agreement.agreementId,
     profile: agreement.profile,
     requestedProfile: agreement.profile,
     effectiveProfile: agreement.profile,
+    status: current ? "in_progress" : "completed",
     phaseOwnership: requested.map(({ phaseId, responsibleParty }) => ({ phaseId, responsibleParty })),
-    runforgeCompletedPhases: requested.filter((phase) => phase.responsibleParty === "runforge" && completed.has(phase.phaseId)).map((phase) => phase.phaseId),
-    delegatedPhases: agreement.handoffs.map(({ phaseId, responsibleParty }) => ({ phaseId, responsibleParty })),
+    runforgeCompletedPhases: completed,
+    delegatedPhases: acceptedDelegatedPhases(agreement),
     awaitingPhases: awaiting,
   };
-  if (Object.keys(direct).length) settled.agreement = summary;
+  if (hasDirect) settled.agreement = summary;
   else settled.workflow = { ...workflow, agreement: summary };
-  const current = awaiting[0];
   if (current) {
-    const gates = current.prerequisites.map((name) => ({ name, status: "pending", evidence: [] }));
-    if (Object.keys(direct).length && Object.keys(object(settled.next)).length) settled.next = { ...object(settled.next), gates };
-    if (!Object.keys(direct).length && Object.keys(object(workflow.next)).length) settled.workflow = { ...object(settled.workflow), next: { ...object(workflow.next), gates } };
+    const next = hasDirect ? object(settled.next) : object(workflow.next);
+    const projected = awaiting.find((phase) => phase.phaseId === current.phaseId);
+    const prerequisites = projected?.prerequisites ?? current.prerequisites;
+    const gates = mergeResultGates(prerequisites, next.gates);
+    const correctedNext = { ...next, party: current.responsibleParty, gates };
+    if (hasDirect) settled.next = correctedNext;
+    else settled.workflow = { ...object(settled.workflow), next: correctedNext };
   }
+  if (hasDirect) settled.status = terminalStatus;
+  if (Object.keys(workflow).length) settled.workflow = { ...object(settled.workflow), status: terminalStatus };
   return settled;
 }
 
@@ -492,10 +495,13 @@ function redactPublicText(value: string): string {
 }
 
 function phaseIds(value: unknown): AgreementLifecycleProjection["runforgeCompletedPhases"] { return Array.isArray(value) ? value.filter((item): item is AgreementLifecycleProjection["runforgeCompletedPhases"][number] => typeof item === "string") : []; }
-function delegatedPhases(value: unknown, agreement: ExecutionAgreement): AgreementLifecycleProjection["delegatedPhases"] { if (!Array.isArray(value)) return agreement.handoffs.map(({ phaseId, responsibleParty }) => ({ phaseId, responsibleParty })); return value.flatMap((item) => { const phase = object(item); const party = executionParty(phase.responsibleParty); return typeof phase.phaseId === "string" && party && party !== "runforge" ? [{ phaseId: phase.phaseId, responsibleParty: party }] as AgreementLifecycleProjection["delegatedPhases"] : []; }); }
-function awaitingPhases(value: unknown, agreement: ExecutionAgreement, completed: AgreementLifecycleProjection["runforgeCompletedPhases"]): AgreementLifecycleProjection["awaitingPhases"] { if (!Array.isArray(value)) return agreement.handoffs.filter((phase) => !completed.includes(phase.phaseId)).map(({ phaseId, responsibleParty, prerequisites }) => ({ phaseId, responsibleParty, prerequisites: [...prerequisites] })); return value.flatMap((item) => { const phase = object(item); const party = executionParty(phase.responsibleParty); if (typeof phase.phaseId !== "string" || !party || party === "runforge") return []; const accepted = agreement.phases.find((item) => item.phaseId === phase.phaseId); return [{ phaseId: phase.phaseId, responsibleParty: party, prerequisites: mergePrerequisites(accepted?.prerequisites ?? [], phase.prerequisites) }] as AgreementLifecycleProjection["awaitingPhases"]; }); }
+function acceptedRunforgeCompletions(agreement: ExecutionAgreement, claimed: unknown): AgreementLifecycleProjection["runforgeCompletedPhases"] { const claims = new Set(phaseIds(claimed)); return agreement.phases.filter((phase) => phase.requested && phase.responsibleParty === "runforge" && (phase.status === "completed" || claims.has(phase.phaseId))).map((phase) => phase.phaseId); }
+function acceptedDelegatedPhases(agreement: ExecutionAgreement): AgreementLifecycleProjection["delegatedPhases"] { return agreement.phases.flatMap((phase) => phase.requested && phase.responsibleParty !== "runforge" && phase.responsibleParty !== "nobody" ? [{ phaseId: phase.phaseId, responsibleParty: phase.responsibleParty }] : []); }
+function acceptedAwaitingPhases(agreement: ExecutionAgreement, projected: unknown): AgreementLifecycleProjection["awaitingPhases"] { const evidence = new Map(Array.isArray(projected) ? projected.flatMap((item) => { const phase = object(item); return typeof phase.phaseId === "string" ? [[phase.phaseId, phase] as const] : []; }) : []); return agreement.handoffs.map(({ phaseId, responsibleParty, prerequisites }) => ({ phaseId, responsibleParty, prerequisites: mergePrerequisites(prerequisites, evidence.get(phaseId)?.prerequisites) })); }
+function firstOutstandingPhase(agreement: ExecutionAgreement, completed: AgreementLifecycleProjection["runforgeCompletedPhases"]): ExecutionAgreement["phases"][number] | undefined { return agreement.phases.find((phase) => phase.requested && phase.status !== "completed" && (phase.responsibleParty !== "runforge" || !completed.includes(phase.phaseId))); }
+function lifecycleStatus(current: ExecutionAgreement["phases"][number] | undefined): "workflow_completed" | "awaiting_external_session" | "awaiting_owner" | "runforge_scope_completed" | "failed" { if (!current) return "workflow_completed"; if (current.responsibleParty === "external_session") return "awaiting_external_session"; if (current.responsibleParty === "owner") return "awaiting_owner"; return current.responsibleParty === "external_system" ? "runforge_scope_completed" : "failed"; }
+function mergeResultGates(prerequisites: readonly string[], projected: unknown): Array<Record<string, unknown>> { const source = new Map(Array.isArray(projected) ? projected.flatMap((item) => { const gate = object(item); return typeof gate.name === "string" ? [[gate.name, gate] as const] : []; }) : []); return prerequisites.map((name) => ({ name, status: source.get(name)?.status ?? "pending", evidence: Array.isArray(source.get(name)?.evidence) ? source.get(name)!.evidence : [] })); }
 function mergePrerequisites(accepted: readonly string[], projected: unknown): string[] { return [...new Set([...accepted, ...(Array.isArray(projected) ? projected.map(String) : [])])]; }
-function executionParty(value: unknown): AgreementLifecycleProjection["nextParty"] { return ["runforge", "external_session", "owner", "external_system"].includes(String(value)) ? value as AgreementLifecycleProjection["nextParty"] : null; }
 function textValue(value: unknown): string | null { return typeof value === "string" && value.trim() ? value : null; }
 function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} is required.`); return value.trim(); }
