@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultAuthority, parseDecisionRequest, parseTaskRequest, type ControlTaskRecord } from "../../src/control-plane/contracts.js";
 import { assertAgreementMatchesTask, negotiateControlPlaneAgreement, negotiateTaskAgreement, parseExecutionAgreementNegotiationRequest, technicalCapabilitiesForExecutor } from "../../src/control-plane/execution-agreements.js";
-import { boundPublicResult } from "../../src/control-plane/manager.js";
+import { boundPublicResult, redactPublicValue } from "../../src/control-plane/manager.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 import type { TaskSpecV2 } from "../../src/product/task-spec-v2.js";
 
@@ -32,6 +32,24 @@ describe("control-plane contracts", () => {
     expect(conflicted).toMatchObject({ status: "conflicted", conflicts: [{ phaseId: "deploy", kind: "unavailable" }] });
     const delegated = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "custom", requestedOwnership: { deploy: "external_system" } }));
     expect(delegated).toMatchObject({ status: "ready", conflicts: [], handoffs: [{ phaseId: "deploy", responsibleParty: "external_system" }] });
+  });
+
+  it("rejects credential-shaped negotiation material without echoing it", () => {
+    const githubToken = ["gh", "p_", "a".repeat(24)].join("");
+    const gitlabToken = ["gl", "pat-", "b".repeat(24)].join("");
+    const bearerToken = ["Bear", "er ", "c".repeat(24)].join("");
+    for (const input of [
+      { schemaVersion: 1, profile: "assist-only", ["api" + "Token"]: githubToken },
+      { schemaVersion: 1, profile: "custom", prerequisites: { taskAnalysis: [gitlabToken] } },
+      { schemaVersion: 1, profile: "custom", completionEvidence: { taskAnalysis: [bearerToken] } },
+    ]) {
+      let thrown: unknown;
+      try { parseExecutionAgreementNegotiationRequest(input); } catch (error) { thrown = error; }
+      expect(thrown).toMatchObject({ code: "credential_material_forbidden" });
+      expect(String((thrown as Error).message)).not.toContain(githubToken);
+      expect(String((thrown as Error).message)).not.toContain(gitlabToken);
+      expect(String((thrown as Error).message)).not.toContain(bearerToken);
+    }
   });
 
   it("treats standalone authority as an explicit per-phase allowlist", () => {
@@ -140,6 +158,18 @@ describe("control-plane contracts", () => {
     expect(bounded.result).toMatchObject({ status: "awaiting_external_session", providerCalls: [{ stdoutArtifact: "provider/iteration-0.stdout.log" }] });
     expect(JSON.stringify(bounded.result).length).toBeLessThan(20_000);
     expect(bounded.truncatedFields).toEqual(["providerCalls.0.stdout"]);
+  });
+
+  it("redacts token families and internal paths from public values", () => {
+    const githubToken = ["gh", "o_", "d".repeat(24)].join("");
+    const gitlabToken = ["gl", "pat-", "e".repeat(24)].join("");
+    const bearerToken = ["Bear", "er ", "f".repeat(24)].join("");
+    const internalPath = ["/pri", "vate/tmp/runforge/private.log"].join("");
+    const redacted = redactPublicValue({ message: `${githubToken} ${gitlabToken} ${bearerToken} ${internalPath}` });
+    const publicText = JSON.stringify(redacted);
+    for (const sensitive of [githubToken, gitlabToken, bearerToken, internalPath]) expect(publicText).not.toContain(sensitive);
+    expect(publicText).toContain("[REDACTED_TOKEN]");
+    expect(publicText).toContain("[internal path]");
   });
 
   it("recovers in-flight state as interrupted without inferring success", async () => {

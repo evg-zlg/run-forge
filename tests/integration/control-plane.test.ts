@@ -27,6 +27,13 @@ describe("local control-plane HTTP lifecycle", () => {
       const unknown = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "assist-only", projectId: "missing-project", publicationTarget: { kind: "none" } }) });
       expect(unknown.status).toBe(404); expect(await json(unknown)).toMatchObject({ error: { code: "project_not_found" } });
 
+      const credential = ["gh", "p_", "z".repeat(24)].join("");
+      const credentialResponse = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "assist-only", ["access" + "Token"]: credential }) });
+      expect(credentialResponse.status).toBe(400);
+      const credentialError = await json(credentialResponse);
+      expect(credentialError).toMatchObject({ error: { code: "credential_material_forbidden" } });
+      expect(JSON.stringify(credentialError)).not.toContain(credential);
+
       const inspected = await json(await fetch(`${instance.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: process.cwd(), workingDirectory: ".", register: true }) }));
       const projectId = inspected.project.id as string;
       const response = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "custom", projectId, publicationTarget: { kind: "externally_managed_existing_change", provider: "github", changeId: "17", responsibleParty: "external_session" } }) });
@@ -93,7 +100,7 @@ describe("local control-plane HTTP lifecycle", () => {
     let ownerWrites = 0;
     const store = new ControlPlaneStore(stateRoot);
     const manager = new ControlPlaneManager(store, {
-      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", diagnostic: "token=supersecret123", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
+      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const token = ["gl", "pat-", "r".repeat(24)].join(""); const internalPath = ["/pri", "vate/tmp/runforge/result.log"].join(""); await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", diagnostic: `${token} ${internalPath}`, ownerGate: { required: false, status: "not_required" } })); return {} as never; },
       recordOwnerDecision: async ({ run }) => { ownerWrites += 1; const path = join(run, "owner-decision.json"); await mkdir(run, { recursive: true }); await writeFile(path, "{}\n"); return { decisionId: "rail-decision-1", path }; },
       continueExecution: async ({ run }) => { await writeFile(join(run, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: "CONTROL-HTTP-1", status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }
     });
@@ -102,9 +109,10 @@ describe("local control-plane HTTP lifecycle", () => {
     const taskSpec = { schemaVersion: 2, taskId: "CONTROL-HTTP-1", task: { text: "Inspect RunForge", goal: "Exercise lifecycle", acceptanceCriteria: ["Durable result"] }, target: { repository: process.cwd(), workingDirectory: "." }, execution: { mode: "validation" }, authority: { profile: "read-only", allowProviderCalls: false }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } };
     const created = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec, authority: { implementation: true }, publication: "draft-pr" }) }); expect(created.status).toBe(202);
     await eventually(async () => (await json(await fetch(`${instance.url}/v1/tasks/CONTROL-HTTP-1`))).status === "completed");
-    const result = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-HTTP-1/result`)); expect(result.diagnostic).toBe("token=[REDACTED]");
+    const result = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-HTTP-1/result`)); expect(result.diagnostic).toBe("[REDACTED_TOKEN] [internal path]");
     const invalidSpec = { ...taskSpec, taskId: "CONTROL-BAD-PATH", target: { repository: "/definitely/missing", workingDirectory: "." } };
-    expect((await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: invalidSpec }) })).status).toBe(422);
+    const invalidResponse = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: invalidSpec }) });
+    expect(invalidResponse.status).toBe(422); expect(JSON.stringify(await json(invalidResponse))).not.toContain("/definitely/missing");
     const task = await manager.getTask("CONTROL-HTTP-1"); task.status = "awaiting_owner_decision"; task.ownerGate = { required: true, status: "awaiting_owner_decision" }; task.authority.implementation = true; await writeFile(join(task.artifactRoot, "continuation-state.json"), JSON.stringify({ repo: process.cwd(), sourceBranch: "main", patchPackageHash: "a", patchDiffHash: "b" })); await store.saveTask(task);
     const body = JSON.stringify({ decisionId: "owner-idempotency-1", decision: "approve", note: "Explicit local-only approval" });
     const first = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-HTTP-1/owner-decisions`, { method: "POST", headers: { "content-type": "application/json" }, body }));
@@ -169,7 +177,7 @@ describe("local control-plane HTTP lifecycle", () => {
     ]));
   });
 
-  it("rejects project-bound agreement reuse across projects or source HEADs while accepting projectless agreements", async () => {
+  it("requires canonical fresh project/source bindings while preserving safe projectless legacy use", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-agreement-binding-"))) - 1]!;
     const firstRepo = await syntheticRepository(); const secondRepo = await syntheticRepository();
     const operations = { runTaskSpec: async (specPath: string) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) };
@@ -182,13 +190,29 @@ describe("local control-plane HTTP lifecycle", () => {
     await expect(manager.createTask({ taskSpec: referencedSpec("CONTROL-BOUND-UNREGISTERED-1", firstRepo), agreementId: bound.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_project_mismatch" });
     await expect(manager.createTask({ projectId: String(secondProject.id), taskSpec: referencedSpec("CONTROL-BOUND-OTHER-1", secondRepo), agreementId: bound.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_project_mismatch" });
 
+    execFileSync("git", ["checkout", "-q", "-b", "same-head-branch"], { cwd: firstRepo });
+    await expect(manager.createTask({ projectId: String(firstProject.id), taskSpec: referencedSpec("CONTROL-BOUND-BRANCH-1", firstRepo), agreementId: bound.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_source_stale" });
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: firstRepo });
+
     await writeFile(join(firstRepo, "changed.txt"), "changed\n"); execFileSync("git", ["add", "changed.txt"], { cwd: firstRepo }); execFileSync("git", ["commit", "-q", "-m", "changed"], { cwd: firstRepo });
     await expect(manager.createTask({ projectId: String(firstProject.id), taskSpec: referencedSpec("CONTROL-BOUND-STALE-1", firstRepo), agreementId: bound.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_source_stale" });
 
+    const current = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", projectId: String(firstProject.id), requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" }, authority: { taskAnalysis: true } });
+    execFileSync("git", ["checkout", "-q", "--detach"], { cwd: firstRepo });
+    await expect(manager.createTask({ projectId: String(firstProject.id), taskSpec: referencedSpec("CONTROL-BOUND-DETACHED-1", firstRepo), agreementId: current.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_source_stale" });
+    execFileSync("git", ["checkout", "-q", "main"], { cwd: firstRepo });
+    current.context!.project!.workingDirectory = "noncanonical"; await store.saveAgreement(current);
+    await expect(manager.createTask({ projectId: String(firstProject.id), taskSpec: referencedSpec("CONTROL-BOUND-CANONICAL-1", firstRepo), agreementId: current.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_project_mismatch" });
+
     const projectless = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" }, authority: { taskAnalysis: true } });
     const legacy = structuredClone(projectless); delete legacy.context; await store.saveAgreement(legacy);
+    await expect(manager.createTask({ projectId: String(firstProject.id), taskSpec: referencedSpec("CONTROL-REGISTERED-LEGACY-1", firstRepo), agreementId: legacy.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_project_context_required" });
     const created = await manager.createTask({ taskSpec: referencedSpec("CONTROL-PROJECTLESS-LEGACY-1", firstRepo), agreementId: legacy.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" });
-    expect(created.executionAgreement).toEqual(legacy); manager.close();
+    expect(created.executionAgreement).toEqual(legacy);
+
+    const automatic = await manager.createTask({ projectId: String(firstProject.id), taskSpec: taskSpec("CONTROL-AUTO-BOUND-1", firstRepo), authority: implementationAuthority() as never, publicationRequested: "none" });
+    expect(automatic.executionAgreement).toMatchObject({ context: { project: { projectId: firstProject.id, repository: firstProject.repository, workingDirectory: firstProject.workingDirectory, source: { head: expect.any(String), branch: "main", detachedHead: false } } } });
+    manager.close();
   });
 
   it("settles from the accepted agreement without losing prerequisites or project context", async () => {

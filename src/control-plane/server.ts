@@ -7,7 +7,7 @@ import { getRunForgeVersionInfo } from "../core/version.js";
 import { publicTaskSpecContract, taskRuntimeIds, taskSpecSchemaPath, taskSpecV2Schema } from "../product/task-spec-contract.js";
 import { commandVersion } from "../product/project-inspection.js";
 import { ControlPlaneError, controlPlaneApiVersion, defaultControlPlaneHost, defaultControlPlanePort, defaultMaxRequestBytes, parseDecisionRequest, parseProjectRequest, parseTaskRequest } from "./contracts.js";
-import { ControlPlaneManager } from "./manager.js";
+import { ControlPlaneManager, redactPublicValue } from "./manager.js";
 import { ControlPlaneStore } from "./state.js";
 import { discoverImplementationExecutors } from "../implementation/executor.js";
 import {
@@ -60,7 +60,7 @@ export async function handleControlPlaneRequest(request: IncomingMessage, respon
   if (!match) throw new ControlPlaneError(404, "not_found", "Endpoint not found.");
   const [, taskId, operation] = match;
   if (method === "GET" && !operation) return sendJson(response, 200, publicTask(await context.manager.getTask(taskId!)));
-  if (method === "GET" && operation === "result") return sendJson(response, 200, await context.manager.getResult(taskId!));
+  if (method === "GET" && operation === "result") return sendJson(response, 200, redactPublicValue(await context.manager.getResult(taskId!)));
   if (method === "GET" && operation === "agreement") return sendJson(response, 200, await context.manager.getTaskAgreement(taskId!));
   if (method === "POST" && operation === "owner-decisions") return sendJson(response, 200, await context.manager.ownerDecision(taskId!, parseDecisionRequest(await readJson(request, context.maxRequestBytes), "owner")));
   if (method === "POST" && operation === "continue") { await assertEmptyOrObject(request, context.maxRequestBytes); return sendJson(response, 202, publicTask(await context.manager.continueTask(taskId!))); }
@@ -146,4 +146,4 @@ function enforceLocalRequest(request: IncomingMessage, host: string): void { con
 function isLocalHostHeader(value: string): boolean { try { return isLoopbackHost(new URL(`http://${value}`).hostname); } catch { return false; } }
 function corsHeaders(host: string): Record<string, string> { return { "access-control-allow-origin": `http://${host}`, "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "600" }; }
 function sendJson(response: ServerResponse, status: number, value: unknown): void { const body = JSON.stringify(redactJson(value), null, 2) + "\n"; response.writeHead(status, { "content-type": "application/json; charset=utf-8", "cache-control": "no-store", "x-content-type-options": "nosniff", "x-runforge-local-only": "true" }); response.end(body); }
-function sendError(response: ServerResponse, error: unknown): void { const known = error instanceof ControlPlaneError ? error : new ControlPlaneError(500, "internal_invariant_violation", "The control plane encountered an internal invariant violation."); sendJson(response, known.status, { schemaVersion: 1, error: { code: known.code, message: known.message, retryable: known.retryable, ...(known.taskId ? { taskId: known.taskId } : {}), details: known.details ?? {} } }); }
+function sendError(response: ServerResponse, error: unknown): void { const known = error instanceof ControlPlaneError ? error : new ControlPlaneError(500, "internal_invariant_violation", "The control plane encountered an internal invariant violation."); sendJson(response, known.status, redactPublicValue({ schemaVersion: 1, error: { code: known.code, message: known.message, retryable: known.retryable, ...(known.taskId ? { taskId: known.taskId } : {}), details: known.details ?? {} } })); }

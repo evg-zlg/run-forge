@@ -37,6 +37,7 @@ export const controlPlaneAgreementPolicy = phaseFlags([
 ]);
 
 export function parseExecutionAgreementNegotiationRequest(value: unknown): ExecutionAgreementNegotiationRequest {
+  assertCredentialFreeNegotiationInput(value);
   const input = object(value, "execution agreement negotiation request");
   rejectUnknown(input, ["schemaVersion", "profile", "projectId", "publicationTarget", "requested", "requestedOwnership", "technicalCapability", "authority", "policy", "prerequisites", "completionEvidence"], "execution agreement negotiation request");
   if (input.schemaVersion !== 1) throw new ControlPlaneError(400, "invalid_request", "schemaVersion must be 1.");
@@ -77,7 +78,7 @@ export function negotiateControlPlaneAgreement(
   });
 }
 
-export function negotiateTaskAgreement(spec: TaskSpecV2, authority: ControlAuthority): ExecutionAgreement {
+export function negotiateTaskAgreement(spec: TaskSpecV2, authority: ControlAuthority, context?: ExecutionAgreementContext): ExecutionAgreement {
   const requested = requestedPhasesForMode(spec);
   return negotiateExecutionAgreement({
     profile: spec.executionAgreement.profile,
@@ -86,6 +87,7 @@ export function negotiateTaskAgreement(spec: TaskSpecV2, authority: ControlAutho
     technicalCapability: controlPlaneTechnicalCapabilities,
     authority: taskPhaseAuthority(authority),
     policy: controlPlaneAgreementPolicy,
+    context,
   });
 }
 
@@ -281,6 +283,31 @@ function phaseMap(value: unknown, name: string): Record<string, unknown> {
   if (unknown.length) throw new ControlPlaneError(400, "unknown_fields", `${name} contains unknown phase(s): ${unknown.join(", ")}.`);
   return input;
 }
+function assertCredentialFreeNegotiationInput(value: unknown): void {
+  const pending: unknown[] = [value]; const seen = new WeakSet<object>();
+  while (pending.length) {
+    const current = pending.pop();
+    if (typeof current === "string" && credentialLikeText(current)) credentialInputError();
+    if (!current || typeof current !== "object") continue;
+    if (seen.has(current)) continue;
+    seen.add(current);
+    if (Array.isArray(current)) { pending.push(...current); continue; }
+    for (const [key, item] of Object.entries(current as Record<string, unknown>)) {
+      if (credentialLikeKey(key) || credentialLikeText(key)) credentialInputError();
+      pending.push(item);
+    }
+  }
+}
+function credentialLikeKey(value: string): boolean { return /(?:authorization|credential|password|private[_-]?key|secret|token|api[_-]?key)/i.test(value); }
+function credentialLikeText(value: string): boolean {
+  return /\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/i.test(value)
+    || /\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,}\b/.test(value)
+    || /\bgithub_pat_[A-Za-z0-9_]{20,}\b/.test(value)
+    || /\bglpat-[A-Za-z0-9_-]{20,}\b/.test(value)
+    || /\bsk-[A-Za-z0-9_-]{20,}\b/.test(value)
+    || /\b(?:api[_-]?key|access[_-]?token|token|secret|password)\s*[:=]\s*["']?[^\s"',;]{8,}/i.test(value);
+}
+function credentialInputError(): never { throw new ControlPlaneError(400, "credential_material_forbidden", "Execution Agreement negotiation requests must not contain credentials or tokens."); }
 function object(value: unknown, name: string): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new ControlPlaneError(400, "invalid_request", `${name} must be an object.`); return value as Record<string, unknown>; }
 function nonEmptyString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} must be a non-empty string.`); return value.trim(); }
 function rejectUnknown(value: Record<string, unknown>, allowed: string[], name: string): void { const unknown = Object.keys(value).filter((key) => !allowed.includes(key)); if (unknown.length) throw new ControlPlaneError(400, "unknown_fields", `${name} contains unknown field(s): ${unknown.join(", ")}.`); }

@@ -112,9 +112,10 @@ export class ControlPlaneManager {
     raw.git = { publication: "none" }; raw.merge = { policy: "never" }; raw.deploy = { policy: "never" }; const artifactRoot = join(this.store.taskDir(taskId), "attempts", "1", "artifacts"); raw.artifacts = { ...object(raw.artifacts), root: artifactRoot, resultFormat: "normalized-v1" };
     const specPath = await this.store.writeSpec(taskId, raw); let normalized: Awaited<ReturnType<typeof loadTaskSpecV2>>; try { normalized = await loadTaskSpecV2(specPath); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error), { operation: "start_new_task", newTaskRequired: true }); }
     const implementation = ["implementation", "repair"].includes(normalized.execution.mode);
-    const preflightAgreement = negotiateTaskAgreement(normalized, input.authority);
+    const automaticContext = project ? await this.executionAgreementContext(project, { kind: "none" }) : undefined;
+    const preflightAgreement = negotiateTaskAgreement(normalized, input.authority, automaticContext);
     const executionAgreement = input.agreementId ? await this.getAgreement(input.agreementId) : preflightAgreement;
-    if (input.agreementId) await this.assertAgreementProjectBinding(executionAgreement, project, taskId);
+    await this.assertAgreementProjectBinding(executionAgreement, project, taskId);
     const delegatedImplementation = implementationParty(executionAgreement);
     if (!delegatedImplementation && implementation && !input.authority.implementation) throw preflightError("implementation_authority_denied", "Implementation mode requires control-plane implementation authority.", normalized, input.authority);
     if (!delegatedImplementation && normalized.authority.allowProviderCalls && input.authority.providerCalls !== true) throw preflightError("provider_authority_denied", "TaskSpec allows provider calls but control-plane providerCalls authority is false.", normalized, input.authority);
@@ -282,13 +283,23 @@ export class ControlPlaneManager {
 
   private async assertAgreementProjectBinding(agreement: ExecutionAgreement, project: ProjectRecord | null, taskId: string): Promise<void> {
     const bound = agreement.context?.project;
-    if (!bound) return;
-    if (!project || project.id !== bound.projectId || project.repository !== bound.repository || project.workingDirectory !== bound.workingDirectory) {
-      throw new ControlPlaneError(409, "execution_agreement_project_mismatch", "The referenced Execution Agreement is bound to a different registered project.", { agreementId: agreement.agreementId, agreementProjectId: bound.projectId, taskProjectId: project?.id ?? null, operation: "start_new_task", newTaskRequired: true }, false, taskId);
+    if (!bound) {
+      if (!project) return;
+      throw new ControlPlaneError(409, "execution_agreement_project_context_required", "A context-free Execution Agreement cannot authorize a registered-project task.", { agreementId: agreement.agreementId, projectId: project.id, operation: "renegotiate_execution_agreement", newTaskRequired: true }, false, taskId);
     }
-    const current = await inspectProject(project.repository, project.workingDirectory);
-    if (current.head !== bound.source.head) {
-      throw new ControlPlaneError(409, "execution_agreement_source_stale", "The referenced Execution Agreement was negotiated for a different project source HEAD.", { agreementId: agreement.agreementId, projectId: project.id, acceptedHead: bound.source.head, currentHead: current.head, operation: "renegotiate_execution_agreement", newTaskRequired: true }, false, taskId);
+    if (!project) {
+      throw new ControlPlaneError(409, "execution_agreement_project_mismatch", "The referenced Execution Agreement is bound to a different registered project.", { agreementId: agreement.agreementId, agreementProjectId: bound.projectId, taskProjectId: null, operation: "start_new_task", newTaskRequired: true }, false, taskId);
+    }
+    const current = await inspectProject(project.repository, project.workingDirectory).catch(() => null);
+    const canonicalProjectMatches = current !== null && current.repositoryRoot !== null && current.workingDirectory !== null
+      && project.id === bound.projectId
+      && project.repository === current.repositoryRoot && project.workingDirectory === current.workingDirectory
+      && bound.repository === current.repositoryRoot && bound.workingDirectory === current.workingDirectory;
+    if (!canonicalProjectMatches) {
+      throw new ControlPlaneError(409, "execution_agreement_project_mismatch", "The referenced Execution Agreement is not bound to the canonical registered project identity.", { agreementId: agreement.agreementId, agreementProjectId: bound.projectId, taskProjectId: project.id, operation: "renegotiate_execution_agreement", newTaskRequired: true }, false, taskId);
+    }
+    if (!bound.source || current!.head !== bound.source.head || current!.branch !== bound.source.branch || current!.detachedHead !== bound.source.detachedHead) {
+      throw new ControlPlaneError(409, "execution_agreement_source_stale", "The referenced Execution Agreement was negotiated for a different project source identity.", { agreementId: agreement.agreementId, projectId: project.id, operation: "renegotiate_execution_agreement", newTaskRequired: true }, false, taskId);
     }
   }
 
@@ -299,13 +310,14 @@ export class ControlPlaneManager {
       publicationTarget,
     };
     const inspection = await inspectProject(project.repository, project.workingDirectory);
+    if (!inspection.repositoryRoot || !inspection.workingDirectory) throw new ControlPlaneError(409, "registered_project_unavailable", "The registered project no longer resolves to a canonical repository and working directory.");
     const runforgeCandidates = [...new Set([join(project.repository, project.workingDirectory === "." ? "" : project.workingDirectory, "RUNFORGE.md"), join(project.repository, "RUNFORGE.md")])];
     const runforgePath = (await Promise.all(runforgeCandidates.map(async (candidate) => await access(candidate).then(() => candidate, () => null)))).find((candidate): candidate is string => candidate !== null) ?? null;
     const present = runforgePath !== null;
     const protectedBranches = [...new Set([inspection.defaultBranch, "main", "master", "develop", "source"].filter((item): item is string => Boolean(item)))].sort();
     return {
       project: {
-        projectId: project.id, repository: project.repository, workingDirectory: project.workingDirectory,
+        projectId: project.id, repository: inspection.repositoryRoot, workingDirectory: inspection.workingDirectory,
         source: { head: inspection.head, branch: inspection.branch, detachedHead: inspection.detachedHead },
         defaultBranch: inspection.defaultBranch, protectedBranches,
       },
@@ -398,15 +410,37 @@ export function boundPublicResult(result: Record<string, unknown>): { result: Re
   const visit = (value: unknown, path: string[]): unknown => {
     if (typeof value === "string") {
       const key = path.at(-1) ?? ""; const limit = key === "stdout" || key === "stderr" ? publicDiagnosticBytes : publicStringBytes;
-      if (Buffer.byteLength(value) <= limit) return value;
+      if (Buffer.byteLength(value) <= limit) return redactPublicText(value);
       truncatedFields.push(path.join("."));
-      return `${Buffer.from(value).subarray(0, limit).toString("utf8")}\n[TRUNCATED: full output remains in the referenced artifact]`;
+      return redactPublicText(`${Buffer.from(value).subarray(0, limit).toString("utf8")}\n[TRUNCATED: full output remains in the referenced artifact]`);
     }
     if (Array.isArray(value)) return value.map((item, index) => visit(item, [...path, String(index)]));
     if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, visit(item, [...path, key])]));
     return value;
   };
   return { result: visit(result, []) as Record<string, unknown>, truncatedFields };
+}
+
+export function redactPublicValue<T>(value: T): T {
+  const visit = (item: unknown): unknown => {
+    if (typeof item === "string") return redactPublicText(item);
+    if (Array.isArray(item)) return item.map(visit);
+    if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, visit(child)]));
+    return item;
+  };
+  return visit(value) as T;
+}
+
+function redactPublicText(value: string): string {
+  return value
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [REDACTED]")
+    .replace(/\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bglpat-[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\bsk-[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_TOKEN]")
+    .replace(/\b((?:api[_-]?key|access[_-]?token|token|secret|password)\s*[:=]\s*["']?)[^\s"',;]{8,}/gi, "$1[REDACTED]")
+    .replace(/(?:\/[A-Za-z0-9_.@-]+){2,}/g, (path) => path.startsWith("/v1/") || path.startsWith("/schemas/") || path.startsWith("/.well-known/") ? path : "[internal path]")
+    .replace(/\b[A-Za-z]:\\(?:[^\\\s"'`,;:]+\\)*[^\\\s"'`,;:]+/g, "[internal path]");
 }
 
 function phaseIds(value: unknown): AgreementLifecycleProjection["runforgeCompletedPhases"] { return Array.isArray(value) ? value.filter((item): item is AgreementLifecycleProjection["runforgeCompletedPhases"][number] => typeof item === "string") : []; }
@@ -418,7 +452,7 @@ function textValue(value: unknown): string | null { return typeof value === "str
 function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} is required.`); return value.trim(); }
 function decisionRecord(decisionId: string, kind: "owner" | "publication", decision: string, response: Record<string, unknown>): DecisionRecord { return { decisionId, kind, decision, response, createdAt: new Date().toISOString() }; }
-function safeMessage(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return message.replace(/(?:\/[\w.@-]+){2,}/g, "[internal path]").slice(0, 500); }
+function safeMessage(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return redactPublicText(message).slice(0, 500); }
 function preflightError(code: string, message: string, spec: Awaited<ReturnType<typeof loadTaskSpecV2>>, authority: ControlAuthority): ControlPlaneError {
   return new ControlPlaneError(403, code, message, {
     requestedMode: spec.execution.mode,
