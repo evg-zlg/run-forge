@@ -184,6 +184,53 @@ describe("agreement-aware task result contract", () => {
     expect(validate({ ...legacy, status: "runforge_scope_completed" })).toBe(false);
   });
 
+  it("rejects unsafe or inconsistent results identically at runtime and through AJV", async () => {
+    const schema = JSON.parse(await readFile("schemas/task-result-v1.schema.json", "utf8"));
+    const validate = new Ajv2020({ strict: true }).compile(schema);
+    const reject = (result: unknown) => {
+      expect(() => validateTaskResultContract(result)).toThrow();
+      expect(validate(result), JSON.stringify(validate.errors)).toBe(false);
+    };
+
+    const agreementCases: Array<(result: Record<string, any>) => void> = [
+      (result) => { result.agreement.agreementId = "agreement-1"; },
+      (result) => { result.agreement.phaseOwnership.push({ ...result.agreement.phaseOwnership[0] }); },
+      (result) => { result.agreement.phaseOwnership[0].phaseId = "unknownPhase"; },
+      (result) => { result.agreement.delegatedPhases.push({ ...result.agreement.delegatedPhases[0] }); },
+      (result) => { result.agreement.awaitingPhases.push({ ...result.agreement.awaitingPhases[0], prerequisites: ["approved plan"] }); },
+      (result) => { result.agreement.delegatedPhases[0].phaseId = "unknownPhase"; },
+      (result) => { result.agreement.delegatedPhases[0].responsibleParty = "owner"; },
+      (result) => { result.agreement.awaitingPhases[0].responsibleParty = "owner"; },
+      (result) => { result.agreement.awaitingPhases[0].responsibleParty = "runforge"; },
+      (result) => { result.agreement.awaitingPhases[0].responsibleParty = "nobody"; },
+      (result) => { result.agreement.delegatedPhases = result.agreement.delegatedPhases.slice(1); },
+      (result) => { result.agreement.runforgeCompletedPhases.push("implementation"); },
+    ];
+    for (const mutate of agreementCases) {
+      const result = agreementAwareFixture() as unknown as Record<string, any>;
+      mutate(result);
+      reject(result);
+    }
+
+    const dangerousFields = ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess"];
+    for (const field of dangerousFields) {
+      const result = legacyFixture() as Record<string, any>;
+      result.safetyAssertions[field] = true;
+      reject(result);
+    }
+
+    for (const field of ["successNotInferred", "lateWorkerResultIgnored"]) {
+      const result = failedSyntheticFixture() as Record<string, any>;
+      result.safetyAssertions[field] = false;
+      reject(result);
+    }
+    for (const [field, unsafeValue] of [["staleLeaseRevoked", false], ["lateWorkerResultIgnored", false], ["providerCallsInferred", true]] as const) {
+      const result = interruptedSyntheticFixture() as Record<string, any>;
+      result.safetyAssertions[field] = unsafeValue;
+      reject(result);
+    }
+  });
+
   it.each([
     {
       schemaVersion: 1, taskId: "PUBLIC-FAILED-1", status: "failed", lastCompletedPhase: "validate", error: "worker failed",
@@ -238,4 +285,46 @@ function partiallyCompletedAgreement(): ExecutionAgreement {
     prerequisites: { implementation: ["approved plan"], merge: ["CI green"] },
   });
   return completeExecutionPhase(initial, "taskAnalysis", ["analysis.md"]);
+}
+
+function agreementAwareFixture() {
+  const action = { party: "external_session" as const, exactAction: "Implement the approved plan.", gates: [], evidence: [] };
+  return buildAgreementAwareTaskResult({
+    taskId: "AGREEMENT-SAFETY-1", status: "awaiting_external_session", agreement: partiallyCompletedAgreement(),
+    handoff: {
+      profile: "assist-only", summary: "Analysis complete.", changedFiles: [], patch: null, branch: null, commit: null,
+      nextActions: [action], safety: { providerCalls: false, notes: [] }, targetSha: null, baseSha: null,
+    },
+    next: action,
+  });
+}
+
+function legacyFixture() {
+  return {
+    schemaVersion: 1, contract: "runforge-task-result", taskId: "LEGACY-SAFETY-1", status: "completed",
+    targetRepository: { path: "/repo", initialSha: "abc", finalSha: "def", changed: true },
+    completedWork: [], validation: [], artifacts: { summary: "summary.md", results: "results.json" },
+    ownerGate: { required: false, status: "not_required" }, nextAction: { recommendation: "Review results" },
+    safetyAssertions: {
+      targetMainMutation: false, targetMainPush: false, targetPrMerge: false, deploy: false,
+      databaseAccess: false, productionAccess: false, secretAccess: false, providerCalls: false,
+    },
+    errors: [], limitations: [],
+  };
+}
+
+function failedSyntheticFixture() {
+  return {
+    schemaVersion: 1, taskId: "SYNTHETIC-FAILED-1", status: "failed", error: "worker failed",
+    execution: {}, artifacts: {}, recovery: {}, nextAction: "Inspect evidence and retry.",
+    safetyAssertions: { successNotInferred: true, lateWorkerResultIgnored: true },
+  };
+}
+
+function interruptedSyntheticFixture() {
+  return {
+    schemaVersion: 1, taskId: "SYNTHETIC-INTERRUPTED-1", status: "interrupted",
+    interruption: {}, targetMutation: {}, validations: {}, artifacts: {}, recovery: {},
+    safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true, providerCallsInferred: false },
+  };
 }

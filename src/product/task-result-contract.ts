@@ -3,7 +3,10 @@ import { join } from "node:path";
 import type { ExternalExecutionResult } from "../run/external-execution.js";
 import type { TaskRunResult } from "../run/task-run-harness.js";
 import type { ExecutorResult } from "../run/task-run-executor.js";
-import type { ExecutionAgreement, ExecutionAgreementStatus, ExecutionParty, ExecutionPhaseId, ExecutionProfile } from "./execution-agreement.js";
+import {
+  EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES,
+  type ExecutionAgreement, type ExecutionAgreementStatus, type ExecutionParty, type ExecutionPhaseId, type ExecutionProfile,
+} from "./execution-agreement.js";
 
 export const RUNFORGE_COMPLETION_STATUSES = [
   "runforge_scope_completed", "workflow_completed", "awaiting_external_session", "awaiting_owner",
@@ -14,6 +17,9 @@ const LEGACY_TASK_RESULT_STATUSES = [
   "completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required",
 ] as const;
 const SYNTHETIC_TERMINAL_STATUSES = ["failed", "interrupted"] as const;
+const EXECUTION_AGREEMENT_STATUSES = ["ready", "conflicted", "in_progress", "completed"] as const;
+const DELEGATED_PARTIES = ["external_session", "owner", "external_system"] as const;
+const AGREEMENT_ID_PATTERN = /^ea_v1_[a-f0-9]{24}$/;
 
 export type RunForgeCompletionStatus = (typeof RUNFORGE_COMPLETION_STATUSES)[number];
 export type HandoffProfile = Extract<ExecutionProfile, "assist-only" | "local-ready">;
@@ -99,7 +105,7 @@ export const buildNextAction = buildResultNextAction;
 export function buildAgreementResultSummary(agreement: ExecutionAgreement): AgreementResultSummary {
   const requested = agreement.phases.filter((phase) => phase.requested);
   return {
-    agreementId: requiredText(agreement.agreementId, "agreement.agreementId"),
+    agreementId: requiredAgreementId(agreement.agreementId, "agreement.agreementId"),
     profile: agreement.profile,
     requestedProfile: agreement.profile,
     effectiveProfile: agreement.profile,
@@ -294,25 +300,29 @@ export function validateTaskResultContract(value: unknown): void {
   const target = result.targetRepository as Record<string, unknown>;
   if (typeof target.changed !== "boolean") throw new Error("Task result targetRepository.changed must be boolean.");
   const safety = result.safetyAssertions as Record<string, unknown>;
-  for (const field of ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess", "providerCalls"]) if (typeof safety[field] !== "boolean") throw new Error(`Task result safetyAssertions.${field} must be boolean.`);
+  for (const field of ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess"]) {
+    if (safety[field] !== false) throw new Error(`Task result safetyAssertions.${field} must be false.`);
+  }
+  if (typeof safety.providerCalls !== "boolean") throw new Error("Task result safetyAssertions.providerCalls must be boolean.");
 }
 
 function validateSyntheticTerminalResult(result: Record<string, unknown>): void {
   if (typeof result.status !== "string" || !(SYNTHETIC_TERMINAL_STATUSES as readonly string[]).includes(result.status)) throw new Error("Task result status is invalid.");
   for (const field of ["artifacts", "recovery", "safetyAssertions"]) assertObject(result[field], `Task result ${field} must be an object.`);
   const safety = result.safetyAssertions as Record<string, unknown>;
-  if (typeof safety.lateWorkerResultIgnored !== "boolean") throw new Error("Task result safetyAssertions.lateWorkerResultIgnored must be boolean.");
+  if (safety.lateWorkerResultIgnored !== true) throw new Error("Task result safetyAssertions.lateWorkerResultIgnored must be true.");
   if (result.status === "failed") {
     assertObject(result.execution, "Task result execution must be an object.");
     if (typeof result.error !== "string" || !result.error.trim()) throw new Error("Task result error is required.");
     if (typeof result.nextAction !== "string" || !result.nextAction.trim()) throw new Error("Task result nextAction is required.");
-    if (typeof safety.successNotInferred !== "boolean") throw new Error("Task result safetyAssertions.successNotInferred must be boolean.");
+    if (safety.successNotInferred !== true) throw new Error("Task result safetyAssertions.successNotInferred must be true.");
     return;
   }
   for (const field of ["interruption", "targetMutation", "validations"]) assertObject(result[field], `Task result ${field} must be an object.`);
   if (result.execution !== undefined) assertObject(result.execution, "Task result execution must be an object.");
   if (result.nextAction !== undefined && typeof result.nextAction !== "string") assertObject(result.nextAction, "Task result nextAction must be a string or object.");
-  for (const field of ["staleLeaseRevoked", "providerCallsInferred"]) if (typeof safety[field] !== "boolean") throw new Error(`Task result safetyAssertions.${field} must be boolean.`);
+  if (safety.staleLeaseRevoked !== true) throw new Error("Task result safetyAssertions.staleLeaseRevoked must be true.");
+  if (safety.providerCallsInferred !== false) throw new Error("Task result safetyAssertions.providerCallsInferred must be false.");
   if (safety.attemptArtifactsIsolated !== undefined && typeof safety.attemptArtifactsIsolated !== "boolean") throw new Error("Task result safetyAssertions.attemptArtifactsIsolated must be boolean.");
 }
 
@@ -337,11 +347,58 @@ function normalizeNextAction(input: Omit<ResultNextAction, "gates" | "evidence">
 }
 
 function validateAgreementSummary(value: Record<string, unknown>): void {
-  for (const field of ["agreementId", "profile", "status"]) if (typeof value[field] !== "string" || !(value[field] as string).trim()) throw new Error(`Task result agreement.${field} is required.`);
+  if (typeof value.agreementId !== "string" || !AGREEMENT_ID_PATTERN.test(value.agreementId)) throw new Error("Task result agreement.agreementId is invalid.");
+  if (!(EXECUTION_PROFILES as readonly unknown[]).includes(value.profile)) throw new Error("Task result agreement.profile is invalid.");
+  if (!(EXECUTION_AGREEMENT_STATUSES as readonly unknown[]).includes(value.status)) throw new Error("Task result agreement.status is invalid.");
   for (const field of ["requestedProfile", "effectiveProfile"] as const) {
-    if (value[field] !== undefined && (typeof value[field] !== "string" || !(value[field] as string).trim())) throw new Error(`Task result agreement.${field} must be a non-empty string when present.`);
+    if (value[field] !== undefined && !(EXECUTION_PROFILES as readonly unknown[]).includes(value[field])) throw new Error(`Task result agreement.${field} is invalid.`);
   }
   for (const field of ["phaseOwnership", "runforgeCompletedPhases", "delegatedPhases", "awaitingPhases"]) if (!Array.isArray(value[field])) throw new Error(`Task result agreement.${field} must be an array.`);
+
+  const ownership = new Map<ExecutionPhaseId, ExecutionParty>();
+  for (const [index, item] of (value.phaseOwnership as unknown[]).entries()) {
+    assertObject(item, `Task result agreement.phaseOwnership[${index}] must be an object.`);
+    const phaseId = validatePhaseId(item.phaseId, `agreement.phaseOwnership[${index}].phaseId`);
+    if (!(EXECUTION_PARTIES as readonly unknown[]).includes(item.responsibleParty)) throw new Error(`Task result agreement.phaseOwnership[${index}].responsibleParty is invalid.`);
+    if (ownership.has(phaseId)) throw new Error(`Task result agreement.phaseOwnership contains duplicate phase '${phaseId}'.`);
+    ownership.set(phaseId, item.responsibleParty as ExecutionParty);
+  }
+
+  const completed = new Set<ExecutionPhaseId>();
+  for (const [index, item] of (value.runforgeCompletedPhases as unknown[]).entries()) {
+    const phaseId = validatePhaseId(item, `agreement.runforgeCompletedPhases[${index}]`);
+    if (completed.has(phaseId)) throw new Error(`Task result agreement.runforgeCompletedPhases contains duplicate phase '${phaseId}'.`);
+    if (ownership.get(phaseId) !== "runforge") throw new Error(`Task result agreement.runforgeCompletedPhases phase '${phaseId}' is not owned by runforge.`);
+    completed.add(phaseId);
+  }
+
+  const delegated = validateOwnedPhaseSet(value.delegatedPhases as unknown[], "delegatedPhases", ownership);
+  const awaiting = validateOwnedPhaseSet(value.awaitingPhases as unknown[], "awaitingPhases", ownership, true);
+  for (const [phaseId, party] of awaiting) {
+    if (delegated.get(phaseId) !== party) throw new Error(`Task result agreement.awaitingPhases phase '${phaseId}' must be delegated to the same party.`);
+  }
+}
+
+function validateOwnedPhaseSet(
+  items: unknown[], name: "delegatedPhases" | "awaitingPhases", ownership: ReadonlyMap<ExecutionPhaseId, ExecutionParty>, awaiting = false,
+): Map<ExecutionPhaseId, ExecutionParty> {
+  const phases = new Map<ExecutionPhaseId, ExecutionParty>();
+  for (const [index, item] of items.entries()) {
+    assertObject(item, `Task result agreement.${name}[${index}] must be an object.`);
+    const phaseId = validatePhaseId(item.phaseId, `agreement.${name}[${index}].phaseId`);
+    if (!(DELEGATED_PARTIES as readonly unknown[]).includes(item.responsibleParty)) throw new Error(`Task result agreement.${name}[${index}].responsibleParty is invalid.`);
+    const party = item.responsibleParty as Exclude<ExecutionParty, "runforge" | "nobody">;
+    if (phases.has(phaseId)) throw new Error(`Task result agreement.${name} contains duplicate phase '${phaseId}'.`);
+    if (ownership.get(phaseId) !== party) throw new Error(`Task result agreement.${name} phase '${phaseId}' is inconsistent with phaseOwnership.`);
+    if (awaiting && !Array.isArray(item.prerequisites)) throw new Error(`Task result agreement.${name}[${index}].prerequisites must be an array.`);
+    phases.set(phaseId, party);
+  }
+  return phases;
+}
+
+function validatePhaseId(value: unknown, name: string): ExecutionPhaseId {
+  if (!(EXECUTION_PHASE_IDS as readonly unknown[]).includes(value)) throw new Error(`Task result ${name} is invalid.`);
+  return value as ExecutionPhaseId;
 }
 
 function validateHandoff(value: Record<string, unknown>): void {
@@ -372,6 +429,12 @@ function validateNextAction(value: Record<string, unknown>, name: string): void 
 function requiredText(value: string, name: string): string {
   const normalized = value.trim();
   if (!normalized) throw new Error(`${name} is required.`);
+  return normalized;
+}
+
+function requiredAgreementId(value: string, name: string): string {
+  const normalized = value.trim();
+  if (!AGREEMENT_ID_PATTERN.test(normalized)) throw new Error(`${name} is invalid.`);
   return normalized;
 }
 
