@@ -129,7 +129,7 @@ async function finalizeDelegatedImplementationArtifacts(spec: TaskSpecV2, initia
   const handoff: NormalizedHandoffInput = {
     profile: "assist-only",
     summary: `RunForge performed safe agreement and project discovery only; implementation is delegated to ${party}.`,
-    changedFiles: [], patch: null, commit: null, validation: [], findings: [],
+    changedFiles: [], patch: null, branch: null, commit: null, validation: [], findings: [],
     risks: ["Implementation and validation remain outside this RunForge execution."],
     nextActions: [next],
     publicationInstructions: ["Publication was not requested or performed by this agreement-handoff lane."],
@@ -275,6 +275,7 @@ function implementationHandoff(
     summary: `RunForge implementation finished with '${result.status}' and workflow status '${status}'.`,
     changedFiles: result.changedFiles,
     patch: result.patchPackage ? "implementation.patch" : null,
+    branch: result.localBranch,
     commit: result.localCommit,
     validation: result.validationResults.map((item) => ({
       command: item.command,

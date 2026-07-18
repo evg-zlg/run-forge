@@ -33,6 +33,8 @@ describe("agreement-aware task result contract", () => {
     expect(completionStatusForAgreement(agreement)).toBe("awaiting_external_session");
     expect(summary).toMatchObject({
       profile: "custom",
+      requestedProfile: "custom",
+      effectiveProfile: "custom",
       status: "in_progress",
       phaseOwnership: [
         { phaseId: "taskAnalysis", responsibleParty: "runforge" },
@@ -52,11 +54,13 @@ describe("agreement-aware task result contract", () => {
   });
 
   it.each(["assist-only", "local-ready"] as const)("normalizes a complete %s handoff package", (profile) => {
+    const branch = profile === "local-ready" ? "runforge/agreement-result-1" : null;
     expect(buildNormalizedHandoffPackage({
       profile,
       summary: "  Bounded implementation is ready. ",
       changedFiles: ["src/z.ts", " src/a.ts ", "src/z.ts"],
       patch: " patch.diff ",
+      branch,
       commit: null,
       validation: [{ command: " pnpm test ", status: "passed", exitCode: 0, evidence: [" test.log ", "test.log"] }],
       findings: [" finding B ", "finding A"],
@@ -77,6 +81,7 @@ describe("agreement-aware task result contract", () => {
       summary: "Bounded implementation is ready.",
       changedFiles: ["src/a.ts", "src/z.ts"],
       patch: "patch.diff",
+      branch,
       commit: null,
       validation: [{ command: "pnpm test", status: "passed", exitCode: 0, evidence: ["test.log"] }],
       findings: ["finding A", "finding B"],
@@ -105,7 +110,7 @@ describe("agreement-aware task result contract", () => {
       agreement: partiallyCompletedAgreement(),
       handoff: {
         profile: "assist-only", summary: "RunForge analysis is complete; implementation is delegated.",
-        changedFiles: [], patch: null, commit: null,
+        changedFiles: [], patch: null, branch: null, commit: null,
         validation: [{ command: "corepack pnpm run typecheck", status: "passed", exitCode: 0, evidence: ["validation/typecheck.log"] }],
         findings: ["Implementation plan prepared"], risks: ["Patch is not yet applied"],
         nextActions: [{ party: "external_session", exactAction: "Implement the approved plan, run validation, and attach the patch.", gates: [], evidence: [] }],
@@ -126,10 +131,18 @@ describe("agreement-aware task result contract", () => {
       expect(validate({ ...result, status }), JSON.stringify(validate.errors)).toBe(true);
     }
     expect(validate({ ...result, status: "completed" })).toBe(false);
+    expect(result.agreement).toMatchObject({ profile: "custom", requestedProfile: "custom", effectiveProfile: "custom" });
+
+    const oldAgreementAware = structuredClone(result) as unknown as Record<string, any>;
+    delete oldAgreementAware.agreement.requestedProfile;
+    delete oldAgreementAware.agreement.effectiveProfile;
+    delete oldAgreementAware.handoff.branch;
+    validateTaskResultContract(oldAgreementAware);
+    expect(validate(oldAgreementAware), JSON.stringify(validate.errors)).toBe(true);
   });
 
   it("rejects incomplete handoffs and unsafe claims", () => {
-    const common = { profile: "local-ready" as const, summary: "Ready", changedFiles: [], patch: null, commit: null, nextActions: [], targetSha: null, baseSha: null };
+    const common = { profile: "local-ready" as const, summary: "Ready", changedFiles: [], patch: null, branch: "runforge/ready", commit: null, nextActions: [], targetSha: null, baseSha: null };
     expect(() => buildNormalizedHandoffPackage(common)).toThrow("at least one exact action");
     expect(() => buildNormalizedHandoffPackage({
       ...common,
@@ -144,6 +157,12 @@ describe("agreement-aware task result contract", () => {
       nextActions: [{ party: "owner", exactAction: "Review the patch" }],
       validation: [{ command: "pnpm test", status: "unknown" as never, exitCode: null }],
     })).toThrow("handoff.validation[0].status is invalid");
+    expect(() => buildNormalizedHandoffPackage({
+      ...common, branch: null, nextActions: [{ party: "owner", exactAction: "Review the patch" }],
+    })).toThrow("handoff.branch is required for local-ready handoffs");
+    expect(() => buildNormalizedHandoffPackage({
+      ...common, profile: "assist-only", nextActions: [{ party: "owner", exactAction: "Review the patch" }],
+    })).toThrow("handoff.branch must be null for assist-only handoffs");
   });
 
   it("keeps legacy result validation compatible while reserving new statuses for agreement-aware results", async () => {

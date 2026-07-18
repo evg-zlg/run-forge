@@ -48,8 +48,8 @@ describe("implementation executor", () => {
     expect(result.providerCalls).toMatchObject([{ tokenUsage: 100 }, { tokenUsage: 100 }]);
     expect(result).toMatchObject({
       status: "awaiting_external_session",
-      agreement: { profile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]), awaitingPhases: expect.arrayContaining([{ phaseId: "remotePush", responsibleParty: "external_session", prerequisites: [] }]) },
-      handoff: { profile: "local-ready", changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), patch: "implementation.patch", commit: expect.any(String), findings: [] },
+      agreement: { profile: "local-ready", requestedProfile: "local-ready", effectiveProfile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]), awaitingPhases: expect.arrayContaining([{ phaseId: "remotePush", responsibleParty: "external_session", prerequisites: [] }]) },
+      handoff: { profile: "local-ready", changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), patch: "implementation.patch", branch: "runforge/executor-success-1", commit: expect.any(String), findings: [] },
       next: { party: "external_session", exactAction: expect.stringContaining("remotePush") },
       implementation: { unresolvedAcceptanceCriteria: [] },
       git: { branch: "runforge/executor-success-1", commit: expect.any(String) },
@@ -75,7 +75,8 @@ describe("implementation executor", () => {
       status: "awaiting_external_session",
       implementation: { status: "implemented_and_validated", localBranch: null, localCommit: null, patchPackage: expect.any(String) },
       git: { branch: null, commit: null, patchPackage: expect.any(String) },
-      handoff: { profile: "assist-only", patch: "implementation.patch", commit: null },
+      agreement: { profile: "assist-only", requestedProfile: "assist-only", effectiveProfile: "assist-only" },
+      handoff: { profile: "assist-only", patch: "implementation.patch", branch: null, commit: null },
       next: { party: "external_session" },
     });
     expect(await git(repo, ["rev-parse", "HEAD"])).toBe(before);
@@ -109,6 +110,8 @@ describe("implementation executor", () => {
       targetRepository: { initialSha: before.head.trim(), finalSha: before.head.trim(), changed: false, refsChanged: false },
       providerCalls: [], providerMutations: 0, publicationMutations: 0,
       publication: { performed: false, mutations: 0 },
+      agreement: { profile: "custom", requestedProfile: "custom", effectiveProfile: "custom" },
+      handoff: { profile: "assist-only", branch: null, commit: null },
       next: { party, exactAction: `Complete the delegated implementation phase in ${party} and attach its completion evidence.` },
       safetyAssertions: { targetUnchanged: true, providerCalls: false },
     });
@@ -245,8 +248,8 @@ describe("implementation executor", () => {
         status: "completed",
         workflow: {
           status: "awaiting_external_session",
-          agreement: { profile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]) },
-          handoff: { profile: "local-ready", findings: [], commit: expect.any(String) },
+          agreement: { profile: "local-ready", requestedProfile: "local-ready", effectiveProfile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]) },
+          handoff: { profile: "local-ready", findings: [], branch: "runforge/executor-http-1", commit: expect.any(String) },
           next: { party: "external_session", exactAction: expect.stringContaining("remotePush") },
         },
         requestedIntent: "implementation", actualExecutorMode: "implementation",

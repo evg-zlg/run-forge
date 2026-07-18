@@ -55,8 +55,12 @@ describe("local control-plane HTTP lifecycle", () => {
 
     const discovery = await json(await fetch(`${instance.url}/.well-known/runforge`));
     expect(discovery).toMatchObject({ executionAgreements: { schemaVersion: 1, schemaUrl: "/schemas/execution-agreement-v1.schema.json", profiles: expect.arrayContaining(["custom"]), parties: expect.arrayContaining(["runforge", "external_session", "owner"]), endpoints: { negotiate: "/v1/execution-agreements/negotiate", agreement: "/v1/execution-agreements/{id}", taskAgreement: "/v1/tasks/{id}/agreement" }, technicalCapabilities: { implementation: true, deploy: false }, minimalRequest: { schemaVersion: 1, profile: "assist-only" } } });
+    expect(discovery.endpoints.resultSchema).toBe("/schemas/task-result-v1.schema.json");
     expect((await fetch(`${instance.url}/schemas/execution-agreement-v1.schema.json`)).status).toBe(200);
-    expect(await json(await fetch(`${instance.url}/v1/capabilities`))).toMatchObject({ schemas: { executionAgreement: "/schemas/execution-agreement-v1.schema.json" }, executionAgreements: { phases: expect.arrayContaining(["implementation", "deploy"]) } });
+    const resultSchemaResponse = await fetch(`${instance.url}${discovery.endpoints.resultSchema}`);
+    expect(resultSchemaResponse.status).toBe(200);
+    expect(await json(resultSchemaResponse)).toEqual(JSON.parse(await readFile("schemas/task-result-v1.schema.json", "utf8")));
+    expect(await json(await fetch(`${instance.url}/v1/capabilities`))).toMatchObject({ schemas: { executionAgreement: "/schemas/execution-agreement-v1.schema.json", result: discovery.endpoints.resultSchema }, executionAgreements: { phases: expect.arrayContaining(["implementation", "deploy"]) } });
 
     const negotiation = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } }) });
     expect(negotiation.status).toBe(201); const agreement = await json(negotiation);

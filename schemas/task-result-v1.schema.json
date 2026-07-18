@@ -144,6 +144,8 @@
       "properties": {
         "agreementId": { "type": "string", "minLength": 1 },
         "profile": { "enum": ["assist-only", "local-ready", "draft-pr", "delivery", "custom"] },
+        "requestedProfile": { "enum": ["assist-only", "local-ready", "draft-pr", "delivery", "custom"] },
+        "effectiveProfile": { "enum": ["assist-only", "local-ready", "draft-pr", "delivery", "custom"] },
         "status": { "enum": ["ready", "conflicted", "in_progress", "completed"] },
         "phaseOwnership": { "type": "array", "items": { "$ref": "#/$defs/phaseOwnership" } },
         "runforgeCompletedPhases": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/phaseId" } },
@@ -227,6 +229,7 @@
         "summary": { "type": "string", "minLength": 1 },
         "changedFiles": { "$ref": "#/$defs/strings" },
         "patch": { "type": ["string", "null"], "minLength": 1 },
+        "branch": { "type": ["string", "null"], "minLength": 1 },
         "commit": { "type": ["string", "null"], "minLength": 1 },
         "validation": { "type": "array", "items": { "$ref": "#/$defs/handoffValidation" } },
         "findings": { "$ref": "#/$defs/strings" },

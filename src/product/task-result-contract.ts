@@ -25,6 +25,8 @@ export type ResultAwaitingPhase = ResultDelegatedPhase & { prerequisites: string
 export type AgreementResultSummary = {
   agreementId: string;
   profile: ExecutionProfile;
+  requestedProfile: ExecutionProfile;
+  effectiveProfile: ExecutionProfile;
   status: ExecutionAgreementStatus;
   phaseOwnership: ResultPhaseOwnership[];
   runforgeCompletedPhases: ExecutionPhaseId[];
@@ -49,6 +51,7 @@ export type NormalizedHandoffPackage = {
   summary: string;
   changedFiles: string[];
   patch: string | null;
+  branch: string | null;
   commit: string | null;
   validation: HandoffValidation[];
   findings: string[];
@@ -97,6 +100,8 @@ export function buildAgreementResultSummary(agreement: ExecutionAgreement): Agre
   return {
     agreementId: requiredText(agreement.agreementId, "agreement.agreementId"),
     profile: agreement.profile,
+    requestedProfile: agreement.profile,
+    effectiveProfile: agreement.profile,
     status: agreement.status,
     phaseOwnership: requested.map(({ phaseId, responsibleParty }) => ({ phaseId, responsibleParty })),
     runforgeCompletedPhases: requested
@@ -118,6 +123,8 @@ export const buildAgreementSummary = buildAgreementResultSummary;
 /** Builds the portable assist-only/local-ready package used by another session without relying on ambient context. */
 export function buildNormalizedHandoffPackage(input: NormalizedHandoffInput): NormalizedHandoffPackage {
   if (input.profile !== "assist-only" && input.profile !== "local-ready") throw new Error(`Unsupported handoff profile '${String(input.profile)}'.`);
+  if (input.profile === "assist-only" && input.branch !== null) throw new Error("handoff.branch must be null for assist-only handoffs.");
+  if (input.profile === "local-ready" && input.branch === null) throw new Error("handoff.branch is required for local-ready handoffs.");
   for (const field of ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess"] as const) {
     if (input.safety?.[field] !== undefined && input.safety[field] !== false) throw new Error(`handoff.safety.${field} must be false.`);
   }
@@ -139,6 +146,7 @@ export function buildNormalizedHandoffPackage(input: NormalizedHandoffInput): No
     summary: requiredText(input.summary, "handoff.summary"),
     changedFiles: normalizedStrings(input.changedFiles),
     patch: nullableText(input.patch, "handoff.patch"),
+    branch: nullableText(input.branch, "handoff.branch"),
     commit: nullableText(input.commit, "handoff.commit"),
     validation,
     findings: normalizedStrings(input.findings),
@@ -305,11 +313,18 @@ function normalizeNextAction(input: Omit<ResultNextAction, "gates" | "evidence">
 
 function validateAgreementSummary(value: Record<string, unknown>): void {
   for (const field of ["agreementId", "profile", "status"]) if (typeof value[field] !== "string" || !(value[field] as string).trim()) throw new Error(`Task result agreement.${field} is required.`);
+  for (const field of ["requestedProfile", "effectiveProfile"] as const) {
+    if (value[field] !== undefined && (typeof value[field] !== "string" || !(value[field] as string).trim())) throw new Error(`Task result agreement.${field} must be a non-empty string when present.`);
+  }
   for (const field of ["phaseOwnership", "runforgeCompletedPhases", "delegatedPhases", "awaitingPhases"]) if (!Array.isArray(value[field])) throw new Error(`Task result agreement.${field} must be an array.`);
 }
 
 function validateHandoff(value: Record<string, unknown>): void {
   if (value.profile !== "assist-only" && value.profile !== "local-ready") throw new Error("Task result handoff.profile is invalid.");
+  if (value.branch !== undefined) {
+    if (value.profile === "assist-only" && value.branch !== null) throw new Error("Task result handoff.branch must be null for assist-only handoffs.");
+    if (value.profile === "local-ready" && (typeof value.branch !== "string" || !value.branch.trim())) throw new Error("Task result handoff.branch is required for local-ready handoffs.");
+  }
   if (typeof value.summary !== "string" || !value.summary.trim()) throw new Error("Task result handoff.summary is required.");
   for (const field of ["changedFiles", "validation", "findings", "risks", "nextActions", "publicationInstructions", "ciCommands"]) if (!Array.isArray(value[field])) throw new Error(`Task result handoff.${field} must be an array.`);
   if ((value.nextActions as unknown[]).length === 0) throw new Error("Task result handoff.nextActions must not be empty.");

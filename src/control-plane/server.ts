@@ -18,6 +18,7 @@ import {
 
 export type ControlPlaneServerOptions = { host?: string; port?: number; stateRoot?: string; maxRequestBytes?: number; manager?: ControlPlaneManager };
 export type ControlPlaneServerInstance = { server: Server; url: string; manager: ControlPlaneManager; stateRoot: string; close: () => Promise<void> };
+const taskResultSchemaPath = "/schemas/task-result-v1.schema.json";
 
 export async function startControlPlaneServer(options: ControlPlaneServerOptions = {}): Promise<ControlPlaneServerInstance> {
   const host = options.host ?? defaultControlPlaneHost;
@@ -43,6 +44,7 @@ export async function handleControlPlaneRequest(request: IncomingMessage, respon
   if (method === "GET" && path === "/v1/capabilities") return sendJson(response, 200, await capabilities(context.manager.store.root));
   if (method === "GET" && path === taskSpecSchemaPath) return sendJson(response, 200, taskSpecV2Schema);
   if (method === "GET" && path === executionAgreementSchemaPath) return sendJson(response, 200, await readSchema("execution-agreement-v1.schema.json"));
+  if (method === "GET" && path === taskResultSchemaPath) return sendJson(response, 200, await readSchema("task-result-v1.schema.json"));
   if (method === "GET" && path === "/schemas/control-plane-v1.schema.json") return sendJson(response, 200, await readSchema("control-plane-v1.schema.json"));
   if (method === "POST" && path === executionAgreementNegotiatePath) return sendJson(response, 201, await context.manager.negotiateAgreement(parseExecutionAgreementNegotiationRequest(await readJson(request, context.maxRequestBytes))));
   const agreementMatch = path.match(/^\/v1\/execution-agreements\/(ea_v1_[a-f0-9]{24})$/);
@@ -75,7 +77,7 @@ async function discoveryManifest(request: IncomingMessage, host: string): Promis
     product: "RunForge", discoveryVersion: 5, apiVersion: controlPlaneApiVersion, version, localOnly: true, baseUrl: `http://${authority}`,
     implementationExecutors: await discoverImplementationExecutors(), taskSpecContract: publicTaskSpecContract(),
     executionAgreements: executionAgreementCapabilities(),
-    endpoints: { health: "/healthz", readiness: "/readyz", capabilities: "/v1/capabilities", taskSpecSchema: taskSpecSchemaPath, executionAgreementSchema: executionAgreementSchemaPath, executionAgreementNegotiation: executionAgreementNegotiatePath, executionAgreement: "/v1/execution-agreements/{id}", projectInspection: "/v1/projects/inspect", tasks: "/v1/tasks", task: "/v1/tasks/{id}", taskAgreement: "/v1/tasks/{id}/agreement", result: "/v1/tasks/{id}/result", ownerDecisions: "/v1/tasks/{id}/owner-decisions", continuation: "/v1/tasks/{id}/continue", retry: "/v1/tasks/{id}/retry", cancellation: "/v1/tasks/{id}/cancel", publicationDecisions: "/v1/tasks/{id}/publication-decisions" },
+    endpoints: { health: "/healthz", readiness: "/readyz", capabilities: "/v1/capabilities", taskSpecSchema: taskSpecSchemaPath, executionAgreementSchema: executionAgreementSchemaPath, resultSchema: taskResultSchemaPath, executionAgreementNegotiation: executionAgreementNegotiatePath, executionAgreement: "/v1/execution-agreements/{id}", projectInspection: "/v1/projects/inspect", tasks: "/v1/tasks", task: "/v1/tasks/{id}", taskAgreement: "/v1/tasks/{id}/agreement", result: "/v1/tasks/{id}/result", ownerDecisions: "/v1/tasks/{id}/owner-decisions", continuation: "/v1/tasks/{id}/continue", retry: "/v1/tasks/{id}/retry", cancellation: "/v1/tasks/{id}/cancel", publicationDecisions: "/v1/tasks/{id}/publication-decisions" },
     lifecycle: { poll: "GET /v1/tasks/{id}", heartbeatField: "progress.lastHeartbeatAt", executionIdentityField: "progress.executionId", attemptField: "progress.attempt", phaseValues: ["understand_task", "implement", "validate", "repair", "finalize"], stalledAfterMs: 15000, terminal: ["completed", "failed", "interrupted"], recoveryAvailabilityField: "recovery.retryAvailable", ownerGate: "awaiting_owner_decision" },
     bootstrap: "Inspect discovery and capabilities, register the project, copy the published implementationRequest, poll progress, and follow only advertised recovery actions."
   };
@@ -88,7 +90,7 @@ async function capabilities(_stateRoot: string): Promise<Record<string, unknown>
     execution: { engine: "TaskSpec v2", runtimes: taskRuntimeIds, dependencyPreparation: ["required", "if-needed", "disabled", "reuse-existing"], persistentState: true, restartRecovery: true, heartbeat: true, watchdog: true, cancellation: true, executionGenerations: true, boundedCleanup: true, interruptedResult: true, journalSchemaVersion: 1, continuationSchemaVersion: 1 },
     authority: { semantics: "explicit upper bounds; implementation requires implementation/providerCalls/network/localBranch/localCommit", inspect: true, implementation: true, providerCalls: "required-for-local-coding-agent", network: "required-for-provider-transport", localBranch: "required-for-disposable-worktree", localCommit: "required-for-local-result", remotePush: "separate-publication-decision", draftPublication: "separate-publication-decision", merge: false, deploy: false },
     safety: { defaultBind: defaultControlPlaneHost, maxRequestBytes: defaultMaxRequestBytes, secretsInResponses: false, providerCallsByDefault: false, networkByDefault: false, sharedCheckoutMutation: false },
-    schemas: { taskSpec: taskSpecSchemaPath, executionAgreement: executionAgreementSchemaPath, result: "/schemas/task-result-v1.schema.json", controlPlane: "/schemas/control-plane-v1.schema.json" }
+    schemas: { taskSpec: taskSpecSchemaPath, executionAgreement: executionAgreementSchemaPath, result: taskResultSchemaPath, controlPlane: "/schemas/control-plane-v1.schema.json" }
   };
 }
 
