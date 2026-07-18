@@ -160,7 +160,16 @@ export function executionAgreementCapabilities(
     technicalCapabilities,
     readiness,
     unavailableAdapters: unavailableAdapters(),
-    minimalRequest: { schemaVersion: 1, profile: "assist-only", projectId: "<registered-project-id>", publicationTarget: { kind: "none" } },
+    minimalRequest: {
+      schemaVersion: 1,
+      profile: "assist-only",
+      projectId: "<registered-project-id>",
+      publicationTarget: { kind: "none" },
+      authority: phaseFlags([
+        "projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation",
+        "repairIterations", "patchPackage", "providerModelCalls",
+      ]),
+    },
   };
 }
 
@@ -293,7 +302,8 @@ function assertCredentialFreeNegotiationInput(value: unknown): void {
     seen.add(current);
     if (Array.isArray(current)) { pending.push(...current); continue; }
     for (const [key, item] of Object.entries(current as Record<string, unknown>)) {
-      if (credentialLikeKey(key) || credentialLikeText(key)) credentialInputError();
+      const executionPhaseKey = (EXECUTION_PHASE_IDS as readonly string[]).includes(key);
+      if ((!executionPhaseKey && credentialLikeKey(key)) || credentialLikeText(key)) credentialInputError();
       pending.push(item);
     }
   }

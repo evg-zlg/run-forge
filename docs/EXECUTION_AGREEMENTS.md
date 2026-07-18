@@ -23,7 +23,7 @@ These short phrases are useful bootstrap intent, not hidden authorization:
 | `Deliver it end to end` | `delivery` | Requests RunForge ownership through review, merge, deploy, and post-deploy validation. This currently conflicts at multiple hard boundaries. |
 | `Use these exact owners` | `custom` | The caller supplies phase ownership explicitly; omitted phases are not requested. |
 
-Selecting a phrase or profile does not grant authority. The negotiation response is the contract to inspect.
+Selecting a phrase or profile does not grant authority. Every standalone `POST /v1/execution-agreements/negotiate` request must include an explicit per-phase `authority` allowlist: set every requested RunForge-owned phase to `true` and dangerous or unrequested phases to `false`. `GET /v1/capabilities` exposes a complete, directly negotiable `executionAgreements.minimalRequest` for `assist-only`. The negotiation response is the contract to inspect.
 
 ## Phase ownership
 
@@ -69,6 +69,8 @@ effective RunForge scope = requested ∩ RunForge-owned ∩ capable ∩ authoriz
 An external party's phase is a `handoff`, not a RunForge failure. An unrequested phase is normalized to owner `nobody` and status `not_requested`. A requested RunForge phase becomes a conflict with kind `unavailable`, `unauthorized`, or `policy_denied` when one of the three gates fails.
 
 Caller-supplied `technicalCapability`, `authority`, and `policy` maps can only narrow installation values; they cannot enable an unavailable or forbidden capability. Project `RUNFORGE.md` is read as defaults only and has `authorityEscalationTrusted: false`. A referenced agreement must match the TaskSpec profile, requested phases, and custom ownership. RunForge never silently changes owners, downgrades a profile, or converts an implementation request to inspection.
+
+Standalone negotiation phase authority is distinct from task submission authority. The negotiation body's phase-keyed `authority` map authorizes RunForge responsibility in the agreement. The top-level task request's `authority` object separately gates inspection, implementation, provider/network use, and Git/publication operations when the task is submitted; an accepted agreement does not replace or broaden those request-level gates.
 
 Agreement status has a separate lifecycle:
 
@@ -196,6 +198,30 @@ This preset asks only for read-oriented discovery and analysis, avoiding acciden
     "deploy": false,
     "postDeployValidation": false,
     "providerModelCalls": false
+  },
+  "authority": {
+    "projectDiscovery": true,
+    "taskAnalysis": true,
+    "implementationPlanning": false,
+    "implementation": false,
+    "localValidation": false,
+    "independentReview": false,
+    "repairIterations": false,
+    "patchPackage": false,
+    "localBranch": false,
+    "localCommit": false,
+    "remotePush": false,
+    "draftPublication": false,
+    "ciMonitoring": false,
+    "ciRepair": false,
+    "prReview": false,
+    "merge": false,
+    "deploy": false,
+    "postDeployValidation": false,
+    "dbAccess": false,
+    "productionAccess": false,
+    "secretUse": false,
+    "providerModelCalls": false
   }
 }
 ```
@@ -203,7 +229,7 @@ This preset asks only for read-oriented discovery and analysis, avoiding acciden
 ```bash
 PRESET=$(curl -fsS \
   -H 'content-type: application/json' \
-  --data "$(jq -nc --arg projectId "$PROJECT_ID" '{schemaVersion:1,profile:"assist-only",projectId:$projectId,publicationTarget:{kind:"none"},requested:{implementationPlanning:false,implementation:false,localValidation:false,independentReview:false,repairIterations:false,patchPackage:false,localBranch:false,localCommit:false,prReview:false,merge:false,deploy:false,postDeployValidation:false,providerModelCalls:false}}')" \
+  --data "$(jq -nc --arg projectId "$PROJECT_ID" '{schemaVersion:1,profile:"assist-only",projectId:$projectId,publicationTarget:{kind:"none"},requested:{implementationPlanning:false,implementation:false,localValidation:false,independentReview:false,repairIterations:false,patchPackage:false,localBranch:false,localCommit:false,prReview:false,merge:false,deploy:false,postDeployValidation:false,providerModelCalls:false},authority:{projectDiscovery:true,taskAnalysis:true,implementationPlanning:false,implementation:false,localValidation:false,independentReview:false,repairIterations:false,patchPackage:false,localBranch:false,localCommit:false,remotePush:false,draftPublication:false,ciMonitoring:false,ciRepair:false,prReview:false,merge:false,deploy:false,postDeployValidation:false,dbAccess:false,productionAccess:false,secretUse:false,providerModelCalls:false}}')" \
   "$BASE/v1/execution-agreements/negotiate")
 printf '%s' "$PRESET" | jq '{agreementId,profile,status,conflicts,handoffs}'
 ```
@@ -226,6 +252,30 @@ This coherent custom request delegates implementation and its local Git result t
     "localBranch": "external_session",
     "localCommit": "external_session"
   },
+  "authority": {
+    "projectDiscovery": false,
+    "taskAnalysis": true,
+    "implementationPlanning": false,
+    "implementation": false,
+    "localValidation": false,
+    "independentReview": false,
+    "repairIterations": false,
+    "patchPackage": false,
+    "localBranch": false,
+    "localCommit": false,
+    "remotePush": false,
+    "draftPublication": false,
+    "ciMonitoring": false,
+    "ciRepair": false,
+    "prReview": false,
+    "merge": false,
+    "deploy": false,
+    "postDeployValidation": false,
+    "dbAccess": false,
+    "productionAccess": false,
+    "secretUse": false,
+    "providerModelCalls": false
+  },
   "prerequisites": {
     "implementation": ["Use the registered project and accepted task scope"]
   },
@@ -236,7 +286,7 @@ This coherent custom request delegates implementation and its local Git result t
 ```bash
 CUSTOM=$(curl -fsS \
   -H 'content-type: application/json' \
-  --data "$(jq -nc --arg projectId "$PROJECT_ID" '{schemaVersion:1,profile:"custom",projectId:$projectId,publicationTarget:{kind:"none"},requestedOwnership:{taskAnalysis:"runforge",implementation:"external_session",localBranch:"external_session",localCommit:"external_session"},prerequisites:{implementation:["Use the registered project and accepted task scope"]},completionEvidence:{}}')" \
+  --data "$(jq -nc --arg projectId "$PROJECT_ID" '{schemaVersion:1,profile:"custom",projectId:$projectId,publicationTarget:{kind:"none"},requestedOwnership:{taskAnalysis:"runforge",implementation:"external_session",localBranch:"external_session",localCommit:"external_session"},authority:{projectDiscovery:false,taskAnalysis:true,implementationPlanning:false,implementation:false,localValidation:false,independentReview:false,repairIterations:false,patchPackage:false,localBranch:false,localCommit:false,remotePush:false,draftPublication:false,ciMonitoring:false,ciRepair:false,prReview:false,merge:false,deploy:false,postDeployValidation:false,dbAccess:false,productionAccess:false,secretUse:false,providerModelCalls:false},prerequisites:{implementation:["Use the registered project and accepted task scope"]},completionEvidence:{}}')" \
   "$BASE/v1/execution-agreements/negotiate")
 AGREEMENT_ID=$(printf '%s' "$CUSTOM" | jq -r '.agreementId')
 printf '%s' "$CUSTOM" | jq '{agreementId,profile,status,conflicts,handoffs}'

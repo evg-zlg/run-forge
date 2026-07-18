@@ -12,12 +12,12 @@ RunForge is a localhost-only control plane. If all you know is its URL, use the 
    - `Сделай локально и передай мне` / `Do it locally and hand it back to me` means `local-ready`.
    - `Доведи до готового PR` / `Take it to a ready PR` means `draft-pr`.
 
-   These are honest intent mappings, not authority grants. `assist-only` stops before RunForge-owned Git handoff, `local-ready` asks RunForge for a bounded local branch and commit, and `draft-pr` asks for push, draft PR/MR, and CI responsibility that the current installation cannot perform.
+   These are honest intent mappings, not authority grants. For standalone `POST /v1/execution-agreements/negotiate`, send an explicit phase-keyed `authority` allowlist: `true` for every requested phase owned by RunForge and `false` for dangerous or unrequested phases. The complete `executionAgreements.minimalRequest` returned by capabilities is the directly negotiable `assist-only` starting point. `assist-only` stops before RunForge-owned Git handoff, `local-ready` asks RunForge for a bounded local branch and commit, and `draft-pr` asks for push, draft PR/MR, and CI responsibility that the current installation cannot perform.
 4. Submit TaskSpec v2 either with the accepted `agreementId` and the matching `taskSpec.executionAgreement`, or omit both to request conservative mode-based auto-negotiation. Never reference a conflicted agreement.
 5. Poll `GET /v1/tasks/{id}` every 1–2 seconds. Fetch `GET /v1/tasks/{id}/result` after a terminal or owner-gated state and inspect `agreement`, `handoff`, and `next` as well as the lifecycle status.
 6. Perform only phases owned by your party. If `next.party` is `external_session`, follow `next.exactAction` and preserve the requested evidence. If an owner gate is advertised, record exactly that decision and call `/continue` only when instructed. Never invent approval or broaden authority on retry.
 
-Before implementation, require a compatible `implementationExecutors[]` entry with `status: "ready"`. Health alone is insufficient. TaskSpec and request-level provider, network, branch, and commit authority must also agree with the negotiated phase ownership.
+Before implementation, require a compatible `implementationExecutors[]` entry with `status: "ready"`. Health alone is insufficient. Negotiation phase authority does not grant task execution authority: TaskSpec authority and the task submission's request-level provider, network, branch, and commit gates must separately agree with the negotiated phase ownership.
 
 ## Hard adapter boundary
 

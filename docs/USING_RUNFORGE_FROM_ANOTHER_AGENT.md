@@ -46,7 +46,9 @@ Bootstrap phrases map to profiles as follows:
 | `Сделай локально и передай мне` | `Do it locally and hand it back to me` | `local-ready` | RunForge owns bounded local work through branch and commit; the calling session owns remote publication and review. |
 | `Доведи до готового PR` | `Take it to a ready PR` | `draft-pr` | Requests push, draft PR/MR, and CI responsibility; current missing adapters make the normal preset conflict. |
 
-The phrase selects intent only. It does not grant provider, network, Git, publication, merge, or deploy authority. Always inspect the returned agreement.
+The phrase selects intent only. It does not grant phase authority. Every standalone negotiation request must include a phase-keyed `authority` allowlist with `true` for every requested RunForge-owned phase and explicit `false` values for dangerous or unrequested phases. Capabilities provides a complete, directly negotiable `executionAgreements.minimalRequest` for `assist-only`. Always inspect the returned agreement.
+
+This negotiation `authority` map is not the top-level `authority` object used later in `POST /v1/tasks`. Task submission separately gates provider, network, Git, publication, merge, and deploy operations; neither authority layer grants the other.
 
 `publicationTarget: { "kind": "none" }` makes `assist-only`, `local-ready`, and `custom` local-only for push, draft publication, and CI. It never converts `draft-pr` or `delivery` into an adapter-ready local profile; those profiles keep their remote responsibilities and conflict while the adapters are unavailable.
 
@@ -56,7 +58,7 @@ For a local implementation handoff, negotiate `local-ready` with no remote publi
 NEGOTIATION=$(curl -fsS \
   -H 'content-type: application/json' \
   --data "$(jq -nc --arg projectId "$PROJECT_ID" \
-    '{schemaVersion:1,profile:"local-ready",projectId:$projectId,publicationTarget:{kind:"none"}}')" \
+    '{schemaVersion:1,profile:"local-ready",projectId:$projectId,publicationTarget:{kind:"none"},authority:{projectDiscovery:true,taskAnalysis:true,implementationPlanning:true,implementation:true,localValidation:true,independentReview:true,repairIterations:true,patchPackage:true,localBranch:true,localCommit:true,remotePush:false,draftPublication:false,ciMonitoring:false,ciRepair:false,prReview:false,merge:false,deploy:false,postDeployValidation:false,dbAccess:false,productionAccess:false,secretUse:false,providerModelCalls:true}}')" \
   "$BASE/v1/execution-agreements/negotiate")
 AGREEMENT_ID=$(printf '%s' "$NEGOTIATION" | jq -er \
   'select(.status == "ready") | .agreementId')
@@ -69,7 +71,7 @@ If responsibility must differ from a preset, negotiate `custom`. Omitted custom 
 CUSTOM=$(curl -fsS \
   -H 'content-type: application/json' \
   --data "$(jq -nc --arg projectId "$PROJECT_ID" \
-    '{schemaVersion:1,profile:"custom",projectId:$projectId,publicationTarget:{kind:"none"},requestedOwnership:{taskAnalysis:"runforge",implementation:"external_session",localBranch:"external_session",localCommit:"external_session"}}')" \
+    '{schemaVersion:1,profile:"custom",projectId:$projectId,publicationTarget:{kind:"none"},requestedOwnership:{taskAnalysis:"runforge",implementation:"external_session",localBranch:"external_session",localCommit:"external_session"},authority:{projectDiscovery:false,taskAnalysis:true,implementationPlanning:false,implementation:false,localValidation:false,independentReview:false,repairIterations:false,patchPackage:false,localBranch:false,localCommit:false,remotePush:false,draftPublication:false,ciMonitoring:false,ciRepair:false,prReview:false,merge:false,deploy:false,postDeployValidation:false,dbAccess:false,productionAccess:false,secretUse:false,providerModelCalls:false}}')" \
   "$BASE/v1/execution-agreements/negotiate")
 printf '%s' "$CUSTOM" | jq '{agreementId,profile,status,conflicts,handoffs}'
 ```

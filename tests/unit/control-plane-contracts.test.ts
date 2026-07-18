@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultAuthority, parseDecisionRequest, parseTaskRequest, type ControlTaskRecord } from "../../src/control-plane/contracts.js";
-import { assertAgreementMatchesTask, negotiateControlPlaneAgreement, negotiateTaskAgreement, parseExecutionAgreementNegotiationRequest, technicalCapabilitiesForExecutor } from "../../src/control-plane/execution-agreements.js";
+import { assertAgreementMatchesTask, executionAgreementCapabilities, negotiateControlPlaneAgreement, negotiateTaskAgreement, parseExecutionAgreementNegotiationRequest, technicalCapabilitiesForExecutor } from "../../src/control-plane/execution-agreements.js";
 import { boundPublicResult, redactPublicValue } from "../../src/control-plane/manager.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 import type { TaskSpecV2 } from "../../src/product/task-spec-v2.js";
@@ -89,6 +89,20 @@ describe("control-plane contracts", () => {
     }));
     expect(unavailable).toMatchObject({ status: "conflicted", conflicts: [{ phaseId: "deploy", kind: "unavailable" }] });
     expect(unavailable.phases).toContainEqual(expect.objectContaining({ phaseId: "deploy", available: false, authorized: true, status: "conflict" }));
+  });
+
+  it("advertises a ready minimal negotiation request and fails closed when required authority is removed", () => {
+    const minimalRequest = executionAgreementCapabilities().minimalRequest;
+    const accepted = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest(minimalRequest));
+    expect(accepted).toMatchObject({ profile: "assist-only", status: "ready", conflicts: [] });
+
+    const missingAuthority = structuredClone(minimalRequest) as { authority: Record<string, boolean> };
+    delete missingAuthority.authority.implementationPlanning;
+    const conflicted = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest(missingAuthority));
+    expect(conflicted).toMatchObject({
+      status: "conflicted",
+      conflicts: [{ phaseId: "implementationPlanning", kind: "unauthorized" }],
+    });
   });
 
   it("stores agreements durably and retrieves them after store restart", async () => {
