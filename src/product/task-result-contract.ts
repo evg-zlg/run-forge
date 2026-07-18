@@ -3,10 +3,204 @@ import { join } from "node:path";
 import type { ExternalExecutionResult } from "../run/external-execution.js";
 import type { TaskRunResult } from "../run/task-run-harness.js";
 import type { ExecutorResult } from "../run/task-run-executor.js";
+import type { ExecutionAgreement, ExecutionAgreementStatus, ExecutionParty, ExecutionPhaseId, ExecutionProfile } from "./execution-agreement.js";
+
+export const RUNFORGE_COMPLETION_STATUSES = [
+  "runforge_scope_completed", "workflow_completed", "awaiting_external_session", "awaiting_owner",
+  "blocked_by_capability", "blocked_by_policy", "failed",
+] as const;
+
+const LEGACY_TASK_RESULT_STATUSES = [
+  "completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required",
+] as const;
+
+export type RunForgeCompletionStatus = (typeof RUNFORGE_COMPLETION_STATUSES)[number];
+export type HandoffProfile = Extract<ExecutionProfile, "assist-only" | "local-ready">;
+export type NextParty = Exclude<ExecutionParty, "nobody">;
+
+export type ResultPhaseOwnership = { phaseId: ExecutionPhaseId; responsibleParty: ExecutionParty };
+export type ResultDelegatedPhase = { phaseId: ExecutionPhaseId; responsibleParty: Exclude<ExecutionParty, "runforge" | "nobody"> };
+export type ResultAwaitingPhase = ResultDelegatedPhase & { prerequisites: string[] };
+
+export type AgreementResultSummary = {
+  agreementId: string;
+  profile: ExecutionProfile;
+  status: ExecutionAgreementStatus;
+  phaseOwnership: ResultPhaseOwnership[];
+  runforgeCompletedPhases: ExecutionPhaseId[];
+  delegatedPhases: ResultDelegatedPhase[];
+  awaitingPhases: ResultAwaitingPhase[];
+};
+
+export type ResultGate = { name: string; status: "satisfied" | "pending" | "blocked"; evidence: string[] };
+export type ResultEvidence = { kind: "artifact" | "command" | "commit" | "patch" | "review" | "other"; reference: string; summary: string };
+
+export type ResultNextAction = { party: NextParty; exactAction: string; gates: ResultGate[]; evidence: ResultEvidence[] };
+export type HandoffValidation = { command: string; status: "passed" | "failed" | "not_run"; exitCode: number | null; evidence: string[] };
+
+export type HandoffSafety = {
+  targetMainMutation: false; targetMainPush: false; targetPrMerge: false; deploy: false;
+  databaseAccess: false; productionAccess: false; secretAccess: false;
+  providerCalls: boolean; notes: string[];
+};
+
+export type NormalizedHandoffPackage = {
+  profile: HandoffProfile;
+  summary: string;
+  changedFiles: string[];
+  patch: string | null;
+  commit: string | null;
+  validation: HandoffValidation[];
+  findings: string[];
+  risks: string[];
+  nextActions: ResultNextAction[];
+  publicationInstructions: string[];
+  ciCommands: string[];
+  safety: HandoffSafety;
+  targetSha: string | null;
+  baseSha: string | null;
+};
+
+export type AgreementAwareTaskResult = {
+  schemaVersion: 1;
+  contract: "runforge-task-result";
+  taskId: string;
+  status: RunForgeCompletionStatus;
+  agreement: AgreementResultSummary;
+  handoff: NormalizedHandoffPackage;
+  next: ResultNextAction;
+};
+
+export type NormalizedHandoffInput = Omit<NormalizedHandoffPackage, "summary" | "changedFiles" | "validation" | "findings" | "risks" | "nextActions" | "publicationInstructions" | "ciCommands" | "safety"> & {
+  summary: string;
+  changedFiles?: readonly string[];
+  validation?: readonly (Omit<HandoffValidation, "evidence"> & { evidence?: readonly string[] })[];
+  findings?: readonly string[];
+  risks?: readonly string[];
+  nextActions: readonly (Omit<ResultNextAction, "gates" | "evidence"> & { gates?: readonly ResultGate[]; evidence?: readonly ResultEvidence[] })[];
+  publicationInstructions?: readonly string[];
+  ciCommands?: readonly string[];
+  safety?: Partial<HandoffSafety>;
+};
+
+export function buildResultNextAction(
+  input: Omit<ResultNextAction, "gates" | "evidence"> & { gates?: readonly ResultGate[]; evidence?: readonly ResultEvidence[] },
+): ResultNextAction {
+  return normalizeNextAction(input, "nextAction");
+}
+
+export const buildNextAction = buildResultNextAction;
+
+/** Projects an agreement into stable, phase-ordered result fields. External ownership remains a handoff, never a failure. */
+export function buildAgreementResultSummary(agreement: ExecutionAgreement): AgreementResultSummary {
+  const requested = agreement.phases.filter((phase) => phase.requested);
+  return {
+    agreementId: requiredText(agreement.agreementId, "agreement.agreementId"),
+    profile: agreement.profile,
+    status: agreement.status,
+    phaseOwnership: requested.map(({ phaseId, responsibleParty }) => ({ phaseId, responsibleParty })),
+    runforgeCompletedPhases: requested
+      .filter((phase) => phase.responsibleParty === "runforge" && phase.status === "completed")
+      .map((phase) => phase.phaseId),
+    delegatedPhases: requested.flatMap((phase): ResultDelegatedPhase[] =>
+      phase.responsibleParty === "runforge" || phase.responsibleParty === "nobody"
+        ? []
+        : [{ phaseId: phase.phaseId, responsibleParty: phase.responsibleParty }]),
+    awaitingPhases: requested.flatMap((phase): ResultAwaitingPhase[] =>
+      phase.status === "completed" || phase.responsibleParty === "runforge" || phase.responsibleParty === "nobody"
+        ? []
+        : [{ phaseId: phase.phaseId, responsibleParty: phase.responsibleParty, prerequisites: normalizedStrings(phase.prerequisites) }]),
+  };
+}
+
+export const buildAgreementSummary = buildAgreementResultSummary;
+
+/** Builds the portable assist-only/local-ready package used by another session without relying on ambient context. */
+export function buildNormalizedHandoffPackage(input: NormalizedHandoffInput): NormalizedHandoffPackage {
+  if (input.profile !== "assist-only" && input.profile !== "local-ready") throw new Error(`Unsupported handoff profile '${String(input.profile)}'.`);
+  for (const field of ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess"] as const) {
+    if (input.safety?.[field] !== undefined && input.safety[field] !== false) throw new Error(`handoff.safety.${field} must be false.`);
+  }
+  if (input.safety?.providerCalls !== undefined && typeof input.safety.providerCalls !== "boolean") throw new Error("handoff.safety.providerCalls must be boolean.");
+  const nextActions = input.nextActions.map((action, index) => normalizeNextAction(action, `handoff.nextActions[${index}]`));
+  if (nextActions.length === 0) throw new Error("handoff.nextActions must contain at least one exact action.");
+  const validation = (input.validation ?? []).map((item, index) => {
+    if (!["passed", "failed", "not_run"].includes(item.status)) throw new Error(`handoff.validation[${index}].status is invalid.`);
+    if (item.exitCode !== null && !Number.isInteger(item.exitCode)) throw new Error(`handoff.validation[${index}].exitCode must be an integer or null.`);
+    return {
+      command: requiredText(item.command, `handoff.validation[${index}].command`),
+      status: item.status,
+      exitCode: item.exitCode,
+      evidence: normalizedStrings(item.evidence),
+    };
+  });
+  return {
+    profile: input.profile,
+    summary: requiredText(input.summary, "handoff.summary"),
+    changedFiles: normalizedStrings(input.changedFiles),
+    patch: nullableText(input.patch, "handoff.patch"),
+    commit: nullableText(input.commit, "handoff.commit"),
+    validation,
+    findings: normalizedStrings(input.findings),
+    risks: normalizedStrings(input.risks),
+    nextActions,
+    publicationInstructions: normalizedStrings(input.publicationInstructions),
+    ciCommands: normalizedStrings(input.ciCommands),
+    safety: {
+      targetMainMutation: false,
+      targetMainPush: false,
+      targetPrMerge: false,
+      deploy: false,
+      databaseAccess: false,
+      productionAccess: false,
+      secretAccess: false,
+      providerCalls: input.safety?.providerCalls ?? false,
+      notes: normalizedStrings(input.safety?.notes),
+    },
+    targetSha: nullableText(input.targetSha, "handoff.targetSha"),
+    baseSha: nullableText(input.baseSha, "handoff.baseSha"),
+  };
+}
+
+export const buildHandoffPackage = buildNormalizedHandoffPackage;
+
+export function buildAgreementAwareTaskResult(input: {
+  taskId: string;
+  status: RunForgeCompletionStatus;
+  agreement: ExecutionAgreement;
+  handoff: NormalizedHandoffInput;
+  next: Omit<ResultNextAction, "gates" | "evidence"> & { gates?: readonly ResultGate[]; evidence?: readonly ResultEvidence[] };
+}): AgreementAwareTaskResult {
+  if (!(RUNFORGE_COMPLETION_STATUSES as readonly string[]).includes(input.status)) throw new Error(`Unknown task result status '${String(input.status)}'.`);
+  return {
+    schemaVersion: 1,
+    contract: "runforge-task-result",
+    taskId: requiredText(input.taskId, "taskId"),
+    status: input.status,
+    agreement: buildAgreementResultSummary(input.agreement),
+    handoff: buildNormalizedHandoffPackage(input.handoff),
+    next: normalizeNextAction(input.next, "next"),
+  };
+}
 
 export function completionStatusForIntent(input: { executionStatus: string; implementationExpected: boolean; targetChanged: boolean; patch?: string | null; commit?: string | null; pullRequest?: string | null }): string {
   if (input.executionStatus !== "completed" || !input.implementationExpected) return input.executionStatus;
   return input.targetChanged || input.patch || input.commit || input.pullRequest ? "completed" : "implementation_not_started";
+}
+
+/** Classifies a terminal agreement result without treating delegated phases as execution failures. */
+export function completionStatusForAgreement(agreement: ExecutionAgreement, failed = false): RunForgeCompletionStatus {
+  if (failed) return "failed";
+  const conflict = agreement.conflicts[0];
+  if (conflict?.kind === "unavailable") return "blocked_by_capability";
+  if (conflict?.kind === "policy_denied") return "blocked_by_policy";
+  if (conflict?.kind === "unauthorized") return "awaiting_owner";
+  const requested = agreement.phases.filter((phase) => phase.requested);
+  if (requested.every((phase) => phase.status === "completed")) return "workflow_completed";
+  if (requested.some((phase) => phase.responsibleParty === "runforge" && phase.status !== "completed")) return "failed";
+  const awaiting = requested.find((phase) => phase.status !== "completed" && phase.responsibleParty !== "runforge");
+  return awaiting?.responsibleParty === "external_session" ? "awaiting_external_session"
+    : awaiting?.responsibleParty === "owner" ? "awaiting_owner" : "runforge_scope_completed";
 }
 
 export function taskRunResultContract(result: TaskRunResult, taskId: string): Record<string, unknown> {
@@ -70,11 +264,86 @@ export function validateTaskResultContract(value: unknown): void {
   if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error("Task result must be an object.");
   const result = value as Record<string, unknown>;
   if (result.schemaVersion !== 1 || result.contract !== "runforge-task-result") throw new Error("Task result contract/version is invalid.");
-  for (const field of ["taskId", "status"]) if (typeof result[field] !== "string" || !(result[field] as string).trim()) throw new Error(`Task result ${field} is required.`);
-  for (const field of ["targetRepository", "artifacts", "ownerGate", "nextAction", "safetyAssertions"]) if (typeof result[field] !== "object" || result[field] === null || Array.isArray(result[field])) throw new Error(`Task result ${field} must be an object.`);
+  if (typeof result.taskId !== "string" || !result.taskId.trim()) throw new Error("Task result taskId is required.");
+  const agreementAware = result.agreement !== undefined || result.handoff !== undefined || result.next !== undefined;
+  if (agreementAware) {
+    if (typeof result.status !== "string" || !(RUNFORGE_COMPLETION_STATUSES as readonly string[]).includes(result.status)) throw new Error("Task result status is invalid.");
+    for (const field of ["agreement", "handoff", "next"]) assertObject(result[field], `Task result ${field} must be an object.`);
+    validateAgreementSummary(result.agreement as Record<string, unknown>);
+    validateHandoff(result.handoff as Record<string, unknown>);
+    validateNextAction(result.next as Record<string, unknown>, "Task result next");
+    return;
+  }
+  if (typeof result.status !== "string" || !(LEGACY_TASK_RESULT_STATUSES as readonly string[]).includes(result.status)) throw new Error("Task result status is invalid.");
+  for (const field of ["targetRepository", "artifacts", "ownerGate", "nextAction", "safetyAssertions"]) assertObject(result[field], `Task result ${field} must be an object.`);
   for (const field of ["completedWork", "validation", "errors", "limitations"]) if (!Array.isArray(result[field])) throw new Error(`Task result ${field} must be an array.`);
   const target = result.targetRepository as Record<string, unknown>;
   if (typeof target.changed !== "boolean") throw new Error("Task result targetRepository.changed must be boolean.");
   const safety = result.safetyAssertions as Record<string, unknown>;
   for (const field of ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess", "providerCalls"]) if (typeof safety[field] !== "boolean") throw new Error(`Task result safetyAssertions.${field} must be boolean.`);
+}
+
+function normalizeNextAction(input: Omit<ResultNextAction, "gates" | "evidence"> & { gates?: readonly ResultGate[]; evidence?: readonly ResultEvidence[] }, name: string): ResultNextAction {
+  if (!["runforge", "external_session", "owner", "external_system"].includes(input.party)) throw new Error(`${name}.party is invalid.`);
+  return {
+    party: input.party,
+    exactAction: requiredText(input.exactAction, `${name}.exactAction`),
+    gates: (input.gates ?? []).map((gate, index) => {
+      if (!["satisfied", "pending", "blocked"].includes(gate.status)) throw new Error(`${name}.gates[${index}].status is invalid.`);
+      return { name: requiredText(gate.name, `${name}.gates[${index}].name`), status: gate.status, evidence: normalizedStrings(gate.evidence) };
+    }),
+    evidence: (input.evidence ?? []).map((item, index) => {
+      if (!["artifact", "command", "commit", "patch", "review", "other"].includes(item.kind)) throw new Error(`${name}.evidence[${index}].kind is invalid.`);
+      return {
+        kind: item.kind,
+        reference: requiredText(item.reference, `${name}.evidence[${index}].reference`),
+        summary: requiredText(item.summary, `${name}.evidence[${index}].summary`),
+      };
+    }),
+  };
+}
+
+function validateAgreementSummary(value: Record<string, unknown>): void {
+  for (const field of ["agreementId", "profile", "status"]) if (typeof value[field] !== "string" || !(value[field] as string).trim()) throw new Error(`Task result agreement.${field} is required.`);
+  for (const field of ["phaseOwnership", "runforgeCompletedPhases", "delegatedPhases", "awaitingPhases"]) if (!Array.isArray(value[field])) throw new Error(`Task result agreement.${field} must be an array.`);
+}
+
+function validateHandoff(value: Record<string, unknown>): void {
+  if (value.profile !== "assist-only" && value.profile !== "local-ready") throw new Error("Task result handoff.profile is invalid.");
+  if (typeof value.summary !== "string" || !value.summary.trim()) throw new Error("Task result handoff.summary is required.");
+  for (const field of ["changedFiles", "validation", "findings", "risks", "nextActions", "publicationInstructions", "ciCommands"]) if (!Array.isArray(value[field])) throw new Error(`Task result handoff.${field} must be an array.`);
+  if ((value.nextActions as unknown[]).length === 0) throw new Error("Task result handoff.nextActions must not be empty.");
+  for (const [index, action] of (value.nextActions as unknown[]).entries()) {
+    assertObject(action, `Task result handoff.nextActions[${index}] must be an object.`);
+    validateNextAction(action as Record<string, unknown>, `Task result handoff.nextActions[${index}]`);
+  }
+  assertObject(value.safety, "Task result handoff.safety must be an object.");
+  const safety = value.safety as Record<string, unknown>;
+  for (const field of ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess"]) if (safety[field] !== false) throw new Error(`Task result handoff.safety.${field} must be false.`);
+  if (typeof safety.providerCalls !== "boolean" || !Array.isArray(safety.notes)) throw new Error("Task result handoff.safety is incomplete.");
+}
+
+function validateNextAction(value: Record<string, unknown>, name: string): void {
+  if (!["runforge", "external_session", "owner", "external_system"].includes(value.party as string)) throw new Error(`${name}.party is invalid.`);
+  if (typeof value.exactAction !== "string" || !value.exactAction.trim()) throw new Error(`${name}.exactAction is required.`);
+  if (!Array.isArray(value.gates) || !Array.isArray(value.evidence)) throw new Error(`${name} gates and evidence must be arrays.`);
+}
+
+function requiredText(value: string, name: string): string {
+  const normalized = value.trim();
+  if (!normalized) throw new Error(`${name} is required.`);
+  return normalized;
+}
+
+function nullableText(value: string | null, name: string): string | null {
+  if (value === null) return null;
+  return requiredText(value, name);
+}
+
+function normalizedStrings(values: readonly string[] | undefined): string[] {
+  return [...new Set((values ?? []).map((value) => value.trim()).filter(Boolean))].sort();
+}
+
+function assertObject(value: unknown, message: string): asserts value is Record<string, unknown> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(message);
 }

@@ -3,17 +3,241 @@
   "$id": "https://runforge.local/schemas/task-result-v1.schema.json",
   "title": "RunForge normalized task result v1",
   "type": "object",
-  "required": ["schemaVersion", "contract", "taskId", "status", "targetRepository", "completedWork", "validation", "artifacts", "ownerGate", "nextAction", "safetyAssertions", "errors", "limitations"],
+  "required": ["schemaVersion", "contract", "taskId", "status"],
+  "anyOf": [
+    {
+      "required": ["agreement", "handoff", "next"],
+      "properties": {
+        "status": { "$ref": "#/$defs/completionStatus" },
+        "agreement": true,
+        "handoff": true,
+        "next": true
+      }
+    },
+    {
+      "required": ["targetRepository", "completedWork", "validation", "artifacts", "ownerGate", "nextAction", "safetyAssertions", "errors", "limitations"],
+      "properties": {
+        "status": { "$ref": "#/$defs/legacyStatus" },
+        "targetRepository": true, "completedWork": true, "validation": true, "artifacts": true,
+        "ownerGate": true, "nextAction": true, "safetyAssertions": true, "errors": true, "limitations": true
+      }
+    }
+  ],
   "properties": {
-    "schemaVersion": { "const": 1 }, "contract": { "const": "runforge-task-result" }, "taskId": { "type": "string", "minLength": 1 },
-    "status": { "enum": ["completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required"] },
-    "targetRepository": { "type": "object", "required": ["path", "initialSha", "finalSha", "changed"], "properties": { "path": { "type": ["string", "null"] }, "repositoryRoot": { "type": ["string", "null"] }, "executionRoot": { "type": ["string", "null"] }, "initialSha": { "type": ["string", "null"] }, "finalSha": { "type": ["string", "null"] }, "changed": { "type": "boolean" } } },
-    "completedWork": { "type": "array", "items": { "type": "object" } }, "validation": { "type": "array", "items": { "type": "object", "required": ["command"], "properties": { "command": { "type": "string", "minLength": 1 } } } },
-    "artifacts": { "type": "object", "required": ["summary", "results"], "properties": { "summary": { "type": "string", "minLength": 1 }, "results": { "type": "string", "minLength": 1 } } },
+    "schemaVersion": { "const": 1 },
+    "contract": { "const": "runforge-task-result" },
+    "taskId": { "type": "string", "minLength": 1 },
+    "status": { "type": "string" },
+    "agreement": { "$ref": "#/$defs/agreementSummary" },
+    "handoff": { "$ref": "#/$defs/handoff" },
+    "next": { "$ref": "#/$defs/nextAction" },
+    "targetRepository": {
+      "type": "object",
+      "required": ["path", "initialSha", "finalSha", "changed"],
+      "properties": {
+        "path": { "type": ["string", "null"] },
+        "repositoryRoot": { "type": ["string", "null"] },
+        "executionRoot": { "type": ["string", "null"] },
+        "initialSha": { "type": ["string", "null"] },
+        "finalSha": { "type": ["string", "null"] },
+        "changed": { "type": "boolean" }
+      }
+    },
+    "completedWork": { "type": "array", "items": { "type": "object" } },
+    "validation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["command"],
+        "properties": { "command": { "type": "string", "minLength": 1 } }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "required": ["summary", "results"],
+      "properties": {
+        "summary": { "type": "string", "minLength": 1 },
+        "results": { "type": "string", "minLength": 1 }
+      }
+    },
     "git": { "type": "object" },
-    "ownerGate": { "type": "object", "required": ["required", "status"], "properties": { "required": { "type": "boolean" }, "status": { "type": "string", "minLength": 1 } } },
-    "nextAction": { "type": "object", "required": ["recommendation"], "properties": { "recommendation": { "type": "string", "minLength": 1 } } },
-    "safetyAssertions": { "type": "object", "required": ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess", "providerCalls"], "properties": { "targetMainMutation": { "const": false }, "targetMainPush": { "const": false }, "targetPrMerge": { "const": false }, "deploy": { "const": false }, "databaseAccess": { "const": false }, "productionAccess": { "const": false }, "secretAccess": { "const": false }, "providerCalls": { "type": "boolean" } } },
-    "errors": { "type": "array" }, "limitations": { "type": "array" }
+    "ownerGate": {
+      "type": "object",
+      "required": ["required", "status"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "status": { "type": "string", "minLength": 1 }
+      }
+    },
+    "nextAction": {
+      "type": "object",
+      "required": ["recommendation"],
+      "properties": { "recommendation": { "type": "string", "minLength": 1 } }
+    },
+    "safetyAssertions": { "$ref": "#/$defs/safety" },
+    "errors": { "type": "array" },
+    "limitations": { "type": "array" }
+  },
+  "$defs": {
+    "completionStatus": {
+      "enum": [
+        "runforge_scope_completed",
+        "workflow_completed",
+        "awaiting_external_session",
+        "awaiting_owner",
+        "blocked_by_capability",
+        "blocked_by_policy",
+        "failed"
+      ]
+    },
+    "legacyStatus": {
+      "enum": ["completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required"]
+    },
+    "phaseId": {
+      "enum": [
+        "projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation",
+        "localValidation", "independentReview", "repairIterations", "patchPackage",
+        "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring",
+        "ciRepair", "prReview", "merge", "deploy", "postDeployValidation", "dbAccess",
+        "productionAccess", "secretUse", "providerModelCalls"
+      ]
+    },
+    "party": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+    "nextParty": { "enum": ["runforge", "external_session", "owner", "external_system"] },
+    "strings": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "phaseOwnership": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phaseId", "responsibleParty"],
+      "properties": {
+        "phaseId": { "$ref": "#/$defs/phaseId" },
+        "responsibleParty": { "$ref": "#/$defs/party" }
+      }
+    },
+    "delegatedPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phaseId", "responsibleParty"],
+      "properties": {
+        "phaseId": { "$ref": "#/$defs/phaseId" },
+        "responsibleParty": { "enum": ["external_session", "owner", "external_system"] }
+      }
+    },
+    "awaitingPhase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["phaseId", "responsibleParty", "prerequisites"],
+      "properties": {
+        "phaseId": { "$ref": "#/$defs/phaseId" },
+        "responsibleParty": { "enum": ["external_session", "owner", "external_system"] },
+        "prerequisites": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "agreementSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agreementId", "profile", "status", "phaseOwnership", "runforgeCompletedPhases", "delegatedPhases", "awaitingPhases"],
+      "properties": {
+        "agreementId": { "type": "string", "minLength": 1 },
+        "profile": { "enum": ["assist-only", "local-ready", "draft-pr", "delivery", "custom"] },
+        "status": { "enum": ["ready", "conflicted", "in_progress", "completed"] },
+        "phaseOwnership": { "type": "array", "items": { "$ref": "#/$defs/phaseOwnership" } },
+        "runforgeCompletedPhases": { "type": "array", "uniqueItems": true, "items": { "$ref": "#/$defs/phaseId" } },
+        "delegatedPhases": { "type": "array", "items": { "$ref": "#/$defs/delegatedPhase" } },
+        "awaitingPhases": { "type": "array", "items": { "$ref": "#/$defs/awaitingPhase" } }
+      }
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "status", "evidence"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["satisfied", "pending", "blocked"] },
+        "evidence": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reference", "summary"],
+      "properties": {
+        "kind": { "enum": ["artifact", "command", "commit", "patch", "review", "other"] },
+        "reference": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string", "minLength": 1 }
+      }
+    },
+    "nextAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["party", "exactAction", "gates", "evidence"],
+      "properties": {
+        "party": { "$ref": "#/$defs/nextParty" },
+        "exactAction": { "type": "string", "minLength": 1 },
+        "gates": { "type": "array", "items": { "$ref": "#/$defs/gate" } },
+        "evidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } }
+      }
+    },
+    "handoffValidation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "status", "exitCode", "evidence"],
+      "properties": {
+        "command": { "type": "string", "minLength": 1 },
+        "status": { "enum": ["passed", "failed", "not_run"] },
+        "exitCode": { "type": ["integer", "null"] },
+        "evidence": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "safety": {
+      "type": "object",
+      "required": ["targetMainMutation", "targetMainPush", "targetPrMerge", "deploy", "databaseAccess", "productionAccess", "secretAccess", "providerCalls"],
+      "properties": {
+        "targetMainMutation": { "const": false },
+        "targetMainPush": { "const": false },
+        "targetPrMerge": { "const": false },
+        "deploy": { "const": false },
+        "databaseAccess": { "const": false },
+        "productionAccess": { "const": false },
+        "secretAccess": { "const": false },
+        "providerCalls": { "type": "boolean" },
+        "notes": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "handoffSafety": {
+      "allOf": [
+        { "$ref": "#/$defs/safety" },
+        {
+          "type": "object",
+          "required": ["notes"],
+          "properties": { "notes": { "$ref": "#/$defs/strings" } }
+        }
+      ]
+    },
+    "handoff": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["profile", "summary", "changedFiles", "patch", "commit", "validation", "findings", "risks", "nextActions", "publicationInstructions", "ciCommands", "safety", "targetSha", "baseSha"],
+      "properties": {
+        "profile": { "enum": ["assist-only", "local-ready"] },
+        "summary": { "type": "string", "minLength": 1 },
+        "changedFiles": { "$ref": "#/$defs/strings" },
+        "patch": { "type": ["string", "null"], "minLength": 1 },
+        "commit": { "type": ["string", "null"], "minLength": 1 },
+        "validation": { "type": "array", "items": { "$ref": "#/$defs/handoffValidation" } },
+        "findings": { "$ref": "#/$defs/strings" },
+        "risks": { "$ref": "#/$defs/strings" },
+        "nextActions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/nextAction" } },
+        "publicationInstructions": { "$ref": "#/$defs/strings" },
+        "ciCommands": { "$ref": "#/$defs/strings" },
+        "safety": { "$ref": "#/$defs/handoffSafety" },
+        "targetSha": { "type": ["string", "null"], "minLength": 1 },
+        "baseSha": { "type": ["string", "null"], "minLength": 1 }
+      }
+    }
   }
 }
