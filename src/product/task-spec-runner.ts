@@ -28,11 +28,18 @@ import {
 export type TaskSpecExecution =
   | { kind: "validation"; spec: TaskSpecV2; result: TaskRunResult; summary: string; success: boolean }
   | { kind: "repair"; spec: TaskSpecV2; result: ExternalExecutionResult; summary: string; success: boolean }
-  | { kind: "implementation"; spec: TaskSpecV2; result: ImplementationExecutorResult; summary: string; success: boolean };
+  | { kind: "implementation"; spec: TaskSpecV2; result: ImplementationExecutorResult | AgreementHandoffResult; summary: string; success: boolean };
+type AgreementHandoffResult = { status: "delegated"; responsibleParty: "external_session" | "external_system"; selectedExecutor: { id: "agreement-handoff"; model: null }; providerCalls: []; publicationMutations: 0 };
 export async function runTaskSpecFile(path: string, context: { signal?: AbortSignal; attempt?: number; executionId?: string; onProgress?: (phase: string, detail: string) => void | Promise<void> } = {}): Promise<TaskSpecExecution> {
   const spec = await loadTaskSpecV2(path);
   const initialTarget = await inspectProject(spec.target.repository, spec.target.workingDirectory);
   await writeNormalizedSpec(spec);
+  const delegatedParty = delegatedImplementationParty(spec);
+  if (["implementation", "repair"].includes(spec.execution.mode) && delegatedParty) {
+    const result: AgreementHandoffResult = { status: "delegated", responsibleParty: delegatedParty, selectedExecutor: { id: "agreement-handoff", model: null }, providerCalls: [], publicationMutations: 0 };
+    const status = await finalizeDelegatedImplementationArtifacts(spec, initialTarget, delegatedParty, context.executionId !== undefined);
+    return { kind: "implementation", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: true };
+  }
   if (["implementation", "repair"].includes(spec.execution.mode) && spec.repair.mode === "none") {
     const result = await preserveSpecOnFailure(spec, initialTarget, () => runImplementationExecutor({
       spec, targetRepository: spec.target.repository, workingDirectory: spec.target.workingDirectory,
@@ -95,6 +102,69 @@ export async function runTaskSpecFile(path: string, context: { signal?: AbortSig
   return { kind: "repair", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: ["completed", "awaiting_owner_decision"].includes(status) };
 }
 
+async function finalizeDelegatedImplementationArtifacts(spec: TaskSpecV2, initialTarget: ProjectInspection, party: "external_session" | "external_system", legacySettlement: boolean): Promise<RunForgeCompletionStatus> {
+  const enabled = Object.fromEntries([...IMPLEMENTATION_PHASES].map((phase) => [phase, true]));
+  let agreement = negotiateExecutionAgreement({
+    profile: spec.executionAgreement.profile,
+    requested: spec.authority.allowProviderCalls ? undefined : { providerModelCalls: false },
+    requestedOwnership: spec.executionAgreement.phaseOwnership,
+    technicalCapability: enabled,
+    authority: enabled,
+    policy: enabled,
+  });
+  for (const [phaseId, evidence] of [["projectDiscovery", ["task-spec.normalized.json"]], ["taskAnalysis", ["task-spec.normalized.json"]]] as const) {
+    const phase = agreement.phases.find((item) => item.phaseId === phaseId);
+    if (phase?.requested && phase.responsibleParty === "runforge" && phase.status !== "conflict") agreement = completeExecutionPhase(agreement, phaseId, evidence);
+  }
+  const implementation = agreement.phases.find((phase) => phase.phaseId === "implementation")!;
+  const status: RunForgeCompletionStatus = party === "external_session" ? "awaiting_external_session" : "runforge_scope_completed";
+  const next: ResultNextAction = {
+    party,
+    exactAction: `Complete the delegated implementation phase in ${party} and attach its completion evidence.`,
+    gates: implementation.prerequisites.map((name) => ({ name, status: "pending", evidence: [] })),
+    evidence: [],
+  };
+  const finalTarget = await inspectProject(spec.target.repository, spec.target.workingDirectory);
+  const sourceUnchanged = initialTarget.head === finalTarget.head && initialTarget.branch === finalTarget.branch && initialTarget.worktree.summary === finalTarget.worktree.summary;
+  const handoff: NormalizedHandoffInput = {
+    profile: "assist-only",
+    summary: `RunForge performed safe agreement and project discovery only; implementation is delegated to ${party}.`,
+    changedFiles: [], patch: null, commit: null, validation: [], findings: [],
+    risks: ["Implementation and validation remain outside this RunForge execution."],
+    nextActions: [next],
+    publicationInstructions: ["Publication was not requested or performed by this agreement-handoff lane."],
+    ciCommands: spec.validation.commands,
+    safety: { providerCalls: false, notes: ["No coding agent, provider call, source mutation, publication, push, merge, deploy, database, production, or secret action was performed."] },
+    targetSha: finalTarget.head,
+    baseSha: initialTarget.head,
+  };
+  const agreementAware = buildAgreementAwareTaskResult({ taskId: spec.taskId, status, agreement, handoff, next });
+  const settlement = legacySettlement
+    ? { schemaVersion: 1 as const, contract: "runforge-task-result" as const, taskId: spec.taskId, status: "completed", workflow: agreementAware }
+    : agreementAware;
+  const document = {
+    ...settlement,
+    requestedIntent: spec.execution.mode,
+    actualExecutorMode: "agreement-handoff",
+    selectedExecutor: { id: "agreement-handoff", model: null },
+    implementation: { status: "delegated", performed: false, responsibleParty: party, changedFiles: [], localBranch: null, localCommit: null, patchPackage: null, unresolvedAcceptanceCriteria: spec.task.acceptanceCriteria },
+    targetRepository: { path: spec.target.repository, repositoryRoot: finalTarget.repositoryRoot, executionRoot: finalTarget.executionRoot, initialSha: initialTarget.head, finalSha: finalTarget.head, changed: !sourceUnchanged, initialBranch: initialTarget.branch, finalBranch: finalTarget.branch, initialStatus: initialTarget.worktree.summary, finalStatus: finalTarget.worktree.summary, refsChanged: false },
+    completedWork: [], validation: [],
+    artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", plan: null, patch: null },
+    git: { branch: null, commit: null, patchPackage: null, pullRequest: null, merge: null, sourceRefsChanged: false },
+    publication: { status: "not_requested", performed: false, mutations: 0 },
+    providerCalls: [], providerMutations: 0, publicationMutations: 0,
+    ownerGate: { required: false, status: "not_required" },
+    nextAction: { recommendation: next.exactAction },
+    safetyAssertions: { targetUnchanged: sourceUnchanged, targetMainMutation: false, targetMainPush: false, targetPrMerge: false, deploy: false, databaseAccess: false, productionAccess: false, secretAccess: false, providerCalls: false },
+    diagnostics: {}, errors: [], limitations: ["Implementation and validation were delegated by the effective Execution Agreement."]
+  };
+  validateTaskResultContract(document);
+  await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
+  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} agreement handoff\n\nRunForge execution status: **${status}**\n\nImplementation owner: **${party}**\n\nNext action: ${next.exactAction}\n\nSource SHA, branch, worktree status, and refs were preserved. Provider and publication mutations: **0**.\n`, "utf8");
+  return status;
+}
+
 async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: ImplementationExecutorResult, legacySettlement: boolean): Promise<RunForgeCompletionStatus> {
   const completed = ["implemented_and_validated", "no_change_required"].includes(result.status);
   const ownerRequired = result.status === "blocked_with_owner_gate";
@@ -133,6 +203,11 @@ const IMPLEMENTATION_PHASES = new Set<ExecutionPhaseId>([
   "projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation",
   "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "providerModelCalls",
 ]);
+
+function delegatedImplementationParty(spec: TaskSpecV2): "external_session" | "external_system" | null {
+  const party = executionPhaseOwner(spec.executionAgreement.profile, "implementation", spec.executionAgreement.phaseOwnership);
+  return party === "external_session" || party === "external_system" ? party : null;
+}
 
 function implementationAgreement(spec: TaskSpecV2, result: ImplementationExecutorResult, completed: boolean): ExecutionAgreement {
   const enabled = Object.fromEntries([...IMPLEMENTATION_PHASES].map((phase) => [phase, true]));

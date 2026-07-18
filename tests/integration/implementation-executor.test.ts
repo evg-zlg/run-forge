@@ -83,6 +83,41 @@ describe("implementation executor", () => {
     expect(await readFile(String(result.implementation.patchPackage), "utf8")).toContain("diff --git");
   });
 
+  it.each([["external_session", "implementation"], ["external_system", "repair"]] as const)("hands %s-owned implementation off in %s mode without invoking the configured coding adapter", async (party, mode) => {
+    const repo = await repository();
+    const probeRoot = await mkdtemp(join(tmpdir(), "runforge-delegated-adapter-probe-"));
+    const marker = join(probeRoot, "invoked");
+    const probe = join(probeRoot, "adapter.mjs");
+    await writeFile(probe, `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "invoked"); throw new Error("delegated adapter must not run");\n`);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${probe}`;
+    const before = {
+      head: await git(repo, ["rev-parse", "HEAD"]),
+      status: await git(repo, ["status", "--porcelain=v1", "-uall"]),
+      refs: await git(repo, ["for-each-ref", "--format=%(refname) %(objectname)"]),
+    };
+    const { execution, result } = await executeWithExecution(
+      repo, `EXECUTOR-DELEGATED-${party === "external_session" ? "SESSION" : "SYSTEM"}-1`, "fix add", ["node test.js"], [],
+      { schemaVersion: 1, profile: "custom", phaseOwnership: { implementation: party, localBranch: "runforge", localCommit: "runforge", providerModelCalls: "runforge" } },
+      undefined, mode,
+    );
+    expect(execution).toMatchObject({ kind: "implementation", success: true, result: { status: "delegated", responsibleParty: party, selectedExecutor: { id: "agreement-handoff" }, providerCalls: [], publicationMutations: 0 } });
+    expect(result).toMatchObject({
+      status: party === "external_session" ? "awaiting_external_session" : "runforge_scope_completed",
+      actualExecutorMode: "agreement-handoff",
+      selectedExecutor: { id: "agreement-handoff", model: null },
+      implementation: { status: "delegated", performed: false, responsibleParty: party, changedFiles: [], localBranch: null, localCommit: null },
+      targetRepository: { initialSha: before.head.trim(), finalSha: before.head.trim(), changed: false, refsChanged: false },
+      providerCalls: [], providerMutations: 0, publicationMutations: 0,
+      publication: { performed: false, mutations: 0 },
+      next: { party, exactAction: `Complete the delegated implementation phase in ${party} and attach its completion evidence.` },
+      safetyAssertions: { targetUnchanged: true, providerCalls: false },
+    });
+    await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    expect(await git(repo, ["rev-parse", "HEAD"])).toBe(before.head);
+    expect(await git(repo, ["status", "--porcelain=v1", "-uall"])).toBe(before.status);
+    expect(await git(repo, ["for-each-ref", "--format=%(refname) %(objectname)"])).toBe(before.refs);
+  });
+
   it("fails safely when the deterministic RunForge branch already exists", async () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const repo = await repository(); const before = await git(repo, ["rev-parse", "HEAD"]);
@@ -297,6 +332,6 @@ async function repository(withSensitiveContext = false): Promise<string> { const
 async function git(cwd: string, args: string[]): Promise<string> { return (await exec("git", args, { cwd })).stdout; }
 function spec(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []) { return { schemaVersion: 2, taskId, task: { text, goal: "Make the deterministic fixture satisfy acceptance", acceptanceCriteria: ["validation is green", "local patch evidence exists"] }, target: { repository: repo, workingDirectory: "." }, execution: { mode: "implementation", maxRepairIterations: 2 }, runtime: { preference: "local-disposable", externalNetwork: "allowed", dependencyPreparation: "disabled" }, validation: { mode: "explicit", commands }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true, forbiddenAreas }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
 async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
-async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.executionAgreement = executionAgreement; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
+async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string, executionMode: "implementation" | "repair" = "implementation"): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.execution.mode = executionMode; value.executionAgreement = executionAgreement; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
 async function poll(url: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("task did not finish"); }
 async function pollPhase(url: string, phase: string): Promise<void> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (task.progress?.phase === phase) return; await new Promise((done) => setTimeout(done, 25)); } throw new Error(`task did not reach ${phase}`); }

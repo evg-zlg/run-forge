@@ -103,7 +103,7 @@ describe("local control-plane HTTP lifecycle", () => {
     bounded.close();
   });
 
-  it("limits requested phases by execution mode and applies local commit preflight only to requested RunForge ownership", async () => {
+  it("limits requested phases by execution mode and bypasses local authority for delegated implementation", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-mode-agreements-"))) - 1]!;
     const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) });
     const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
@@ -123,11 +123,11 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(validationAgreement.phases).toContainEqual(expect.objectContaining({ phaseId: "localCommit", requested: false, responsibleParty: "nobody" }));
 
     const ownedCommitSpec = { ...implementationTaskSpec("CONTROL-PREFLIGHT-LOCAL-COMMIT-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { implementation: "external_session", localBranch: "external_session", localCommit: "runforge" } } };
-    const ownedCommit = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: ownedCommitSpec, authority: { ...implementationAuthority(), localBranch: false, localCommit: false } }) });
-    expect(ownedCommit.status).toBe(403); expect(await json(ownedCommit)).toMatchObject({ error: { code: "local_commit_authority_denied", taskId: "CONTROL-PREFLIGHT-LOCAL-COMMIT-1" } });
+    const ownedCommit = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: ownedCommitSpec, authority: { ...implementationAuthority(), implementation: false, providerCalls: false, network: false, localBranch: false, localCommit: false } }) });
+    expect(ownedCommit.status).toBe(202); expect(await json(ownedCommit)).toMatchObject({ selection: { selectedExecutor: "agreement-handoff", selectedRuntime: null, authorityChecks: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true }, providerDecision: "not_requested", networkDecision: "not_requested" } });
   });
 
-  it("checks local mutation authority against referenced effective ownership", async () => {
+  it("uses referenced effective implementation ownership to choose the agreement-handoff lane", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-effective-authority-"))) - 1]!;
     const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) });
     await manager.initialize();
@@ -137,17 +137,42 @@ describe("local control-plane HTTP lifecycle", () => {
 
     const branchOwnership: LocalOwnership = { implementation: "external_session", localBranch: "runforge", localCommit: "external_session" };
     const branchAgreement = await negotiate(branchOwnership, { localBranch: true });
-    await expect(create("CONTROL-EFFECTIVE-BRANCH-1", branchOwnership, branchAgreement.agreementId)).rejects.toMatchObject({ status: 403, code: "mutation_authority_denied", taskId: "CONTROL-EFFECTIVE-BRANCH-1" });
+    expect(await create("CONTROL-EFFECTIVE-BRANCH-1", branchOwnership, branchAgreement.agreementId)).toMatchObject({ selection: { selectedExecutor: "agreement-handoff", authorityChecks: { localBranch: true, localCommit: true } } });
 
     const commitOwnership: LocalOwnership = { implementation: "external_session", localBranch: "external_session", localCommit: "runforge" };
     const commitAgreement = await negotiate(commitOwnership, { localCommit: true });
-    await expect(create("CONTROL-EFFECTIVE-COMMIT-1", commitOwnership, commitAgreement.agreementId)).rejects.toMatchObject({ status: 403, code: "local_commit_authority_denied", taskId: "CONTROL-EFFECTIVE-COMMIT-1" });
+    expect(await create("CONTROL-EFFECTIVE-COMMIT-1", commitOwnership, commitAgreement.agreementId)).toMatchObject({ selection: { selectedExecutor: "agreement-handoff", authorityChecks: { localBranch: true, localCommit: true } } });
 
     const externalOwnership: LocalOwnership = { implementation: "external_session", localBranch: "external_session", localCommit: "external_session" };
     const externalAgreement = await negotiate(externalOwnership);
     const externalCreated = await create("CONTROL-EFFECTIVE-EXTERNAL-1", externalOwnership, externalAgreement.agreementId);
     expect(externalCreated).toMatchObject({ executionAgreement: { agreementId: externalAgreement.agreementId }, selection: { authorityChecks: { localBranch: true, localCommit: true } } });
     manager.close();
+  });
+
+  it("settles an externally owned implementation through public HTTP without selecting or invoking the configured adapter", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-control-delegated-implementation-"))) - 1]!;
+    const probe = join(stateRoot, "adapter.mjs"); const marker = join(stateRoot, "adapter-invoked");
+    await writeFile(probe, `import { writeFileSync } from "node:fs"; writeFileSync(${JSON.stringify(marker)}, "invoked"); throw new Error("delegated adapter must not run");\n`);
+    const previous = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${probe}`;
+    const source = { head: execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" }), status: execFileSync("git", ["status", "--porcelain=v1", "-uall"], { encoding: "utf8" }), refs: execFileSync("git", ["for-each-ref", "--format=%(refname) %(objectname)"], { encoding: "utf8" }) };
+    const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
+    try {
+      const taskSpec = { ...implementationTaskSpec("CONTROL-DELEGATED-IMPLEMENTATION-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { implementation: "external_system", localBranch: "runforge", localCommit: "runforge", providerModelCalls: "runforge" } } };
+      const response = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec, authority: { inspect: true } }) });
+      expect(response.status).toBe(202);
+      expect(await json(response)).toMatchObject({ selection: { requestedMode: "implementation", selectedExecutor: "agreement-handoff", selectedRuntime: null, providerDecision: "not_requested", networkDecision: "not_requested", provider: null, model: null, authorityChecks: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true } } });
+      await eventually(async () => (await json(await fetch(`${instance.url}/v1/tasks/CONTROL-DELEGATED-IMPLEMENTATION-1`))).status === "completed");
+      const result = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-DELEGATED-IMPLEMENTATION-1/result`));
+      expect(result).toMatchObject({ status: "completed", workflow: { status: "runforge_scope_completed", next: { party: "external_system", exactAction: "Complete the delegated implementation phase in external_system and attach its completion evidence." } }, actualExecutorMode: "agreement-handoff", implementation: { status: "delegated", performed: false, responsibleParty: "external_system" }, providerCalls: [], providerMutations: 0, publicationMutations: 0, publication: { performed: false, mutations: 0 }, targetRepository: { initialSha: source.head.trim(), finalSha: source.head.trim(), changed: false, refsChanged: false } });
+      await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+      expect(execFileSync("git", ["rev-parse", "HEAD"], { encoding: "utf8" })).toBe(source.head);
+      expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { encoding: "utf8" })).toBe(source.status);
+      expect(execFileSync("git", ["for-each-ref", "--format=%(refname) %(objectname)"], { encoding: "utf8" })).toBe(source.refs);
+    } finally {
+      if (previous === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previous;
+    }
   });
 
   it("reuses the task effective timeout for continuation", async () => {
