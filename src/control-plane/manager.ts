@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { access, cp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { realpath } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
@@ -37,6 +37,7 @@ function agreementHardBoundaries(): string[] {
 }
 
 type ActiveWorker = { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController };
+type ContinuationBinding = { taskId: string; projectId: string | null; repository: string; workingDirectory: string; sourceBranch: string; sourceSha: string };
 
 export class ControlPlaneManager {
   private readonly active = new Map<string, ActiveWorker>();
@@ -110,7 +111,9 @@ export class ControlPlaneManager {
     }
     const requestedInSpec = object(raw.git).publication; const publicationRequested = input.publicationRequested === "draft-pr" || requestedInSpec === "draft-pr" ? "draft-pr" : "none";
     raw.git = { publication: "none" }; raw.merge = { policy: "never" }; raw.deploy = { policy: "never" }; const artifactRoot = join(this.store.taskDir(taskId), "attempts", "1", "artifacts"); raw.artifacts = { ...object(raw.artifacts), root: artifactRoot, resultFormat: "normalized-v1" };
-    const specPath = await this.store.writeSpec(taskId, raw); let normalized: Awaited<ReturnType<typeof loadTaskSpecV2>>; try { normalized = await loadTaskSpecV2(specPath); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error), { operation: "start_new_task", newTaskRequired: true }); }
+    let specPath = await this.store.writeSpec(taskId, raw); let normalized: Awaited<ReturnType<typeof loadTaskSpecV2>>; try { normalized = await loadTaskSpecV2(specPath); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error), { operation: "start_new_task", newTaskRequired: true }); }
+    raw.target = { ...object(raw.target), repository: normalized.target.repository, workingDirectory: normalized.target.workingDirectory, expectedSha: normalized.target.expectedSha };
+    specPath = await this.store.writeSpec(taskId, raw);
     const implementation = ["implementation", "repair"].includes(normalized.execution.mode);
     const automaticContext = project ? await this.executionAgreementContext(project, { kind: "none" }) : undefined;
     const preflightAgreement = negotiateTaskAgreement(normalized, input.authority, automaticContext);
@@ -157,7 +160,7 @@ export class ControlPlaneManager {
     if (task.decisions.some((item) => item.kind === "owner")) throw new ControlPlaneError(409, "owner_decision_conflict", "An owner decision is already recorded.", undefined, false, id);
     if (!task.ownerGate.required) throw new ControlPlaneError(409, "owner_gate_not_open", "This task has no open implementation owner gate.", undefined, false, id);
     if (["approve", "continue"].includes(input.decision) && !task.authority.implementation) throw new ControlPlaneError(403, "authority_denied", "Implementation authority is required.", undefined, false, id);
-    await this.ensureContinuationSnapshot(task); if (task.continuation.state === "unrecoverable") { await this.interrupt(task, "continuation_state_unrecoverable", ["retry", "cancel"]); throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Owner decision was not recorded because continuation state cannot be safely reconstructed.", { recoveryActions: task.recovery?.actions }, false, id); } const targetBranch = input.targetBranch ?? `runforge/${task.id.toLowerCase()}`;
+    await this.ensureContinuationSnapshot(task); if (task.continuation.state === "unrecoverable") { await this.markContinuationUnrecoverable(task); throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Owner decision was not recorded because continuation state cannot be safely reconstructed.", { recoveryActions: task.recovery?.actions }, false, id); } const targetBranch = input.targetBranch ?? `runforge/${task.id.toLowerCase()}`;
     let recorded: { decisionId: string; path: string }; try { recorded = await this.operations.recordOwnerDecision({ run: task.artifactRoot, decision: input.decision, targetMode: "controlled-worktree", targetBranch, ownerNote: input.note }); } catch (error) { throw continuationError(task, error); }
     const response = { decisionId: input.decisionId, runforgeDecisionId: recorded.decisionId, artifact: basename(recorded.path), decision: input.decision, targetBranch };
     task.decisions.push(decisionRecord(input.decisionId, "owner", input.decision, response)); task.continuation.decisionId = input.decisionId; const snapshot = await this.store.readContinuation(id); if (snapshot) await this.store.saveContinuation(id, { ...snapshot, decisionId: input.decisionId }); task.ownerGate = { required: ["approve", "continue"].includes(input.decision), status: input.decision === "reject" ? "rejected" : input.decision === "hold" ? "on_hold" : "decision_recorded" }; task.updatedAt = new Date().toISOString(); await this.persist(task, "owner_decision_recorded", input.decision); return response;
@@ -168,7 +171,7 @@ export class ControlPlaneManager {
     const live = this.liveWorker(task); if (live?.operation === "continuation" || live && ["running", "continuing"].includes(task.status)) return task;
     if (task.status !== "awaiting_owner_decision") throw new ControlPlaneError(409, "task_not_continuable", `Task status '${task.status}' cannot be continued; interrupted attempts must use the advertised retry operation.`, undefined, false, id);
     if (!task.decisions.some((item) => item.kind === "owner" && ["approve", "continue"].includes(item.decision))) throw new ControlPlaneError(409, "owner_decision_required", "An approving owner decision is required.", undefined, false, id);
-    if (!(await this.restoreContinuation(task))) { await this.interrupt(task, "continuation_state_unrecoverable", ["retry", "cancel"]); throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Continuation state is missing or corrupt and could not be safely reconstructed.", { recoveryActions: task.recovery?.actions }, false, id); }
+    if (!(await this.restoreContinuation(task))) { await this.markContinuationUnrecoverable(task); throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Continuation state is missing or corrupt and could not be safely reconstructed.", { recoveryActions: task.recovery?.actions }, false, id); }
     await this.persist(task, "continuation_requested"); await this.beginAttempt(task, "continuation"); return task;
   }); }
 
@@ -183,7 +186,8 @@ export class ControlPlaneManager {
     const sourceExecutionId = task.progress.executionId;
     if (!sourceExecutionId) throw new ControlPlaneError(409, "execution_identity_missing", "Interrupted task has no execution identity.", undefined, false, id);
     const operation = task.continuation.decisionId ? "continuation" : "execution";
-    if (operation === "continuation" && !(await this.restoreContinuation(task))) throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Interrupted continuation cannot be reconstructed safely.", undefined, false, id);
+    if (!(await this.acceptedSourceIsCurrent(task))) throw new ControlPlaneError(409, "target_sha_changed", "Retry is blocked because the accepted source identity is missing or no longer current; submit a new TaskSpec.", { recoveryActions: task.recovery?.actions }, false, id);
+    if (operation === "continuation" && !(await this.restoreContinuation(task))) { await this.markContinuationUnrecoverable(task); throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Interrupted continuation cannot be reconstructed safely.", { recoveryActions: task.recovery?.actions }, false, id); }
     await this.beginAttempt(task, operation, sourceExecutionId);
     return task;
   }); }
@@ -274,8 +278,52 @@ export class ControlPlaneManager {
       nextAction: task.recovery?.retryAvailable ? task.recovery.operation : { poll: `/v1/tasks/${task.id}`, retryAfter: task.recovery?.retryAfter }
     });
   }
-  private async ensureContinuationSnapshot(task: ControlTaskRecord): Promise<void> { if (task.continuation.state === "available") { try { const existing = await this.store.readContinuation(task.id); if (existing) { task.continuation.sourceExecutionId ??= typeof existing.executionIdentity === "string" ? existing.executionIdentity : task.progress.executionId; await this.store.saveTask(task); return; } } catch { /* reconstruct from the official native artifact below */ } } let native: unknown; try { native = JSON.parse(await readFile(join(task.artifactRoot, "continuation-state.json"), "utf8")); } catch { task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return; } const spec = await this.store.readSpec(task.id); task.continuation.sourceExecutionId = task.progress.executionId; await this.store.saveContinuation(task.id, { schemaVersion: 1, taskId: task.id, projectId: task.projectId, authority: task.authority, executionIdentity: task.continuation.sourceExecutionId, taskSpec: spec, specPath: basename(task.specPath), workingDirectory: object(object(spec).target).workingDirectory ?? ".", runtime: object(spec).runtime ?? null, native }); task.continuation.state = "available"; await this.store.saveTask(task); }
-  private async restoreContinuation(task: ControlTaskRecord): Promise<boolean> { let snapshot: Record<string, unknown> | null = null; try { snapshot = await this.store.readContinuation(task.id); } catch { snapshot = null; } const sourceExecutionId = task.continuation.sourceExecutionId ?? (typeof snapshot?.executionIdentity === "string" ? snapshot.executionIdentity : null); if (!snapshot || snapshot.schemaVersion !== 1 || snapshot.taskId !== task.id || snapshot.projectId !== task.projectId || snapshot.decisionId !== task.continuation.decisionId || snapshot.executionIdentity !== sourceExecutionId || JSON.stringify(snapshot.authority) !== JSON.stringify(task.authority) || object(snapshot.taskSpec).taskId !== task.id || !object(snapshot.native).repo) { task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return false; } try { const path = join(task.artifactRoot, "continuation-state.json"); const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`; await writeFile(temporary, JSON.stringify(snapshot.native, null, 2) + "\n", { encoding: "utf8", mode: 0o600 }); await rename(temporary, path); task.continuation.sourceExecutionId = sourceExecutionId; task.continuation.state = "available"; await this.store.saveTask(task); return true; } catch { return false; } }
+  private async ensureContinuationSnapshot(task: ControlTaskRecord): Promise<void> {
+    if (task.continuation.state === "available") {
+      const existing = await this.store.readContinuation(task.id).catch(() => null);
+      if (existing && await this.validateContinuationSnapshot(task, existing)) return;
+      task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return;
+    }
+    let native: Record<string, unknown>; try { native = object(JSON.parse(await readFile(join(task.artifactRoot, "continuation-state.json"), "utf8"))); } catch { task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return; }
+    const context = await this.continuationContext(task);
+    if (!context || !nativeMatchesContinuationContext(native, context.binding)) { task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return; }
+    task.continuation.sourceExecutionId = task.progress.executionId;
+    const snapshot = { schemaVersion: 1, ...context.binding, authority: task.authority, decisionId: task.continuation.decisionId, executionIdentity: task.continuation.sourceExecutionId, taskSpec: context.spec, specPath: basename(task.specPath), runtime: object(context.spec.runtime), bindingHash: continuationBindingHash(context.binding, task.authority, context.spec), native };
+    await this.store.saveContinuation(task.id, snapshot); task.continuation.state = "available"; await this.store.saveTask(task);
+  }
+  private async restoreContinuation(task: ControlTaskRecord): Promise<boolean> {
+    const snapshot = await this.store.readContinuation(task.id).catch(() => null);
+    if (!snapshot || !(await this.validateContinuationSnapshot(task, snapshot))) { task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return false; }
+    try { const path = join(task.artifactRoot, "continuation-state.json"); const temporary = `${path}.${process.pid}.${randomUUID()}.tmp`; await writeFile(temporary, JSON.stringify(snapshot.native, null, 2) + "\n", { encoding: "utf8", mode: 0o600 }); await rename(temporary, path); task.continuation.state = "available"; await this.store.saveTask(task); return true; } catch { task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return false; }
+  }
+  private async validateContinuationSnapshot(task: ControlTaskRecord, snapshot: Record<string, unknown>): Promise<boolean> {
+    const context = await this.continuationContext(task); if (!context) return false;
+    const sourceExecutionId = task.continuation.sourceExecutionId ?? (typeof snapshot.executionIdentity === "string" ? snapshot.executionIdentity : null);
+    const binding = context.binding;
+    const matches = snapshot.schemaVersion === 1 && snapshot.taskId === binding.taskId && snapshot.projectId === binding.projectId && snapshot.repository === binding.repository && snapshot.workingDirectory === binding.workingDirectory && snapshot.sourceBranch === binding.sourceBranch && snapshot.sourceSha === binding.sourceSha
+      && snapshot.decisionId === task.continuation.decisionId && snapshot.executionIdentity === sourceExecutionId && JSON.stringify(snapshot.authority) === JSON.stringify(task.authority) && snapshot.bindingHash === continuationBindingHash(binding, task.authority, context.spec)
+      && JSON.stringify(snapshot.taskSpec) === JSON.stringify(context.spec) && nativeMatchesContinuationContext(object(snapshot.native), binding);
+    if (!matches) return false;
+    task.continuation.sourceExecutionId = sourceExecutionId; await this.store.saveTask(task); return true;
+  }
+  private async continuationContext(task: ControlTaskRecord): Promise<{ spec: Record<string, unknown>; binding: ContinuationBinding } | null> {
+    const spec = await this.store.readSpec(task.id); if (!spec || spec.taskId !== task.id) return null;
+    const target = object(spec.target); const repository = typeof target.repository === "string" ? target.repository : null; const workingDirectory = typeof target.workingDirectory === "string" ? target.workingDirectory : null; const sourceSha = typeof target.expectedSha === "string" ? target.expectedSha : null;
+    if (!repository || !workingDirectory || !sourceSha) return null;
+    const inspection = await inspectProject(repository, workingDirectory).catch(() => null);
+    if (!inspection?.repositoryRoot || !inspection.workingDirectory || !inspection.branch || inspection.detachedHead || inspection.repositoryRoot !== repository || inspection.workingDirectory !== workingDirectory || inspection.head !== sourceSha) return null;
+    if (task.projectId) { const project = await this.store.getProject(task.projectId); if (!project || project.repository !== repository || project.workingDirectory !== workingDirectory) return null; }
+    return { spec, binding: { taskId: task.id, projectId: task.projectId, repository, workingDirectory, sourceBranch: inspection.branch, sourceSha } };
+  }
+  private async acceptedSourceIsCurrent(task: ControlTaskRecord): Promise<boolean> {
+    const spec = await this.store.readSpec(task.id); const target = object(object(spec).target); const repository = typeof target.repository === "string" ? target.repository : null; const workingDirectory = typeof target.workingDirectory === "string" ? target.workingDirectory : null; const expectedSha = typeof target.expectedSha === "string" ? target.expectedSha : null;
+    const inspection = repository && workingDirectory ? await inspectProject(repository, workingDirectory).catch(() => null) : null;
+    const project = task.projectId ? await this.store.getProject(task.projectId) : null;
+    if (spec?.taskId === task.id && repository && workingDirectory && expectedSha && inspection?.repositoryRoot === repository && inspection.workingDirectory === workingDirectory && inspection.head === expectedSha && (!task.projectId || project?.repository === repository && project?.workingDirectory === workingDirectory)) return true;
+    task.recovery = { reason: expectedSha ? "target_sha_changed" : "accepted_source_identity_missing", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, originalExecutionId: task.progress.executionId, actions: ["cancel", "start_new_task"], retryAvailable: false, cleanupStatus: "completed", operation: "start_new_task", prerequisites: ["Submit a new TaskSpec against the intended current source."], newTaskRequired: true, previousArtifactsReusable: false, targetShaChanged: expectedSha ? true : null };
+    await this.persist(task, "retry_blocked", task.recovery.reason); await this.writeInterruptedResult(task); return false;
+  }
+  private async markContinuationUnrecoverable(task: ControlTaskRecord): Promise<void> { if (task.status !== "interrupted") await this.interrupt(task, "continuation_state_unrecoverable", ["cancel", "start_new_task"]); task.continuation.state = "unrecoverable"; task.recovery = { reason: "continuation_state_unrecoverable", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, originalExecutionId: task.progress.executionId, actions: ["cancel", "start_new_task"], retryAvailable: false, cleanupStatus: "completed", operation: "start_new_task", prerequisites: ["Submit a new TaskSpec; the persisted continuation identity cannot be trusted."], newTaskRequired: true, previousArtifactsReusable: false, targetShaChanged: null }; await this.persist(task, "continuation_unrecoverable"); await this.writeInterruptedResult(task); }
   private async persist(task: ControlTaskRecord, type: string, detail?: string): Promise<void> { const event = { at: new Date().toISOString(), type, ...(detail ? { detail } : {}) }; if (task.events.at(-1)?.type !== type || type !== "heartbeat") task.events.push(event); await this.store.saveTask(task); if (type !== "heartbeat") await this.store.appendEvent(task.id, { ...event, executionId: task.progress.executionId ?? undefined }); }
   private async withLock<T>(id: string, action: () => Promise<T>): Promise<T> { const previous = this.locks.get(id) ?? Promise.resolve(); let release!: () => void; const next = new Promise<void>((done) => { release = done; }); const tail = previous.then(() => next); this.locks.set(id, tail); await previous; try { return await action(); } finally { release(); if (this.locks.get(id) === tail) this.locks.delete(id); } }
   private async readTask(id: string): Promise<ControlTaskRecord> { const task = await this.store.getTask(id); if (!task) throw new ControlPlaneError(404, "task_not_found", `Task not found: ${id}`, undefined, false, id); return normalizeTask(task); }
@@ -451,6 +499,11 @@ function executionParty(value: unknown): AgreementLifecycleProjection["nextParty
 function textValue(value: unknown): string | null { return typeof value === "string" && value.trim() ? value : null; }
 function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} is required.`); return value.trim(); }
+function continuationBindingHash(binding: ContinuationBinding, authority: ControlAuthority, taskSpec: Record<string, unknown>): string { return createHash("sha256").update(JSON.stringify({ binding, authority, taskSpec })).digest("hex"); }
+function nativeMatchesContinuationContext(native: Record<string, unknown>, binding: ContinuationBinding): boolean {
+  const sourceBefore = object(native.sourceBefore);
+  return native.schemaVersion === 1 && native.taskId === binding.taskId && native.repo === binding.repository && native.workingDirectory === binding.workingDirectory && native.sourceBranch === binding.sourceBranch && sourceBefore.path === binding.repository && sourceBefore.head === binding.sourceSha;
+}
 function decisionRecord(decisionId: string, kind: "owner" | "publication", decision: string, response: Record<string, unknown>): DecisionRecord { return { decisionId, kind, decision, response, createdAt: new Date().toISOString() }; }
 function safeMessage(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return redactPublicText(message).slice(0, 500); }
 function preflightError(code: string, message: string, spec: Awaited<ReturnType<typeof loadTaskSpecV2>>, authority: ControlAuthority): ControlPlaneError {
