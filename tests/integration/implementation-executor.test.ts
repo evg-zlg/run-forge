@@ -97,7 +97,7 @@ describe("implementation executor", () => {
     };
     const { execution, result } = await executeWithExecution(
       repo, `EXECUTOR-DELEGATED-${party === "external_session" ? "SESSION" : "SYSTEM"}-1`, "fix add", ["node test.js"], [],
-      { schemaVersion: 1, profile: "custom", phaseOwnership: { implementation: party, localBranch: "runforge", localCommit: "runforge", providerModelCalls: "runforge" } },
+      { schemaVersion: 1, profile: "custom", phaseOwnership: { implementation: party, localBranch: party, localCommit: party, providerModelCalls: party } },
       undefined, mode,
     );
     expect(execution).toMatchObject({ kind: "implementation", success: true, result: { status: "delegated", responsibleParty: party, selectedExecutor: { id: "agreement-handoff" }, providerCalls: [], publicationMutations: 0 } });
