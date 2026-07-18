@@ -17,7 +17,7 @@ export type TaskSpecExecutionAgreement =
     schemaVersion: 1;
     profile: "custom";
     /** Omitted phases are not requested. */
-    phaseOwnership: Partial<Record<ExecutionPhaseId, Exclude<ExecutionParty, "nobody">>>;
+    phaseOwnership: Partial<Record<ExecutionPhaseId, ExecutionParty>>;
   };
 
 export type TaskSpecV2 = {
@@ -192,10 +192,9 @@ function normalizeExecutionAgreementRequest(value: unknown, mode: TaskExecutionM
   if (Object.keys(ownershipRaw).length === 0) throw new Error("executionAgreement.profile='custom' requires a non-empty phaseOwnership object.");
   const unknownPhases = Object.keys(ownershipRaw).filter((phase) => !(EXECUTION_PHASE_IDS as readonly string[]).includes(phase));
   if (unknownPhases.length) throw new Error(`executionAgreement.phaseOwnership contains unknown phase(s): ${unknownPhases.join(", ")}.`);
-  const allowedParties = EXECUTION_PARTIES.filter((party) => party !== "nobody");
   const phaseOwnership: NonNullable<TaskSpecExecutionAgreement["phaseOwnership"]> = {};
   for (const phase of EXECUTION_PHASE_IDS) {
-    if (ownershipRaw[phase] !== undefined) phaseOwnership[phase] = choice(ownershipRaw[phase], allowedParties, `executionAgreement.phaseOwnership.${phase}`);
+    if (ownershipRaw[phase] !== undefined) phaseOwnership[phase] = choice(ownershipRaw[phase], EXECUTION_PARTIES, `executionAgreement.phaseOwnership.${phase}`);
   }
   return { schemaVersion: 1, profile, phaseOwnership };
 }

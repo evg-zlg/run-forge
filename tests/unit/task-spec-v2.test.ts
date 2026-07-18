@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterEach, describe, expect, it } from "vitest";
-import { EXECUTION_PHASE_IDS, EXECUTION_PROFILES } from "../../src/product/execution-agreement.js";
+import { EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES } from "../../src/product/execution-agreement.js";
 import { publicTaskSpecContract, taskSpecV2Schema } from "../../src/product/task-spec-contract.js";
 import { loadTaskSpecV2, normalizeTaskSpecV2, redactedTaskSpec } from "../../src/product/task-spec-v2.js";
 import { readExternalValidationResults } from "../../src/product/task-result-contract.js";
@@ -41,18 +41,32 @@ describe("TaskSpec v2", () => {
 
   it("normalizes custom phase ownership in canonical phase order", async () => {
     const repo = await gitRepo();
-    const spec = await normalizeTaskSpecV2({
+    const value = {
       ...minimal(repo),
       executionAgreement: {
         schemaVersion: 1, profile: "custom",
-        phaseOwnership: { localValidation: "external_session", taskAnalysis: "runforge" }
+        phaseOwnership: { secretUse: "nobody", localValidation: "external_session", deploy: "nobody", taskAnalysis: "runforge" }
       }
-    });
+    };
+    const spec = await normalizeTaskSpecV2(value);
     expect(spec.executionAgreement).toEqual({
       schemaVersion: 1, profile: "custom",
-      phaseOwnership: { taskAnalysis: "runforge", localValidation: "external_session" }
+      phaseOwnership: { taskAnalysis: "runforge", localValidation: "external_session", deploy: "nobody", secretUse: "nobody" }
     });
-    expect(Object.keys(spec.executionAgreement.phaseOwnership ?? {})).toEqual(EXECUTION_PHASE_IDS.filter((phase) => ["taskAnalysis", "localValidation"].includes(phase)));
+    expect(Object.keys(spec.executionAgreement.phaseOwnership ?? {})).toEqual(EXECUTION_PHASE_IDS.filter((phase) => ["taskAnalysis", "localValidation", "deploy", "secretUse"].includes(phase)));
+    const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(taskSpecV2Schema);
+    expect(validate(value), JSON.stringify(validate.errors)).toBe(true);
+  });
+
+  it("rejects unknown custom phase ownership parties", async () => {
+    const repo = await gitRepo();
+    const value = {
+      ...minimal(repo),
+      executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { deploy: "unknown_party" } }
+    };
+    await expect(normalizeTaskSpecV2(value)).rejects.toThrow("executionAgreement.phaseOwnership.deploy must be one of");
+    const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(taskSpecV2Schema);
+    expect(validate(value)).toBe(false);
   });
 
   it("rejects agreement version mismatch and ambiguous custom ownership", async () => {
@@ -81,7 +95,7 @@ describe("TaskSpec v2", () => {
     const fileSchema = JSON.parse(await readFile("schemas/task-spec-v2.schema.json", "utf8"));
     expect(taskSpecV2Schema).toEqual(fileSchema);
     const contract = publicTaskSpecContract() as Record<string, any>;
-    expect(contract.executionAgreement).toMatchObject({ schemaVersion: 1, profiles: EXECUTION_PROFILES, phases: EXECUTION_PHASE_IDS });
+    expect(contract.executionAgreement).toMatchObject({ schemaVersion: 1, profiles: EXECUTION_PROFILES, phases: EXECUTION_PHASE_IDS, phaseOwnershipParties: EXECUTION_PARTIES });
     expect(contract.implementationRequest.taskSpec.executionAgreement).toEqual({ schemaVersion: 1, profile: "local-ready" });
     const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(fileSchema);
     expect(validate(contract.implementationRequest.taskSpec), JSON.stringify(validate.errors)).toBe(true);

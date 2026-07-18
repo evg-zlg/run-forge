@@ -45,7 +45,7 @@ export const taskSpecV2Schema: Record<string, unknown> = {
         schemaVersion: { const: 1 }, profile: { enum: EXECUTION_PROFILES },
         phaseOwnership: {
           type: "object", minProperties: 1, additionalProperties: false,
-          properties: Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, { enum: EXECUTION_PARTIES.filter((party) => party !== "nobody") }]))
+          properties: Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, { enum: EXECUTION_PARTIES }]))
         }
       },
       allOf: [{ if: { properties: { profile: { const: "custom" } } }, then: { required: ["phaseOwnership"] }, else: { not: { required: ["phaseOwnership"] } } }]
@@ -71,7 +71,7 @@ export function publicTaskSpecContract(): Record<string, unknown> {
     schemaUrl: taskSpecSchemaPath,
     schema: taskSpecV2Schema,
     executionModes: taskExecutionModes,
-    executionAgreement: { schemaVersion: 1, profiles: EXECUTION_PROFILES, phases: EXECUTION_PHASE_IDS, phaseOwnershipParties: EXECUTION_PARTIES.filter((party) => party !== "nobody") },
+    executionAgreement: { schemaVersion: 1, profiles: EXECUTION_PROFILES, phases: EXECUTION_PHASE_IDS, phaseOwnershipParties: EXECUTION_PARTIES },
     runtimeIds: taskRuntimeIds,
     runtimeDefaults: { implementation: executor.defaultRuntime, repair: executor.defaultRuntime, inspection: "docker", validation: "docker" },
     implementationExecutorIds: [executor.id],
