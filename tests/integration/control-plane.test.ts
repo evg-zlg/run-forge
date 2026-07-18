@@ -114,6 +114,42 @@ describe("local control-plane HTTP lifecycle", () => {
     ]));
   });
 
+  it("rejects project-bound agreement reuse across projects or source HEADs while accepting projectless agreements", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-agreement-binding-"))) - 1]!;
+    const firstRepo = await syntheticRepository(); const secondRepo = await syntheticRepository();
+    const operations = { runTaskSpec: async (specPath: string) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) };
+    const store = new ControlPlaneStore(stateRoot); const manager = new ControlPlaneManager(store, operations as never); await manager.initialize();
+    const firstProject = (await manager.inspectProject({ path: firstRepo, workingDirectory: ".", register: true })).project as Record<string, unknown>;
+    const secondProject = (await manager.inspectProject({ path: secondRepo, workingDirectory: ".", register: true })).project as Record<string, unknown>;
+    const bound = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", projectId: String(firstProject.id), requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } });
+    const referencedSpec = (taskId: string, repository: string) => ({ ...taskSpec(taskId, repository), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } } });
+
+    await expect(manager.createTask({ taskSpec: referencedSpec("CONTROL-BOUND-UNREGISTERED-1", firstRepo), agreementId: bound.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_project_mismatch" });
+    await expect(manager.createTask({ projectId: String(secondProject.id), taskSpec: referencedSpec("CONTROL-BOUND-OTHER-1", secondRepo), agreementId: bound.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_project_mismatch" });
+
+    await writeFile(join(firstRepo, "changed.txt"), "changed\n"); execFileSync("git", ["add", "changed.txt"], { cwd: firstRepo }); execFileSync("git", ["commit", "-q", "-m", "changed"], { cwd: firstRepo });
+    await expect(manager.createTask({ projectId: String(firstProject.id), taskSpec: referencedSpec("CONTROL-BOUND-STALE-1", firstRepo), agreementId: bound.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_source_stale" });
+
+    const projectless = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } });
+    const legacy = structuredClone(projectless); delete legacy.context; await store.saveAgreement(legacy);
+    const created = await manager.createTask({ taskSpec: referencedSpec("CONTROL-PROJECTLESS-LEGACY-1", firstRepo), agreementId: legacy.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" });
+    expect(created.executionAgreement).toEqual(legacy); manager.close();
+  });
+
+  it("settles from the accepted agreement without losing prerequisites or project context", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-agreement-settlement-"))) - 1]!; const repository = await syntheticRepository(); const store = new ControlPlaneStore(stateRoot);
+    const manager = new ControlPlaneManager(store, {
+      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, contract: "runforge-task-result", taskId: spec.taskId, status: "completed", workflow: { status: "runforge_scope_completed", agreement: { agreementId: "ea_v1_aaaaaaaaaaaaaaaaaaaaaaaa", profile: "custom", status: "in_progress", phaseOwnership: [{ phaseId: "taskAnalysis", responsibleParty: "runforge" }, { phaseId: "localValidation", responsibleParty: "external_system" }], runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "localValidation", responsibleParty: "external_system" }], awaitingPhases: [{ phaseId: "localValidation", responsibleParty: "external_system", prerequisites: ["result validation evidence"] }] }, next: { party: "external_system", exactAction: "Validate externally.", gates: [], evidence: [] } }, ownerGate: { required: false, status: "not_required" } })); return {} as never; },
+      recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never)
+    });
+    await manager.initialize(); const project = (await manager.inspectProject({ path: repository, workingDirectory: ".", register: true })).project as Record<string, unknown>;
+    const accepted = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", projectId: String(project.id), requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" }, prerequisites: { localValidation: ["accepted validation evidence"] } });
+    await manager.createTask({ projectId: String(project.id), taskSpec: { ...taskSpec("CONTROL-ACCEPTED-SETTLEMENT-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } } }, agreementId: accepted.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" });
+    await eventually(async () => (await manager.getTask("CONTROL-ACCEPTED-SETTLEMENT-1")).status === "completed"); const task = await manager.getTask("CONTROL-ACCEPTED-SETTLEMENT-1");
+    expect(task).toMatchObject({ executionAgreement: { agreementId: accepted.agreementId, context: { project: { projectId: project.id } } }, progress: { agreement: { agreementId: accepted.agreementId, awaitingPhases: [{ phaseId: "localValidation", responsibleParty: "external_system", prerequisites: ["accepted validation evidence", "result validation evidence"] }] } } });
+    expect(await manager.getResult("CONTROL-ACCEPTED-SETTLEMENT-1")).toMatchObject({ workflow: { agreement: { agreementId: accepted.agreementId, awaitingPhases: [{ phaseId: "localValidation", responsibleParty: "external_system", prerequisites: ["accepted validation evidence", "result validation evidence"] }] }, next: { gates: [{ name: "accepted validation evidence", status: "pending", evidence: [] }, { name: "result validation evidence", status: "pending", evidence: [] }] } }, controlPlane: { executionAgreement: { agreementId: accepted.agreementId, context: { project: { projectId: project.id } } } } }); manager.close();
+  });
+
   it("uses the normalized TaskSpec timeout up to the production ceiling and honors a smaller manager ceiling", async () => {
     const operations = { runTaskSpec: async (specPath: string) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) };
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-timeout-http-"))) - 1]!;
