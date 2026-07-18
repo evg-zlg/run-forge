@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { ExecutionAgreement } from "../product/execution-agreement.js";
+import type { ExecutionAgreement, ExecutionAgreementConflict, ExecutionParty, ExecutionPhaseId, ExecutionProfile } from "../product/execution-agreement.js";
 
 export const controlPlaneApiVersion = "v1";
 export const defaultControlPlaneHost = "127.0.0.1";
@@ -50,6 +50,23 @@ export type TaskProgress = {
   deadlineAt: string | null;
   summary: string;
   diagnostic: string | null;
+  agreement?: AgreementLifecycleProjection;
+};
+
+export type AgreementLifecycleProjection = {
+  schemaVersion: 1;
+  agreementId: string;
+  profile: ExecutionProfile;
+  currentPhase: ExecutionPhaseId | null;
+  responsibleParty: ExecutionParty | null;
+  runforgeCompletedPhases: ExecutionPhaseId[];
+  delegatedPhases: Array<{ phaseId: ExecutionPhaseId; responsibleParty: Exclude<ExecutionParty, "runforge" | "nobody"> }>;
+  awaitingPhases: Array<{ phaseId: ExecutionPhaseId; responsibleParty: Exclude<ExecutionParty, "runforge" | "nobody">; prerequisites: string[] }>;
+  nextParty: Exclude<ExecutionParty, "nobody"> | null;
+  nextAction: string | null;
+  conflicts: ExecutionAgreementConflict[];
+  ownerGate: { required: boolean; status: string; reason?: string };
+  publicationGate: { required: boolean; status: string; reason?: string };
 };
 
 export type TaskRecovery = {

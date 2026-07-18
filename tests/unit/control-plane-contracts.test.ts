@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultAuthority, parseDecisionRequest, parseTaskRequest, type ControlTaskRecord } from "../../src/control-plane/contracts.js";
 import { negotiateControlPlaneAgreement, parseExecutionAgreementNegotiationRequest } from "../../src/control-plane/execution-agreements.js";
+import { boundPublicResult } from "../../src/control-plane/manager.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 
 const roots: string[] = [];
@@ -39,6 +40,13 @@ describe("control-plane contracts", () => {
     await first.saveAgreement(agreement);
     const restarted = new ControlPlaneStore(root); await restarted.initialize();
     expect(await restarted.getAgreement(agreement.agreementId)).toEqual(agreement);
+  });
+
+  it("bounds verbose public diagnostics while retaining compact result fields", () => {
+    const bounded = boundPublicResult({ status: "awaiting_external_session", providerCalls: [{ stdout: "x".repeat(2_000_000), stderr: "", stdoutArtifact: "provider/iteration-0.stdout.log" }] });
+    expect(bounded.result).toMatchObject({ status: "awaiting_external_session", providerCalls: [{ stdoutArtifact: "provider/iteration-0.stdout.log" }] });
+    expect(JSON.stringify(bounded.result).length).toBeLessThan(20_000);
+    expect(bounded.truncatedFields).toEqual(["providerCalls.0.stdout"]);
   });
 
   it("recovers in-flight state as interrupted without inferring success", async () => {

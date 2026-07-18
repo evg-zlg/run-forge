@@ -80,6 +80,40 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(delegated.status).toBe(202); expect(await json(delegated)).toMatchObject({ executionAgreement: { status: "ready", conflicts: [], handoffs: [{ phaseId: "implementation", responsibleParty: "external_session" }, { phaseId: "merge", responsibleParty: "owner" }] } });
   });
 
+  it("settles agreement-aware external handoffs successfully with durable, bounded public lifecycle projections", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-control-handoffs-"))) - 1]!;
+    const store = new ControlPlaneStore(stateRoot);
+    const manager = new ControlPlaneManager(store, {
+      runTaskSpec: async (specPath) => {
+        const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const party = spec.executionAgreement.phaseOwnership.implementation as "external_session" | "external_system";
+        const status = party === "external_session" ? "awaiting_external_session" : "runforge_scope_completed";
+        await mkdir(root, { recursive: true });
+        await writeFile(join(root, "results.json"), JSON.stringify({
+          schemaVersion: 1, contract: "runforge-task-result", taskId: spec.taskId, status,
+          agreement: { agreementId: "ea_v1_aaaaaaaaaaaaaaaaaaaaaaaa", profile: "custom", status: "in_progress", phaseOwnership: [{ phaseId: "taskAnalysis", responsibleParty: "runforge" }, { phaseId: "implementation", responsibleParty: party }], runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "implementation", responsibleParty: party }], awaitingPhases: [{ phaseId: "implementation", responsibleParty: party, prerequisites: ["local evidence"] }] },
+          next: { party, exactAction: `Complete implementation in ${party}.`, gates: [], evidence: [] },
+          providerCalls: [{ stdout: "x".repeat(2_000_000), stderr: "", stdoutArtifact: "provider/iteration-0.stdout.log" }], ownerGate: { required: false, status: "not_required" }
+        }));
+        return {} as never;
+      }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never)
+    });
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
+
+    for (const [suffix, party] of [["SESSION", "external_session"], ["SYSTEM", "external_system"]] as const) {
+      const id = `CONTROL-HANDOFF-${suffix}-1`; const spec = { ...taskSpec(id), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", implementation: party } } };
+      const created = await json(await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec, authority: { implementation: true } }) }));
+      const agreementId = created.executionAgreement.agreementId;
+      expect(created.progress.agreement).toMatchObject({ schemaVersion: 1, agreementId, profile: "custom", currentPhase: "taskAnalysis", responsibleParty: "runforge" });
+      await eventually(async () => (await manager.getTask(id)).status === "completed");
+      const task = await json(await fetch(`${instance.url}/v1/tasks/${id}`));
+      expect(task).toMatchObject({ status: "completed", executionAgreement: { agreementId }, progress: { agreement: { schemaVersion: 1, agreementId, profile: "custom", currentPhase: "implementation", responsibleParty: party, runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "implementation", responsibleParty: party }], awaitingPhases: [{ phaseId: "implementation", responsibleParty: party, prerequisites: ["local evidence"] }], nextParty: party, nextAction: `Complete implementation in ${party}.`, conflicts: [], ownerGate: { required: false } } } });
+      const response = await fetch(`${instance.url}/v1/tasks/${id}/result`); expect(response.status).toBe(200); const body = await response.text(); expect(body.length).toBeLessThan(30_000); const result = JSON.parse(body);
+      expect(result).toMatchObject({ status: party === "external_session" ? "awaiting_external_session" : "runforge_scope_completed", providerCalls: [{ stdoutArtifact: "provider/iteration-0.stdout.log" }], controlPlane: { status: "completed", agreement: { agreementId, currentPhase: "implementation", responsibleParty: party, nextParty: party }, responseBounds: { truncated: true, truncatedFields: ["providerCalls.0.stdout"] } } });
+      expect((await manager.cancelTask(id)).executionAgreement?.agreementId).toBe(agreementId);
+      expect((await new ControlPlaneStore(stateRoot).getTask(id))?.executionAgreement?.agreementId).toBe(agreementId);
+    }
+  });
+
   it("rejects non-local binds, malformed input, oversized bodies, and foreign origins", async () => {
     await expect(startControlPlaneServer({ host: "0.0.0.0", port: 0 })).rejects.toThrow("localhost");
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-control-security-"))) - 1]!;
@@ -113,9 +147,9 @@ describe("local control-plane HTTP lifecycle", () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-watchdog-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let executions = 0;
     const manager = new ControlPlaneManager(store, { runTaskSpec: async (specPath) => { const run = ++executions; if (run === 1) await new Promise((done) => setTimeout(done, 80)); else { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); } return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 30, executionTimeoutMs: 1_000 });
     const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-CANCEL-1");
-    await new Promise((done) => setTimeout(done, 20)); const active = await manager.getTask("CONTROL-CANCEL-1"); expect(active.progress.workerStatus).toBe("active"); expect(Date.parse(active.progress.lastHeartbeatAt!)).toBeGreaterThan(Date.parse(active.progress.startedAt!));
+    await new Promise((done) => setTimeout(done, 20)); const active = await manager.getTask("CONTROL-CANCEL-1"); const cancelAgreementId = active.executionAgreement?.agreementId; expect(active.progress.workerStatus).toBe("active"); expect(Date.parse(active.progress.lastHeartbeatAt!)).toBeGreaterThan(Date.parse(active.progress.startedAt!));
     expect((await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-1/cancel`, { method: "POST" })).status).toBe(200); expect((await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-1/cancel`, { method: "POST" })).status).toBe(200);
-    await new Promise((done) => setTimeout(done, 90)); const cancelled = await manager.getTask("CONTROL-CANCEL-1"); expect(cancelled).toMatchObject({ status: "interrupted", recovery: { reason: "cancelled_by_operator", retryAvailable: true } }); expect(["completed", "not_required"]).toContain(cancelled.recovery?.cleanupStatus);
+    await new Promise((done) => setTimeout(done, 90)); const cancelled = await manager.getTask("CONTROL-CANCEL-1"); expect(cancelled).toMatchObject({ status: "interrupted", executionAgreement: { agreementId: cancelAgreementId }, progress: { agreement: { agreementId: cancelAgreementId } }, recovery: { reason: "cancelled_by_operator", retryAvailable: true } }); expect(["completed", "not_required"]).toContain(cancelled.recovery?.cleanupStatus);
     const now = new Date(Date.now() - 60_000).toISOString(); const lost = { ...(await manager.getTask("CONTROL-CANCEL-1")), id: "CONTROL-LOST-1", status: "running" as const, updatedAt: now, finishedAt: null, progress: { ...active.progress, executionId: "lost-worker", updatedAt: now, lastHeartbeatAt: now, workerStatus: "active" as const } }; await store.saveTask(lost);
     const health = await manager.health(); expect(health).toMatchObject({ service: { status: "healthy" }, readiness: { acceptingNewTasks: true }, tasks: { active: 0, interrupted: 2 } }); expect((await manager.getTask("CONTROL-LOST-1")).status).toBe("interrupted");
     await manager.retryTask("CONTROL-CANCEL-1"); await eventually(async () => (await manager.getTask("CONTROL-CANCEL-1")).status === "completed"); expect(executions).toBe(2);
