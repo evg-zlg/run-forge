@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, cp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
-import { basename, join, relative } from "node:path";
+import { cp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
 import { buildDoctorReport } from "../product/doctor.js";
 import { runTaskSpecFile } from "../product/task-spec-runner.js";
 import { loadTaskSpecV2 } from "../product/task-spec-v2.js";
@@ -9,7 +9,7 @@ import { continueExternalExecution, recordOwnerDecision } from "../run/external-
 import { ControlPlaneError, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
 import { ControlPlaneStore } from "./state.js";
 import { discoverImplementationExecutors, selectImplementationExecutor } from "../implementation/executor.js";
-import type { ExecutionAgreement, ExecutionAgreementContext } from "../product/execution-agreement.js";
+import type { ExecutionAgreement } from "../product/execution-agreement.js";
 import { inspectProject } from "../product/project-inspection.js";
 import {
   assertAgreementAccepted,
@@ -20,19 +20,12 @@ import {
   type ExecutionAgreementNegotiationRequest,
 } from "./execution-agreements.js";
 import { boundPublicResult, projectAgreementLifecycle, publicResultLimits, redactPublicValue, settleAcceptedAgreement } from "./manager-results.js";
+import { assertAgreementProjectBinding, buildExecutionAgreementContext } from "./manager-project-context.js";
 export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
 const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs;
 const heartbeatIntervalMs = 1_000;
 const staleHeartbeatMs = 15_000;
 const cleanupGraceMs = 2_000;
-function agreementHardBoundaries(): string[] {
-  return [
-    "No GitHub or GitLab push, PR/MR creation, or existing-change update adapter is available.",
-    "No CI, merge, deploy, database, production, or secret adapter is available.",
-    "Request maps may only narrow installation capability, authority, and policy.",
-    "RUNFORGE.md supplies project defaults only and cannot grant authority or relax hard boundaries.",
-  ];
-}
 type ActiveWorker = { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController };
 type ContinuationBinding = { taskId: string; projectId: string | null; repository: string; workingDirectory: string; sourceBranch: string; sourceSha: string };
 export class ControlPlaneManager {
@@ -60,7 +53,7 @@ export class ControlPlaneManager {
   }
   async negotiateAgreement(input: ExecutionAgreementNegotiationRequest): Promise<ExecutionAgreement> {
     const project = input.projectId ? await this.requireProject(input.projectId) : null;
-    const [executors, context] = await Promise.all([discoverImplementationExecutors(), this.executionAgreementContext(project, input.publicationTarget ?? { kind: "none" })]);
+    const [executors, context] = await Promise.all([discoverImplementationExecutors(), buildExecutionAgreementContext({ project, publicationTarget: input.publicationTarget ?? { kind: "none" } })]);
     const agreement = negotiateControlPlaneAgreement(input, technicalCapabilitiesForExecutor(executors.some((item) => item.status === "ready")), context);
     await this.store.saveAgreement(agreement);
     return agreement;
@@ -105,10 +98,10 @@ export class ControlPlaneManager {
     raw.target = { ...object(raw.target), repository: normalized.target.repository, workingDirectory: normalized.target.workingDirectory, expectedSha: normalized.target.expectedSha };
     specPath = await this.store.writeSpec(taskId, raw);
     const implementation = ["implementation", "repair"].includes(normalized.execution.mode);
-    const automaticContext = project ? await this.executionAgreementContext(project, { kind: "none" }) : undefined;
+    const automaticContext = project ? await buildExecutionAgreementContext({ project, publicationTarget: { kind: "none" } }) : undefined;
     const preflightAgreement = negotiateTaskAgreement(normalized, input.authority, automaticContext);
     const executionAgreement = input.agreementId ? await this.getAgreement(input.agreementId) : preflightAgreement;
-    await this.assertAgreementProjectBinding(executionAgreement, project, taskId);
+    await assertAgreementProjectBinding({ agreement: executionAgreement, project, taskId });
     const delegatedImplementation = implementationParty(executionAgreement);
     if (!delegatedImplementation && implementation && !input.authority.implementation) throw preflightError("implementation_authority_denied", "Implementation mode requires control-plane implementation authority.", normalized, input.authority);
     if (!delegatedImplementation && normalized.authority.allowProviderCalls && input.authority.providerCalls !== true) throw preflightError("provider_authority_denied", "TaskSpec allows provider calls but control-plane providerCalls authority is false.", normalized, input.authority);
@@ -311,53 +304,6 @@ export class ControlPlaneManager {
   private async withLock<T>(id: string, action: () => Promise<T>): Promise<T> { const previous = this.locks.get(id) ?? Promise.resolve(); let release!: () => void; const next = new Promise<void>((done) => { release = done; }); const tail = previous.then(() => next); this.locks.set(id, tail); await previous; try { return await action(); } finally { release(); if (this.locks.get(id) === tail) this.locks.delete(id); } }
   private async readTask(id: string): Promise<ControlTaskRecord> { const task = await this.store.getTask(id); if (!task) throw new ControlPlaneError(404, "task_not_found", `Task not found: ${id}`, undefined, false, id); return normalizeTask(task); }
   private async requireProject(id: string): Promise<ProjectRecord> { const project = await this.store.getProject(id); if (!project) throw new ControlPlaneError(404, "project_not_found", `Project not found: ${id}`); return project; }
-  private async assertAgreementProjectBinding(agreement: ExecutionAgreement, project: ProjectRecord | null, taskId: string): Promise<void> {
-    const bound = agreement.context?.project;
-    if (!bound) {
-      if (!project) return;
-      throw new ControlPlaneError(409, "execution_agreement_project_context_required", "A context-free Execution Agreement cannot authorize a registered-project task.", { agreementId: agreement.agreementId, projectId: project.id, operation: "renegotiate_execution_agreement", newTaskRequired: true }, false, taskId);
-    }
-    if (!project) {
-      throw new ControlPlaneError(409, "execution_agreement_project_mismatch", "The referenced Execution Agreement is bound to a different registered project.", { agreementId: agreement.agreementId, agreementProjectId: bound.projectId, taskProjectId: null, operation: "start_new_task", newTaskRequired: true }, false, taskId);
-    }
-    const current = await inspectProject(project.repository, project.workingDirectory).catch(() => null);
-    const canonicalProjectMatches = current !== null && current.repositoryRoot !== null && current.workingDirectory !== null
-      && project.id === bound.projectId
-      && project.repository === current.repositoryRoot && project.workingDirectory === current.workingDirectory
-      && bound.repository === current.repositoryRoot && bound.workingDirectory === current.workingDirectory;
-    if (!canonicalProjectMatches) {
-      throw new ControlPlaneError(409, "execution_agreement_project_mismatch", "The referenced Execution Agreement is not bound to the canonical registered project identity.", { agreementId: agreement.agreementId, agreementProjectId: bound.projectId, taskProjectId: project.id, operation: "renegotiate_execution_agreement", newTaskRequired: true }, false, taskId);
-    }
-    if (!bound.source || current!.head !== bound.source.head || current!.branch !== bound.source.branch || current!.detachedHead !== bound.source.detachedHead) {
-      throw new ControlPlaneError(409, "execution_agreement_source_stale", "The referenced Execution Agreement was negotiated for a different project source identity.", { agreementId: agreement.agreementId, projectId: project.id, operation: "renegotiate_execution_agreement", newTaskRequired: true }, false, taskId);
-    }
-  }
-  private async executionAgreementContext(project: ProjectRecord | null, publicationTarget: ExecutionAgreementContext["publicationTarget"]): Promise<ExecutionAgreementContext> {
-    if (!project) return {
-      project: null,
-      policy: { sources: ["runforge-installation-policy"], hardBoundaries: agreementHardBoundaries(), runforgeMd: { present: false, path: null, authorityEscalationTrusted: false } },
-      publicationTarget,
-    };
-    const inspection = await inspectProject(project.repository, project.workingDirectory);
-    if (!inspection.repositoryRoot || !inspection.workingDirectory) throw new ControlPlaneError(409, "registered_project_unavailable", "The registered project no longer resolves to a canonical repository and working directory.");
-    const runforgeCandidates = [...new Set([join(project.repository, project.workingDirectory === "." ? "" : project.workingDirectory, "RUNFORGE.md"), join(project.repository, "RUNFORGE.md")])];
-    const runforgePath = (await Promise.all(runforgeCandidates.map(async (candidate) => await access(candidate).then(() => candidate, () => null)))).find((candidate): candidate is string => candidate !== null) ?? null;
-    const present = runforgePath !== null;
-    const protectedBranches = [...new Set([inspection.defaultBranch, "main", "master", "develop", "source"].filter((item): item is string => Boolean(item)))].sort();
-    return {
-      project: {
-        projectId: project.id, repository: inspection.repositoryRoot, workingDirectory: inspection.workingDirectory,
-        source: { head: inspection.head, branch: inspection.branch, detachedHead: inspection.detachedHead },
-        defaultBranch: inspection.defaultBranch, protectedBranches,
-      },
-      policy: {
-        sources: ["runforge-installation-policy", ...(present ? ["project/RUNFORGE.md (defaults only; no authority escalation)"] : [])],
-        hardBoundaries: agreementHardBoundaries(),
-        runforgeMd: { present, path: runforgePath ? relative(project.repository, runforgePath) || "RUNFORGE.md" : null, authorityEscalationTrusted: false },
-      },
-      publicationTarget,
-    };
-  }
 }
 function progress(now: string, timeoutMs = executionTimeoutMs): ControlTaskRecord["progress"] { return { phase: "queued", operation: "execution", startedAt: null, updatedAt: now, lastHeartbeatAt: null, executionId: null, attempt: 0, workerStatus: "idle", timeoutMs, deadlineAt: null, summary: "Queued for execution.", diagnostic: null }; }
 function runforgeOwns(agreement: ExecutionAgreement, phaseId: "localBranch" | "localCommit"): boolean { const phase = agreement.phases.find((item) => item.phaseId === phaseId); return phase?.requested === true && phase.responsibleParty === "runforge"; }

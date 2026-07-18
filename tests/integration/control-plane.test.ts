@@ -95,6 +95,31 @@ describe("local control-plane HTTP lifecycle", () => {
     }
   });
 
+  it("prefers working-directory RUNFORGE.md context and falls back to the repository root", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-project-context-"))) - 1]!;
+    const repository = await syntheticRepository();
+    const workingDirectory = join("packages", "app");
+    const nestedRunforgePath = join(repository, workingDirectory, "RUNFORGE.md");
+    await mkdir(join(repository, workingDirectory), { recursive: true });
+    await writeFile(join(repository, "RUNFORGE.md"), "# Repository defaults\n");
+    await writeFile(nestedRunforgePath, "# Working-directory defaults\n");
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot));
+    await manager.initialize();
+
+    const inspected = await manager.inspectProject({ path: repository, workingDirectory, register: true });
+    const project = inspected.project as Record<string, unknown>;
+    const nested = await manager.negotiateAgreement({ schemaVersion: 1, profile: "assist-only", projectId: String(project.id) });
+    expect(nested.context?.policy).toMatchObject({
+      sources: ["runforge-installation-policy", "project/RUNFORGE.md (defaults only; no authority escalation)"],
+      runforgeMd: { present: true, path: join(workingDirectory, "RUNFORGE.md"), authorityEscalationTrusted: false },
+    });
+
+    await rm(nestedRunforgePath);
+    const root = await manager.negotiateAgreement({ schemaVersion: 1, profile: "assist-only", projectId: String(project.id) });
+    expect(root.context?.policy.runforgeMd).toEqual({ present: true, path: "RUNFORGE.md", authorityEscalationTrusted: false });
+    manager.close();
+  });
+
   it("discovers the dynamic URL, runs a durable task, and keeps decisions idempotent", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-control-http-"))) - 1]!;
     let ownerWrites = 0;
