@@ -1,97 +1,148 @@
 # Using RunForge from another agent session
 
-RunForge exposes a persistent, localhost-only HTTP control plane. A product-project session can discover capabilities, register its checkout, submit TaskSpec v2, poll durable state, and record explicit decisions without entering the RunForge checkout or knowing its CLI layout.
+This is the concise localhost bootstrap. The responsibility model, phase table, conflict rules, publication targets, recovery behavior, and result semantics are canonical in [Execution Agreements](EXECUTION_AGREEMENTS.md). Do not duplicate or override that contract in a calling-agent prompt.
 
-## Start and stop
+RunForge binds to loopback; the default URL is `http://127.0.0.1:7373`. A caller needs no RunForge checkout or CLI knowledge.
 
-```bash
-runforge control-plane start
-runforge control-plane status
-runforge control-plane stop
-```
-
-For foreground development use `corepack pnpm dev -- control-plane serve`. The default URL is `http://127.0.0.1:7373`; state and the versioned lifecycle journal are stored atomically under `~/.runforge/control-plane`. The service refuses non-loopback binds. On restart, in-flight tasks become `interrupted`; success is never inferred.
-
-## Bootstrap prompt for a product session
-
-```text
-Use the RunForge control plane at http://127.0.0.1:7373.
-Do not enter or inspect the RunForge repository and do not invoke its CLI.
-First GET /.well-known/runforge and /v1/capabilities.
-
-Before implementation, require a compatible `implementationExecutors` entry with `status: "ready"`. With no compatible backend, RunForge rejects the request with `executor_unavailable` before creating the task; it never silently performs inspection.
-Then POST /v1/projects/inspect with this project's absolute checkout path and working directory.
-Submit a TaskSpec v2 to POST /v1/tasks with an explicit authority object.
-Poll GET /v1/tasks/{id}; read GET /v1/tasks/{id}/result when ready.
-While status is running or continuing, inspect progress.phase, progress.operation, progress.lastHeartbeatAt, progress.workerStatus, progress.deadlineAt, progress.summary, and progress.diagnostic.
-GET /healthz reports HTTP-service health; GET /readyz separately reports acceptance readiness and task aggregates. A degraded task does not disable read-only operations.
-Treat implementation, local branch/commit, remote push, draft publication, merge, and deploy as separate authorities.
-Never infer approval. Use owner-decisions and continue only after an explicit owner decision.
-For interrupted tasks, first inspect `recovery.retryAvailable`. Execute only the exact `recovery.operation` advertised by the task. During bounded cleanup it is absent, `retryAvailable` is false, and `retryAfter` plus the task polling URL are authoritative. POST `/v1/tasks/{id}/retry` is idempotent while the replacement attempt is active; POST `/v1/tasks/{id}/cancel` is a distinct idempotent cancellation operation.
-Use publication-decisions separately; merge and deploy are unavailable.
-```
-
-## Minimal API flow
+## 1. Discover the live contract
 
 ```bash
 BASE=http://127.0.0.1:7373
+
 curl -fsS "$BASE/.well-known/runforge"
 curl -fsS "$BASE/v1/capabilities"
-
-The default backend is the locally available `codex` CLI. It can instead be set through an enabled `codex-cli` admin provider or `RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND`. Credentials remain in the CLI credential store and are never copied into TaskSpec, logs, or results.
-
-Implementation adds explicit mode and independent provider/network authority:
-
-The public runtime ID for `local-coding-agent` is exactly `local-disposable`. If `runtime.preference` is omitted from an implementation or repair TaskSpec, normalization uses that documented compatible default. An explicit incompatible value such as `docker` is rejected with `runtime_incompatible`, the allowed values, compatible runtimes, and a corrected request; RunForge never substitutes an incompatible runtime.
-
-```json
-{
-  "taskSpec": {
-    "execution": { "mode": "implementation", "maxRepairIterations": 2, "maxProviderTokens": 100000 },
-    "runtime": { "preference": "local-disposable", "externalNetwork": "allowed" },
-    "authority": {
-      "profile": "bounded-implementation",
-      "allowProviderCalls": true,
-      "allowNetwork": true,
-      "forbiddenAreas": [".github", "deploy", "migrations"]
-    },
-    "git": { "publication": "none" }
-  },
-  "authority": { "implementation": true, "providerCalls": true, "network": true }
-}
+curl -fsS "$BASE/schemas/control-plane-v1.schema.json"
+curl -fsS "$BASE/schemas/task-spec-v2.schema.json"
+curl -fsS "$BASE/schemas/execution-agreement-v1.schema.json"
+curl -fsS "$BASE/schemas/task-result-v1.schema.json"
 ```
 
-Poll `selection` and `progress.phase`. The result reports `implementation.status`, changed files, validation stdout/stderr evidence, `localCommit`, `patchPackage`, provider-call audit, and `publication.status: "on_hold"`.
-curl -fsS -H 'content-type: application/json' -d '{"path":"/absolute/project","workingDirectory":".","register":true}' "$BASE/v1/projects/inspect"
+Use the routes advertised by discovery. Before implementation, require a compatible `implementationExecutors[]` entry whose `status` is `ready`; also inspect runtime support. `/healthz` describes service health and `/readyz` describes acceptance readiness, but neither grants task authority.
+
+## 2. Inspect and register the checkout
+
+`register: false` is a readiness-only inspection. Use `true` to obtain a durable project ID for negotiation and submission:
+
+```bash
+REPO=/absolute/path/to/project
+REGISTRATION=$(curl -fsS \
+  -H 'content-type: application/json' \
+  --data "$(jq -nc --arg path "$REPO" \
+    '{path:$path,workingDirectory:".",register:true,dependencyPreparation:"if-needed"}')" \
+  "$BASE/v1/projects/inspect")
+PROJECT_ID=$(printf '%s' "$REGISTRATION" | jq -er '.project.id')
+printf '%s' "$REGISTRATION" | jq '{project,readiness}'
 ```
 
-Submit TaskSpec v2 as `taskSpec` and keep authority explicit:
+The registered checkout supplies source HEAD/branch and project policy context. Keep the readiness report; registration is not proof that an implementation executor is ready.
 
-```json
-{
-  "projectId": "prj_...",
-  "taskSpec": {
-    "schemaVersion": 2, "taskId": "PROJECT-LOCAL-1",
-    "task": { "text": "Validate locally", "goal": "Produce evidence", "acceptanceCriteria": ["Checks are recorded"] },
-    "target": { "repository": "/absolute/project", "workingDirectory": "." },
-    "authority": { "profile": "read-only", "allowProviderCalls": false },
-    "git": { "publication": "none" }, "merge": { "policy": "never" }, "deploy": { "policy": "never" }
-  },
-  "authority": { "inspect": true, "implementation": false, "localBranch": false, "localCommit": false, "remotePush": false, "draftPublication": false, "merge": false, "deploy": false },
-  "publication": "none"
-}
+## 3. Negotiate responsibility
+
+Bootstrap phrases map to profiles as follows:
+
+| User phrase | Useful English equivalent | Profile | Honest boundary |
+| --- | --- | --- | --- |
+| `Только помоги разобраться` | `Just help me understand` | `assist-only` | RunForge can analyze and prepare a patch package; the calling session owns independent review and Git handoff/publication. |
+| `Сделай локально и передай мне` | `Do it locally and hand it back to me` | `local-ready` | RunForge owns bounded local work through branch and commit; the calling session owns remote publication and review. |
+| `Доведи до готового PR` | `Take it to a ready PR` | `draft-pr` | Requests push, draft PR/MR, and CI responsibility; current missing adapters make the normal preset conflict. |
+
+The phrase selects intent only. It does not grant phase authority. Every standalone negotiation request must include a phase-keyed `authority` allowlist with `true` for every requested RunForge-owned phase and explicit `false` values for dangerous or unrequested phases. Capabilities provides a complete, directly negotiable `executionAgreements.minimalRequest` for `assist-only`. Always inspect the returned agreement.
+
+This negotiation `authority` map is not the top-level `authority` object used later in `POST /v1/tasks`. Task submission separately gates provider, network, Git, publication, merge, and deploy operations; neither authority layer grants the other.
+
+`publicationTarget: { "kind": "none" }` makes `assist-only`, `local-ready`, and `custom` local-only for push, draft publication, and CI. It never converts `draft-pr` or `delivery` into an adapter-ready local profile; those profiles keep their remote responsibilities and conflict while the adapters are unavailable.
+
+For a local implementation handoff, negotiate `local-ready` with no remote publication target:
+
+```bash
+NEGOTIATION=$(curl -fsS \
+  -H 'content-type: application/json' \
+  --data "$(jq -nc --arg projectId "$PROJECT_ID" \
+    '{schemaVersion:1,profile:"local-ready",projectId:$projectId,publicationTarget:{kind:"none"},authority:{projectDiscovery:true,taskAnalysis:true,implementationPlanning:true,implementation:true,localValidation:true,independentReview:true,repairIterations:true,patchPackage:true,localBranch:true,localCommit:true,remotePush:false,draftPublication:false,ciMonitoring:false,ciRepair:false,prReview:false,merge:false,deploy:false,postDeployValidation:false,dbAccess:false,productionAccess:false,secretUse:false,providerModelCalls:true}}')" \
+  "$BASE/v1/execution-agreements/negotiate")
+AGREEMENT_ID=$(printf '%s' "$NEGOTIATION" | jq -er \
+  'select(.status == "ready") | .agreementId')
+printf '%s' "$NEGOTIATION" | jq '{agreementId,profile,status,conflicts,handoffs}'
 ```
 
-JSON bodies are bounded to 1 MiB by default. Unknown fields, malformed JSON, non-local Host/Origin values, authority escalation, merge, and deploy are rejected. Responses are redacted and never cacheable. Publication approval is durable and idempotent, but never performs a provider call by itself.
+If responsibility must differ from a preset, negotiate `custom`. Omitted custom phases are unrequested; this example assigns analysis to RunForge and implementation to the calling session:
 
-## Polling and recovery
+```bash
+CUSTOM=$(curl -fsS \
+  -H 'content-type: application/json' \
+  --data "$(jq -nc --arg projectId "$PROJECT_ID" \
+    '{schemaVersion:1,profile:"custom",projectId:$projectId,publicationTarget:{kind:"none"},requestedOwnership:{taskAnalysis:"runforge",implementation:"external_session",localBranch:"external_session",localCommit:"external_session"},authority:{projectDiscovery:false,taskAnalysis:true,implementationPlanning:false,implementation:false,localValidation:false,independentReview:false,repairIterations:false,patchPackage:false,localBranch:false,localCommit:false,remotePush:false,draftPublication:false,ciMonitoring:false,ciRepair:false,prReview:false,merge:false,deploy:false,postDeployValidation:false,dbAccess:false,productionAccess:false,secretUse:false,providerModelCalls:false}}')" \
+  "$BASE/v1/execution-agreements/negotiate")
+printf '%s' "$CUSTOM" | jq '{agreementId,profile,status,conflicts,handoffs}'
+```
 
-Poll every 1–2 seconds. A task is considered stalled when its durable execution lease has no matching in-memory worker, its deadline passes, or its heartbeat is older than 15 seconds. The lifecycle is `running|continuing → interrupted(cleanup pending) → interrupted(retry available) → retry_requested → running|continuing`. The watchdog revokes the old generation and waits a bounded cleanup window. It publishes `recovery.operation` only after the underlying worker Promise has settled. During cleanup, retry returns `recovery_pending` with an exact `retryAfter` and polling action; it never returns an unbounded `task_active` for a task that health reports inactive. If cleanup does not complete by the deadline, the task reports `cleanupStatus: detached`, keeps `retryAvailable: false`, and returns the formal non-retryable `worker_cleanup_failed` response with safe operator actions; RunForge does not overlap a replacement with a worker that could still mutate the target. Polling continues to reconcile a detached generation, so an eventually settled worker changes cleanup to `completed` and makes retry available without a service restart.
+Do not submit a referenced task unless `status` is `ready`. A `conflicted` agreement produces HTTP 409 and no task. Caller-supplied capability, policy, or authority maps can only narrow installed capability; they cannot manufacture an adapter.
 
-Health aggregates, retry guards, and watchdog checks all use the same live-lease predicate: a running/continuing durable status, an active durable lease, and a matching live worker generation. Poll-driven recovery reconciliation runs under the same per-task lock as retry, so an old interrupted snapshot cannot overwrite a new attempt. Every retry receives a new `progress.executionId`, increments `progress.attempt`, and uses an isolated attempt artifact root, including continuation retries. Two concurrent retry requests return the same active replacement attempt. A late result from a revoked generation is never accepted or published for the current generation.
+## 4. Submit by agreement reference
 
-`GET /result` is available for `interrupted` even before retry. Its normalized result records the last phase, interruption reason, original execution identity, heartbeat/deadline evidence, non-inferred mutation status, artifacts, incomplete validations, recovery availability, safety assertions, and next action. `result_not_ready` is reserved for an execution that is genuinely active and has not produced a generation-matched result. On service restart, active durable leases are revoked, journal evidence is reconciled with the snapshot, and interrupted recovery becomes immediately retryable because no process-local worker can survive the restart.
+The TaskSpec must repeat the referenced profile (and, for `custom`, the same phase ownership). This exact request executes the ready `local-ready` agreement without requesting remote publication:
 
-An approving owner decision is recorded once with a stable `decisionId`; replaying the identical request is safe, while a conflicting decision is HTTP 409. `continue` is also idempotent after completion. Missing or corrupt native continuation state is restored only from the control plane's versioned, authority-bound snapshot. Completed, failed, and owner-gated tasks are not retryable; operator-cancelled executions follow the same bounded cleanup and explicit retry policy as watchdog interruptions.
+```bash
+TASK_ID=PROJECT-LOCAL-1
+TASK=$(curl -fsS \
+  -H 'content-type: application/json' \
+  --data "$(jq -nc \
+    --arg projectId "$PROJECT_ID" \
+    --arg agreementId "$AGREEMENT_ID" \
+    --arg repo "$REPO" \
+    --arg taskId "$TASK_ID" \
+    '{projectId:$projectId,agreementId:$agreementId,taskSpec:{schemaVersion:2,taskId:$taskId,task:{text:"Implement the bounded requested change.",goal:"Return a validated local branch and commit.",acceptanceCriteria:["The requested change is implemented","Validation evidence is recorded","A local commit is recorded"]},target:{repository:$repo,workingDirectory:"."},execution:{mode:"implementation",maxRepairIterations:2,timeoutMs:300000,maxProviderTokens:100000},executionAgreement:{schemaVersion:1,profile:"local-ready"},runtime:{preference:"local-disposable",dependencyPreparation:"if-needed",externalNetwork:"allowed"},validation:{mode:"auto",commands:[]},authority:{profile:"bounded-implementation",forbiddenAreas:[".env","secrets"],allowProviderCalls:true,allowNetwork:true},git:{publication:"none",branch:null},merge:{policy:"never"},deploy:{policy:"never"},repair:{mode:"none",plan:null}},authority:{inspect:true,implementation:true,providerCalls:true,network:true,localBranch:true,localCommit:true,remotePush:false,draftPublication:false,merge:false,deploy:false},publication:"none"}')" \
+  "$BASE/v1/tasks")
+printf '%s' "$TASK" | jq '{id,status,executionAgreement,selection,progress}'
+```
 
-Contracts: [TaskSpec v2](../schemas/task-spec-v2.schema.json), [task result v1](../schemas/task-result-v1.schema.json), and [control plane v1](../schemas/control-plane-v1.schema.json).
+`agreementId` and its alias `executionAgreementId` are mutually exclusive; prefer `agreementId`. Task IDs are unique, so use a new one for a new submission.
+
+## 5. Or allow safe auto-negotiation
+
+Omit both the top-level agreement reference and `taskSpec.executionAgreement`. RunForge persists a conservative mode default: `assist-only` for inspection/validation and `local-ready` for implementation/repair. This read-only example auto-negotiates only discovery and analysis:
+
+```bash
+TASK_ID=PROJECT-INSPECT-1
+curl -fsS \
+  -H 'content-type: application/json' \
+  --data "$(jq -nc --arg projectId "$PROJECT_ID" --arg repo "$REPO" --arg taskId "$TASK_ID" \
+    '{projectId:$projectId,taskSpec:{schemaVersion:2,taskId:$taskId,task:{text:"Inspect the registered checkout without changing it.",goal:"Return bounded local evidence.",acceptanceCriteria:["The target repository remains unchanged"]},target:{repository:$repo,workingDirectory:"."},execution:{mode:"inspection",timeoutMs:300000},runtime:{preference:"docker",dependencyPreparation:"if-needed",externalNetwork:"denied"},validation:{mode:"explicit",commands:["git diff --check"]},authority:{profile:"read-only",allowProviderCalls:false,allowNetwork:false},git:{publication:"none",branch:null},merge:{policy:"never"},deploy:{policy:"never"},repair:{mode:"none",plan:null}},authority:{inspect:true,implementation:false,providerCalls:false,network:false,localBranch:false,localCommit:false,remotePush:false,draftPublication:false,merge:false,deploy:false},publication:"none"}')" \
+  "$BASE/v1/tasks"
+```
+
+Use this example only when capabilities report Docker available. Auto-negotiation is conservative, not an authority shortcut: implementation still requires all TaskSpec and request-level implementation, provider, network, branch, and commit gates.
+
+## 6. Poll, read the result, and hand off
+
+```bash
+curl -fsS "$BASE/v1/tasks/$TASK_ID"
+curl -fsS "$BASE/v1/tasks/$TASK_ID/agreement"
+curl -fsS "$BASE/v1/tasks/$TASK_ID/result"
+```
+
+Poll the task every 1–2 seconds. While active, read `progress.phase`, `progress.operation`, `progress.lastHeartbeatAt`, `progress.workerStatus`, `progress.deadlineAt`, and `progress.agreement`. `/result` returns `result_not_ready` until result evidence exists.
+
+At completion, read the result's `agreement`, `handoff`, and `next` objects. `runforge_scope_completed` is not end-to-end completion. If `next.party` is `external_session`, perform only `next.exactAction` and retain the requested evidence; do not infer a push, PR/MR, CI result, merge, or deploy from a local branch or commit. If the task advertises an owner gate, post the explicit decision and continue only as directed:
+
+```bash
+curl -fsS \
+  -H 'content-type: application/json' \
+  --data '{"decisionId":"owner-decision-1","decision":"approve","note":"Owner explicitly approved the advertised continuation."}' \
+  "$BASE/v1/tasks/$TASK_ID/owner-decisions"
+curl -fsS -X POST "$BASE/v1/tasks/$TASK_ID/continue"
+```
+
+On interruption, wait for `recovery.retryAvailable: true` and call only the advertised `recovery.operation`. Retry, restart, cancellation, continuation, and publication decisions preserve the agreement and never expand authority.
+
+## Publication targets and unavailable adapters
+
+Current GitHub/GitLab push and PR/MR create/update adapters are unavailable. So are adapters for updating an existing change, CI monitoring/repair, merge, deploy, database, production, and secrets. Normal `draft-pr` and delivery profiles therefore conflict when RunForge owns those phases. A publication decision records approval but performs no provider call; `external_session` (or another explicitly named external party) must publish.
+
+- `{ "kind": "existing_branch", "branchName": "work/task-1" }` means another party already controls that local branch. It suppresses branch creation but proves neither branch existence nor commit/push authority.
+- `{ "kind": "existing_change", "provider": "github", "changeId": "123" }` asks RunForge to push/update that PR and currently conflicts.
+- `{ "kind": "externally_managed_existing_change", "provider": "gitlab", "changeId": "456", "responsibleParty": "external_session" }` delegates push/publication of that MR to the calling session; CI defaults to unrequested.
+
+Register the actual checkout before using an existing branch or PR/MR target so negotiation captures its source state. No phrase, project file, target, decision, retry, or handoff silently escalates authority.
+
+Contracts: [Execution Agreement v1](../schemas/execution-agreement-v1.schema.json), [control-plane v1](../schemas/control-plane-v1.schema.json), [TaskSpec v2](../schemas/task-spec-v2.schema.json), and [task result v1](../schemas/task-result-v1.schema.json).

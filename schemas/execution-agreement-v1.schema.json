@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runforge.local/schemas/execution-agreement-v1.schema.json",
+  "title": "RunForge Execution Agreement v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "agreementId", "profile", "status", "phases", "conflicts", "handoffs", "humanSummary"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "agreementId": { "type": "string", "pattern": "^ea_v1_[a-f0-9]{24}$" },
+    "profile": { "enum": ["assist-only", "local-ready", "draft-pr", "delivery", "custom"] },
+    "status": { "enum": ["ready", "conflicted", "in_progress", "completed"] },
+    "phases": {
+      "type": "array", "minItems": 22, "maxItems": 22,
+      "prefixItems": [
+        { "$ref": "#/$defs/projectDiscovery" }, { "$ref": "#/$defs/taskAnalysis" },
+        { "$ref": "#/$defs/implementationPlanning" }, { "$ref": "#/$defs/implementation" },
+        { "$ref": "#/$defs/localValidation" }, { "$ref": "#/$defs/independentReview" },
+        { "$ref": "#/$defs/repairIterations" }, { "$ref": "#/$defs/patchPackage" },
+        { "$ref": "#/$defs/localBranch" }, { "$ref": "#/$defs/localCommit" },
+        { "$ref": "#/$defs/remotePush" }, { "$ref": "#/$defs/draftPublication" },
+        { "$ref": "#/$defs/ciMonitoring" }, { "$ref": "#/$defs/ciRepair" },
+        { "$ref": "#/$defs/prReview" }, { "$ref": "#/$defs/merge" },
+        { "$ref": "#/$defs/deploy" }, { "$ref": "#/$defs/postDeployValidation" },
+        { "$ref": "#/$defs/dbAccess" }, { "$ref": "#/$defs/productionAccess" },
+        { "$ref": "#/$defs/secretUse" }, { "$ref": "#/$defs/providerModelCalls" }
+      ],
+      "items": false
+    },
+    "conflicts": { "type": "array", "items": { "$ref": "#/$defs/conflict" } },
+    "handoffs": { "type": "array", "items": { "$ref": "#/$defs/handoff" } },
+    "humanSummary": { "type": "string", "minLength": 1 },
+    "context": { "$ref": "#/$defs/context" }
+  },
+  "$defs": {
+    "publicationTarget": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "none" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "branchName"], "properties": { "kind": { "enum": ["new_branch", "existing_branch"] }, "branchName": { "type": "string", "minLength": 1 } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "provider", "changeId"], "properties": { "kind": { "const": "existing_change" }, "provider": { "enum": ["github", "gitlab", "other"] }, "changeId": { "type": "string", "minLength": 1 } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "provider", "changeId", "responsibleParty"], "properties": { "kind": { "const": "externally_managed_existing_change" }, "provider": { "enum": ["github", "gitlab", "other"] }, "changeId": { "type": "string", "minLength": 1 }, "responsibleParty": { "enum": ["external_session", "external_system", "owner"] } } }
+      ]
+    },
+    "context": {
+      "type": "object", "additionalProperties": false, "required": ["project", "policy", "publicationTarget"],
+      "properties": {
+        "project": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/projectContext" }] },
+        "policy": { "$ref": "#/$defs/policyContext" },
+        "publicationTarget": { "$ref": "#/$defs/publicationTarget" }
+      }
+    },
+    "projectContext": {
+      "type": "object", "additionalProperties": false, "required": ["projectId", "repository", "workingDirectory", "source", "defaultBranch", "protectedBranches"],
+      "properties": {
+        "projectId": { "type": "string", "minLength": 1 }, "repository": { "type": "string", "minLength": 1 }, "workingDirectory": { "type": "string", "minLength": 1 },
+        "source": { "type": "object", "additionalProperties": false, "required": ["head", "branch", "detachedHead"], "properties": { "head": { "type": ["string", "null"] }, "branch": { "type": ["string", "null"] }, "detachedHead": { "type": "boolean" } } },
+        "defaultBranch": { "type": ["string", "null"] }, "protectedBranches": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "policyContext": {
+      "type": "object", "additionalProperties": false, "required": ["sources", "hardBoundaries", "runforgeMd"],
+      "properties": {
+        "sources": { "$ref": "#/$defs/strings" }, "hardBoundaries": { "$ref": "#/$defs/strings" },
+        "runforgeMd": { "type": "object", "additionalProperties": false, "required": ["present", "path", "authorityEscalationTrusted"], "properties": { "present": { "type": "boolean" }, "path": { "type": ["string", "null"] }, "authorityEscalationTrusted": { "const": false } } }
+      }
+    },
+    "phaseId": { "enum": ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring", "ciRepair", "prReview", "merge", "deploy", "postDeployValidation", "dbAccess", "productionAccess", "secretUse", "providerModelCalls"] },
+    "party": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+    "strings": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },
+    "phase": {
+      "type": "object", "additionalProperties": false,
+      "required": ["phaseId", "requested", "available", "authorized", "policyAllowed", "responsibleParty", "status", "reason", "prerequisites", "completionEvidence"],
+      "properties": {
+        "phaseId": { "$ref": "#/$defs/phaseId" }, "requested": { "type": "boolean" },
+        "available": { "type": "boolean" }, "authorized": { "type": "boolean" }, "policyAllowed": { "type": "boolean" },
+        "responsibleParty": { "$ref": "#/$defs/party" },
+        "status": { "enum": ["not_requested", "ready", "handoff", "conflict", "completed"] },
+        "reason": { "type": "string", "minLength": 1 }, "prerequisites": { "$ref": "#/$defs/strings" },
+        "completionEvidence": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "projectDiscovery": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "projectDiscovery" } } }] },
+    "taskAnalysis": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "taskAnalysis" } } }] },
+    "implementationPlanning": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "implementationPlanning" } } }] },
+    "implementation": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "implementation" } } }] },
+    "localValidation": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "localValidation" } } }] },
+    "independentReview": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "independentReview" } } }] },
+    "repairIterations": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "repairIterations" } } }] },
+    "patchPackage": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "patchPackage" } } }] },
+    "localBranch": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "localBranch" } } }] },
+    "localCommit": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "localCommit" } } }] },
+    "remotePush": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "remotePush" } } }] },
+    "draftPublication": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "draftPublication" } } }] },
+    "ciMonitoring": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "ciMonitoring" } } }] },
+    "ciRepair": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "ciRepair" } } }] },
+    "prReview": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "prReview" } } }] },
+    "merge": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "merge" } } }] },
+    "deploy": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "deploy" } } }] },
+    "postDeployValidation": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "postDeployValidation" } } }] },
+    "dbAccess": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "dbAccess" } } }] },
+    "productionAccess": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "productionAccess" } } }] },
+    "secretUse": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "secretUse" } } }] },
+    "providerModelCalls": { "allOf": [{ "$ref": "#/$defs/phase" }, { "type": "object", "properties": { "phaseId": { "const": "providerModelCalls" } } }] },
+    "conflict": {
+      "type": "object", "additionalProperties": false, "required": ["phaseId", "kind", "reason"],
+      "properties": { "phaseId": { "$ref": "#/$defs/phaseId" }, "kind": { "enum": ["unavailable", "unauthorized", "policy_denied"] }, "reason": { "type": "string", "minLength": 1 } }
+    },
+    "handoff": {
+      "type": "object", "additionalProperties": false, "required": ["phaseId", "responsibleParty", "reason", "prerequisites", "completionEvidence"],
+      "properties": {
+        "phaseId": { "$ref": "#/$defs/phaseId" }, "responsibleParty": { "enum": ["external_session", "owner", "external_system"] },
+        "reason": { "type": "string", "minLength": 1 }, "prerequisites": { "$ref": "#/$defs/strings" }, "completionEvidence": { "$ref": "#/$defs/strings" }
+      }
+    }
+  }
+}

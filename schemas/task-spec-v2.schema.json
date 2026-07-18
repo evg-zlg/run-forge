@@ -14,6 +14,41 @@
     },
     "target": { "type": "object", "additionalProperties": false, "required": ["repository"], "properties": { "repository": { "type": "string", "minLength": 1 }, "workingDirectory": { "type": "string", "minLength": 1 }, "expectedSha": { "type": "string", "minLength": 7 } } },
     "execution": { "type": "object", "additionalProperties": false, "required": ["mode"], "properties": { "mode": { "enum": ["inspection", "implementation", "validation", "repair"] }, "maxRepairIterations": { "type": "integer", "minimum": 0, "maximum": 3 }, "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 1800000 }, "maxChangedFiles": { "type": "integer", "minimum": 1, "maximum": 100 }, "maxPatchBytes": { "type": "integer", "minimum": 1000, "maximum": 5000000 }, "maxProviderTokens": { "type": "integer", "minimum": 1000, "maximum": 200000 } } },
+    "executionAgreement": {
+      "type": "object", "additionalProperties": false, "required": ["schemaVersion", "profile"],
+      "properties": {
+        "schemaVersion": { "const": 1 },
+        "profile": { "enum": ["assist-only", "local-ready", "draft-pr", "delivery", "custom"] },
+        "phaseOwnership": {
+          "type": "object", "minProperties": 1, "additionalProperties": false,
+          "properties": {
+            "projectDiscovery": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "taskAnalysis": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "implementationPlanning": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "implementation": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "localValidation": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "independentReview": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "repairIterations": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "patchPackage": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "localBranch": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "localCommit": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "remotePush": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "draftPublication": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "ciMonitoring": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "ciRepair": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "prReview": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "merge": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "deploy": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "postDeployValidation": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "dbAccess": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "productionAccess": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "secretUse": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+            "providerModelCalls": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] }
+          }
+        }
+      },
+      "allOf": [{ "if": { "properties": { "profile": { "const": "custom" } } }, "then": { "required": ["phaseOwnership"] }, "else": { "not": { "required": ["phaseOwnership"] } } }]
+    },
     "discovery": { "type": "object", "additionalProperties": false, "properties": { "policy": { "enum": ["auto", "explicit"] } } },
     "runtime": { "type": "object", "additionalProperties": false, "properties": { "preference": { "enum": ["docker", "local-disposable"] }, "dockerImage": { "type": "string", "minLength": 1 }, "prepareDependencies": { "type": "boolean" }, "dependencyPreparation": { "enum": ["required", "if-needed", "disabled", "reuse-existing"] }, "externalNetwork": { "enum": ["denied", "dependency-preparation-only", "allowed"] } }, "not": { "required": ["prepareDependencies", "dependencyPreparation"] } },
     "validation": { "type": "object", "additionalProperties": false, "properties": { "mode": { "enum": ["auto", "explicit"] }, "commands": { "type": "array", "items": { "type": "string", "minLength": 1 } } } },

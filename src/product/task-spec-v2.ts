@@ -2,13 +2,23 @@ import { readFile, realpath, stat } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { blockedCommandReports } from "../run/external-command-check-helpers.js";
 import { loadCodeRepairPlan } from "../run/code-repair.js";
+import { EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES, type ExecutionParty, type ExecutionPhaseId, type ExecutionProfile } from "./execution-agreement.js";
 import { defaultArtifactRoot, inspectProject, isPathInside } from "./project-inspection.js";
 import { defaultRuntimeForMode, implementationExecutorContract, runtimeCompatibleWithImplementationExecutor, taskExecutionModes, taskRuntimeIds, taskSpecSchemaVersion, type TaskExecutionMode, type TaskRuntimeId } from "./task-spec-contract.js";
 
 export { taskSpecSchemaVersion } from "./task-spec-contract.js";
-const topKeys = ["schemaVersion", "taskId", "task", "target", "execution", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
+const topKeys = ["schemaVersion", "taskId", "task", "target", "execution", "executionAgreement", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
 
 export type { TaskExecutionMode } from "./task-spec-contract.js";
+
+export type TaskSpecExecutionAgreement =
+  | { schemaVersion: 1; profile: Exclude<ExecutionProfile, "custom">; phaseOwnership?: never }
+  | {
+    schemaVersion: 1;
+    profile: "custom";
+    /** Omitted phases are not requested. */
+    phaseOwnership: Partial<Record<ExecutionPhaseId, ExecutionParty>>;
+  };
 
 export type TaskSpecV2 = {
   schemaVersion: 2;
@@ -16,6 +26,7 @@ export type TaskSpecV2 = {
   task: { text: string; goal: string; acceptanceCriteria: string[] };
   target: { repository: string; workingDirectory: string; expectedSha: string };
   execution: { mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number };
+  executionAgreement: TaskSpecExecutionAgreement;
   discovery: { policy: "auto" | "explicit" };
   runtime: { preference: TaskRuntimeId; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" | "allowed" };
   validation: { mode: "auto" | "explicit"; commands: string[] };
@@ -96,6 +107,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const forbiddenAreas = strings(authorityRaw.forbiddenAreas ?? defaultForbidden(), "authority.forbiddenAreas");
   const repairMode = choice(repairRaw.mode ?? "none", ["none", "disposable", "code"], "repair.mode");
   const executionMode = choice(executionRaw.mode, taskExecutionModes, "execution.mode");
+  const executionAgreement = normalizeExecutionAgreementRequest(raw.executionAgreement, executionMode);
   if (["implementation", "repair"].includes(executionMode) !== (profile === "bounded-implementation")) throw new Error(`execution.mode='${executionMode}' is inconsistent with authority.profile='${profile}'.`);
   const authorityFile = authorityRaw.envelopeFile === undefined || authorityRaw.envelopeFile === null ? null : resolve(baseDir, string(authorityRaw.envelopeFile, "authority.envelopeFile"));
   const repairPlan = repairRaw.plan === undefined || repairRaw.plan === null ? null : resolve(baseDir, string(repairRaw.plan, "repair.plan"));
@@ -127,6 +139,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
     task: { text: string(task.text, "task.text"), goal: string(task.goal, "task.goal"), acceptanceCriteria: strings(task.acceptanceCriteria, "task.acceptanceCriteria", true) },
     target: { repository: await realpath(inspection.path), workingDirectory: inspection.workingDirectory ?? ".", expectedSha },
     execution: { mode: executionMode, maxRepairIterations: integer(executionRaw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(executionRaw.timeoutMs, "execution.timeoutMs", 1_000, 1_800_000, 300_000), maxChangedFiles: integer(executionRaw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(executionRaw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: integer(executionRaw.maxProviderTokens, "execution.maxProviderTokens", 1_000, 200_000, 100_000) },
+    executionAgreement,
     discovery: { policy: choice(discoveryRaw.policy ?? "auto", ["auto", "explicit"], "discovery.policy") },
     runtime: {
       preference: runtimePreference,
@@ -162,6 +175,29 @@ function strings(value: unknown, name: string, nonEmpty = false): string[] { if 
 function choice<T extends string>(value: unknown, choices: readonly T[], name: string): T { if (typeof value !== "string" || !choices.includes(value as T)) throw new Error(`${name} must be one of: ${choices.join(", ")}.`); return value as T; }
 function rejectUnknown(value: Record<string, unknown>, allowed: string[], name: string): void { const unknown = Object.keys(value).filter((key) => !allowed.includes(key)); if (unknown.length) throw new Error(`${name} contains unknown field(s): ${unknown.join(", ")}.`); }
 function defaultForbidden(): string[] { return ["target main mutation or push", "PR merge", "deploy", "database", "production", "secrets", "migrations"]; }
+
+function normalizeExecutionAgreementRequest(value: unknown, mode: TaskExecutionMode): TaskSpecExecutionAgreement {
+  if (value === undefined) {
+    return { schemaVersion: 1, profile: mode === "implementation" || mode === "repair" ? "local-ready" : "assist-only" };
+  }
+  const raw = object(value, "executionAgreement must be an object.");
+  rejectUnknown(raw, ["schemaVersion", "profile", "phaseOwnership"], "executionAgreement");
+  if (raw.schemaVersion !== 1) throw new Error(`Unsupported executionAgreement.schemaVersion: ${String(raw.schemaVersion)}; supported: 1.`);
+  const profile = choice(raw.profile, EXECUTION_PROFILES, "executionAgreement.profile");
+  if (profile !== "custom") {
+    if (raw.phaseOwnership !== undefined) throw new Error("executionAgreement.phaseOwnership is only valid when profile='custom'.");
+    return { schemaVersion: 1, profile };
+  }
+  const ownershipRaw = object(raw.phaseOwnership, "executionAgreement.profile='custom' requires a non-empty phaseOwnership object.");
+  if (Object.keys(ownershipRaw).length === 0) throw new Error("executionAgreement.profile='custom' requires a non-empty phaseOwnership object.");
+  const unknownPhases = Object.keys(ownershipRaw).filter((phase) => !(EXECUTION_PHASE_IDS as readonly string[]).includes(phase));
+  if (unknownPhases.length) throw new Error(`executionAgreement.phaseOwnership contains unknown phase(s): ${unknownPhases.join(", ")}.`);
+  const phaseOwnership: NonNullable<TaskSpecExecutionAgreement["phaseOwnership"]> = {};
+  for (const phase of EXECUTION_PHASE_IDS) {
+    if (ownershipRaw[phase] !== undefined) phaseOwnership[phase] = choice(ownershipRaw[phase], EXECUTION_PARTIES, `executionAgreement.phaseOwnership.${phase}`);
+  }
+  return { schemaVersion: 1, profile, phaseOwnership };
+}
 
 function assertRepairOutsideForbiddenAreas(files: string[], areas: string[]): void {
   const paths = areas.filter((area) => !/\s/.test(area)).map((area) => area.replace(/^\.\//, "").replace(/^\*\*\//, "").replace(/\/\*\*$/, "").replace(/\/$/, ""));

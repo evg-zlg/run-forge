@@ -7,6 +7,7 @@ import { loadAdminConfig } from "../admin/config.js";
 import { scanSecrets } from "../security/secret-scan.js";
 import type { TaskSpecV2, TaskExecutionMode } from "../product/task-spec-v2.js";
 import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor } from "../product/task-spec-contract.js";
+import { executionPhaseOwner } from "../product/execution-agreement.js";
 
 const execFileAsync = promisify(execFile);
 const credentialCache = new Map<string, { at: number; ready: boolean }>();
@@ -36,7 +37,7 @@ export type ImplementationExecutorResult = {
   plan: string[]; changedFiles: string[]; patch: string; validationResults: CommandDiagnostic[];
   unresolvedFindings: string[]; status: "implemented_and_validated" | "no_change_required" | "blocked_with_owner_gate" | "failed_with_diagnostics";
   ownerGate: { required: boolean; reason: string | null }; safetyAssertions: Record<string, boolean>;
-  diagnostics: Record<string, unknown>; localCommit: string | null; patchPackage: string | null;
+  diagnostics: Record<string, unknown>; localBranch: string | null; localCommit: string | null; patchPackage: string | null;
   providerCalls: Array<Record<string, unknown>>; selectedExecutor: { id: string; model: string | null };
 };
 
@@ -79,7 +80,23 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   await rm(workspace, { recursive: true, force: true });
   await mkdir(dirname(workspace), { recursive: true });
   await progress(request, "understand_task", "Task, acceptance criteria, authority and forbidden zones normalized.");
-  await git(request.targetRepository, ["worktree", "add", "--detach", workspace, request.spec.target.expectedSha]);
+  const branchOwnedByRunForge = executionPhaseOwner(
+    request.spec.executionAgreement.profile,
+    "localBranch",
+    request.spec.executionAgreement.phaseOwnership,
+  ) === "runforge";
+  const commitOwnedByRunForge = executionPhaseOwner(
+    request.spec.executionAgreement.profile,
+    "localCommit",
+    request.spec.executionAgreement.phaseOwnership,
+  ) === "runforge";
+  const localBranch = branchOwnedByRunForge ? localBranchName(request.spec.taskId, request.generation, request.attempt) : null;
+  if (localBranch && await localRefExists(request.targetRepository, localBranch)) {
+    throw new Error(`local_branch_collision: refusing to overwrite refs/heads/${localBranch}`);
+  }
+  await git(request.targetRepository, localBranch
+    ? ["worktree", "add", "-b", localBranch, workspace, request.spec.target.expectedSha]
+    : ["worktree", "add", "--detach", workspace, request.spec.target.expectedSha]);
   const executionRoot = resolve(workspace, request.workingDirectory);
   if (!isInside(workspace, executionRoot)) throw new Error("working_directory_escape");
   const plan = ["Inspect the target and acceptance criteria", "Implement only bounded changes in the disposable worktree", "Run declared validation", "Repair in-scope failures within the iteration budget", "Finalize patch/commit evidence without publication"];
@@ -115,7 +132,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       }
       const safetyErrors = validateChangedPaths(changedFiles, request.forbiddenZones, request.spec.execution.maxChangedFiles);
       if (Buffer.byteLength(patch) > request.spec.execution.maxPatchBytes) safetyErrors.push(`Patch exceeds ${request.spec.execution.maxPatchBytes} bytes.`);
-      const secretScan = scanSecrets(patch);
+      const secretScan = scanSecrets(addedPatchLines(patch));
       if (secretScan.status === "failed") safetyErrors.push("Secret scan rejected the patch.");
       if (safetyErrors.length) { unresolved = safetyErrors; status = "blocked_with_owner_gate"; break; }
       await progress(request, "validate", `Running ${request.validationProfile.commands.length} validation command(s).`);
@@ -124,13 +141,17 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       if (validations.every((item) => item.exitCode === 0)) { status = "implemented_and_validated"; break; }
       unresolved = validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}: exit ${item.exitCode}${item.infrastructureDefect ? ` (${item.infrastructureDefect})` : ""}`);
     }
-    if (status === "implemented_and_validated") {
-      await progress(request, "finalize", "Creating local commit and patch package; publication remains on hold.");
-      await git(workspace, ["add", "-A"]);
-      await git(workspace, ["-c", "user.name=RunForge Executor", "-c", "user.email=runforge@localhost", "commit", "-m", `RunForge ${request.spec.taskId}`]);
-      localCommit = (await git(workspace, ["rev-parse", "HEAD"])).trim();
-      patch = await git(workspace, ["format-patch", "-1", "--stdout", localCommit]);
-      changedFiles = lines(await git(workspace, ["diff-tree", "--no-commit-id", "--name-only", "-r", localCommit]));
+    if (status === "implemented_and_validated" || status === "no_change_required") {
+      if (commitOwnedByRunForge) {
+        await progress(request, "finalize", "Creating the RunForge-owned local commit and patch package; publication remains on hold.");
+        await git(workspace, ["add", "-A"]);
+        await git(workspace, ["-c", "user.name=RunForge Executor", "-c", "user.email=runforge@localhost", "commit", ...(status === "no_change_required" ? ["--allow-empty"] : []), "-m", `RunForge ${request.spec.taskId}`]);
+        localCommit = (await git(workspace, ["rev-parse", "HEAD"])).trim();
+        patch = await git(workspace, ["format-patch", "-1", "--stdout", localCommit]);
+        changedFiles = lines(await git(workspace, ["diff-tree", "--no-commit-id", "--name-only", "-r", localCommit]));
+      } else {
+        await progress(request, "finalize", "Preserving the validated binary diff without creating an externally owned commit.");
+      }
     }
     const patchPackage = patch ? join(request.artifactRoot, "implementation.patch") : null;
     if (patchPackage) await writeFile(patchPackage, patch, "utf8");
@@ -141,7 +162,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       ownerGate: { required: status === "blocked_with_owner_gate", reason: status === "blocked_with_owner_gate" ? unresolved.join(" ") : null },
       safetyAssertions: { sourceShaUnchanged: sourceAfter === sourceBefore.trim(), sourceWorktreeStateUnchanged: sourceStatusAfter === sourceStatusBefore, targetMainMutation: false, targetMainPush: false, merge: false, deploy: false, publicationPerformed: false, forbiddenZonesRespected: !unresolved.some((item) => item.includes("forbidden")), secretScanPassed: !unresolved.includes("Secret scan rejected the patch.") },
       diagnostics: { agentSummary, sourceBefore: sourceBefore.trim(), sourceAfter, sourceWorktreeStatusBefore: sourceStatusBefore, sourceWorktreeStatusAfter: sourceStatusAfter, selectionReason: selection.reason, rejectedAlternatives: selection.rejected, workspace: relative(request.targetRepository, workspace) },
-      localCommit, patchPackage, providerCalls, selectedExecutor: { id: executor.id, model: executor.model }
+      localBranch, localCommit, patchPackage, providerCalls, selectedExecutor: { id: executor.id, model: executor.model }
     };
   } finally {
     await git(request.targetRepository, ["worktree", "remove", "--force", workspace]).catch(() => undefined);
@@ -155,6 +176,30 @@ async function executableAvailable(command: string): Promise<boolean> { if (comm
 async function codexCredentialReady(argv: string[]): Promise<boolean> { const key = argv.join("\0"), cached = credentialCache.get(key); if (cached && Date.now() - cached.at < 30_000) return cached.ready; const ready = await execFileAsync(argv[0]!, [...argv.slice(1), "login", "status"], { env: safeRuntimeEnv(), timeout: 10_000 }).then(() => true, () => false); credentialCache.set(key, { at: Date.now(), ready }); return ready; }
 function splitCommand(value: string): string[] { return value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((part) => part.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2")) ?? []; }
 async function git(cwd: string, args: string[]): Promise<string> { return (await execFileAsync("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 })).stdout; }
+async function localRefExists(repository: string, branch: string): Promise<boolean> {
+  return execFileAsync("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repository })
+    .then(() => true, (error: unknown) => {
+      if (typeof error === "object" && error !== null && "code" in error && error.code === 1) return false;
+      throw error;
+    });
+}
+function localBranchName(taskId: string, generation: string, attempt: number): string {
+  const task = refSlug(taskId, "task");
+  const execution = refSlug(generation, "standalone");
+  const retry = Number.isSafeInteger(attempt) && attempt > 0 ? attempt : 1;
+  return `runforge/${task}/${execution}-attempt-${retry}`;
+}
+function refSlug(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || fallback; }
+function addedPatchLines(patch: string): string {
+  const added: string[] = [];
+  let inHunk = false;
+  for (const line of patch.split(/\r?\n/)) {
+    if (line.startsWith("@@ ")) { inHunk = true; continue; }
+    if (line.startsWith("diff --git ") || line.startsWith("GIT binary patch") || line.startsWith("Binary files ")) { inHunk = false; continue; }
+    if (inHunk && line.startsWith("+")) added.push(line.slice(1));
+  }
+  return added.join("\n");
+}
 function lines(text: string): string[] { return text.split(/\r?\n/).map((item) => item.trim()).filter(Boolean); }
 function isInside(root: string, path: string): boolean { const rel = relative(root, path); return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/")); }
 async function progress(request: ImplementationExecutorRequest, phase: string, detail: string): Promise<void> { await request.onProgress?.(phase, detail); }
@@ -179,7 +224,7 @@ async function runAgent(commandText: string, model: string | null, cwd: string, 
   });
 }
 function extractSummary(stdout: string, stderr: string): string { const finals = stdout.split(/\r?\n/).flatMap((line) => { try { const item = JSON.parse(line) as Record<string, any>; const text = item.msg?.message ?? item.message ?? item.text ?? item.item?.text; return typeof text === "string" ? [text] : []; } catch { return []; } }); return (finals.at(-1) ?? stdout ?? stderr).slice(-20_000); }
-function extractTokenUsage(stdout: string): number | null { const values = stdout.split(/\r?\n/).flatMap((line) => { try { const item = JSON.parse(line) as Record<string, any>; const usage = item.usage ?? item.token_usage ?? item.item?.usage; const explicit = usage?.total_tokens ?? usage?.totalTokens ?? item.total_tokens; if (Number.isFinite(explicit)) return [Number(explicit)]; const input = usage?.input_tokens ?? usage?.inputTokens, output = usage?.output_tokens ?? usage?.outputTokens; return Number.isFinite(input) && Number.isFinite(output) ? [Number(input) + Number(output)] : []; } catch { return []; } }); return values.length ? Math.max(...values) : null; }
+export function extractTokenUsage(stdout: string): number | null { const values = stdout.split(/\r?\n/).flatMap((line) => { try { const item = JSON.parse(line) as Record<string, any>; const usage = item.usage ?? item.token_usage ?? item.item?.usage; const input = usage?.input_tokens ?? usage?.inputTokens, cached = usage?.cached_input_tokens ?? usage?.cachedInputTokens ?? 0, output = usage?.output_tokens ?? usage?.outputTokens; if (Number.isFinite(input) && Number.isFinite(output) && Number.isFinite(cached)) return [Math.max(0, Number(input) - Number(cached)) + Number(output)]; const explicit = usage?.total_tokens ?? usage?.totalTokens ?? item.total_tokens; return Number.isFinite(explicit) ? [Number(explicit)] : []; } catch { return []; } }); return values.length ? Math.max(...values) : null; }
 async function runValidation(command: string, cwd: string, root: string, iteration: number, index: number, timeoutMs: number, signal?: AbortSignal): Promise<CommandDiagnostic> { const started = Date.now(), startedAt = new Date(started).toISOString(); let stdout = "", stderr = "", timedOut = false, setupFailure = false; const artifactPath = `validation/iteration-${iteration}/command-${index}.json`; await mkdir(dirname(join(root, artifactPath)), { recursive: true }); return new Promise((resolveRun) => { const child = spawn(command, { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"], env: safeRuntimeEnv() }); const stop = () => child.kill("SIGTERM"); signal?.addEventListener("abort", stop, { once: true }); const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs); child.stdout?.on("data", (chunk) => { stdout += chunk; }); child.stderr?.on("data", (chunk) => { stderr += chunk; }); child.on("error", (error) => { setupFailure = true; stderr += error.message; }); child.on("close", (exitCode, childSignal) => { clearTimeout(timer); signal?.removeEventListener("abort", stop); const finishedAt = new Date().toISOString(); stdout = redactProviderOutput(stdout); stderr = redactProviderOutput(stderr); const stdoutTruncated = Buffer.byteLength(stdout) > 1_000_000, stderrTruncated = Buffer.byteLength(stderr) > 1_000_000; const diagnosticGap = exitCode !== 0 && !stdout.trim() && !stderr.trim(); const failureReason = exitCode === 0 ? null : timedOut ? `Validation timed out after ${timeoutMs}ms.` : setupFailure ? "Validation command could not be started." : diagnosticGap ? "Validation exited non-zero without stdout or stderr." : `Validation command exited with code ${exitCode ?? "signal"}.`; const classification = exitCode === 0 ? null : setupFailure ? "setup" as const : timedOut || childSignal ? "runtime" as const : diagnosticGap ? "infrastructure" as const : "product" as const; const diagnostic: CommandDiagnostic = { command, cwd, executor: "local-coding-agent", runtime: "local-disposable", startedAt, finishedAt, durationMs: Date.now() - started, exitCode, signal: childSignal, stdout: stdout.slice(0, 1_000_000), stderr: stderr.slice(0, 1_000_000), stdoutTruncated, stderrTruncated, truncation: { stdout: stdoutTruncated, stderr: stderrTruncated, limitBytes: 1_000_000 }, artifactPaths: [artifactPath], timedOut, setupFailure, failureReason, classification, diagnosticGap, infrastructureDefect: diagnosticGap ? "non-zero exit produced empty stdout and stderr" : null, artifactPath }; void writeFile(join(root, artifactPath), JSON.stringify(diagnostic, null, 2) + "\n").then(() => resolveRun(diagnostic)); }); }); }
 function safeRuntimeEnv(): NodeJS.ProcessEnv { const allowed = ["HOME", "PATH", "SHELL", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "LANG", "LC_ALL", "CODEX_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"]; return Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]!]])); }
 function redactProviderOutput(value: string): string { return value.replace(/\b(?:gh[pousr]_|github_pat_|glpat-|sk-)[A-Za-z0-9_-]{12,}\b/gi, "[REDACTED]").replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]{12,}/gi, "$1[REDACTED]").replace(/\b(password|passwd|api[_-]?key|access[_-]?token|secret|credential)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]"); }

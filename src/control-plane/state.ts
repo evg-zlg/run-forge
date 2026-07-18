@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { appendFile, mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import type { ExecutionAgreement } from "../product/execution-agreement.js";
 import type { ControlTaskRecord, ProjectRecord } from "./contracts.js";
 
 export class ControlPlaneStore {
@@ -8,6 +9,7 @@ export class ControlPlaneStore {
 
   async initialize(): Promise<void> {
     await mkdir(join(this.root, "tasks"), { recursive: true });
+    await mkdir(join(this.root, "execution-agreements"), { recursive: true });
     await this.recoverInterruptedTasks();
   }
 
@@ -23,6 +25,10 @@ export class ControlPlaneStore {
     if (index === -1) projects.push(project); else projects[index] = project;
     await this.writeJson(join(this.root, "projects.json"), projects);
   }
+
+  agreementPath(id: string): string { return join(this.root, "execution-agreements", `${id}.json`); }
+  async getAgreement(id: string): Promise<ExecutionAgreement | null> { return this.readJson<ExecutionAgreement | null>(this.agreementPath(id), null); }
+  async saveAgreement(agreement: ExecutionAgreement): Promise<void> { await this.writeJson(this.agreementPath(agreement.agreementId), agreement); }
 
   taskDir(id: string): string { return join(this.root, "tasks", id); }
   taskPath(id: string): string { return join(this.taskDir(id), "state.json"); }

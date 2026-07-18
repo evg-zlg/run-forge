@@ -1,4 +1,5 @@
 import { randomUUID } from "node:crypto";
+import type { ExecutionAgreement, ExecutionAgreementConflict, ExecutionParty, ExecutionPhaseId, ExecutionProfile } from "../product/execution-agreement.js";
 
 export const controlPlaneApiVersion = "v1";
 export const defaultControlPlaneHost = "127.0.0.1";
@@ -49,6 +50,23 @@ export type TaskProgress = {
   deadlineAt: string | null;
   summary: string;
   diagnostic: string | null;
+  agreement?: AgreementLifecycleProjection;
+};
+
+export type AgreementLifecycleProjection = {
+  schemaVersion: 1;
+  agreementId: string;
+  profile: ExecutionProfile;
+  currentPhase: ExecutionPhaseId | null;
+  responsibleParty: ExecutionParty | null;
+  runforgeCompletedPhases: ExecutionPhaseId[];
+  delegatedPhases: Array<{ phaseId: ExecutionPhaseId; responsibleParty: Exclude<ExecutionParty, "runforge" | "nobody"> }>;
+  awaitingPhases: Array<{ phaseId: ExecutionPhaseId; responsibleParty: Exclude<ExecutionParty, "runforge" | "nobody">; prerequisites: string[] }>;
+  nextParty: Exclude<ExecutionParty, "nobody"> | null;
+  nextAction: string | null;
+  conflicts: ExecutionAgreementConflict[];
+  ownerGate: { required: boolean; status: string; reason?: string };
+  publicationGate: { required: boolean; status: string; reason?: string };
 };
 
 export type TaskRecovery = {
@@ -94,6 +112,7 @@ export type ControlTaskRecord = {
   status: ControlTaskStatus;
   specPath: string;
   artifactRoot: string;
+  executionAgreement?: ExecutionAgreement;
   authority: ControlAuthority;
   publicationRequested: "none" | "draft-pr";
   publicationGate: { required: boolean; status: string; reason?: string };
@@ -147,12 +166,16 @@ export function parseProjectRequest(value: unknown): { path: string; workingDire
   return { path: string(input.path, "path"), workingDirectory: optionalString(input.workingDirectory, "workingDirectory") ?? ".", register: optionalBoolean(input.register, "register") ?? true, ...(runtime ? { runtime } : {}), ...(dependencyPreparation ? { dependencyPreparation } : {}) };
 }
 
-export function parseTaskRequest(value: unknown): { projectId?: string; taskSpec: Record<string, unknown>; authority: ControlAuthority; publicationRequested: "none" | "draft-pr" } {
+export function parseTaskRequest(value: unknown): { projectId?: string; taskSpec: Record<string, unknown>; authority: ControlAuthority; publicationRequested: "none" | "draft-pr"; agreementId?: string } {
   const input = asObject(value, "task request");
-  rejectUnknown(input, ["projectId", "taskSpec", "authority", "publication"], "task request");
+  rejectUnknown(input, ["projectId", "taskSpec", "authority", "publication", "agreementId", "executionAgreementId"], "task request");
+  if (input.agreementId !== undefined && input.executionAgreementId !== undefined) throw new ControlPlaneError(400, "invalid_request", "Use agreementId or executionAgreementId, not both.");
   const taskSpec = asObject(input.taskSpec, "taskSpec");
   const publication = input.publication === undefined ? "none" : choice(input.publication, ["none", "draft-pr"], "publication");
-  return { ...(input.projectId === undefined ? {} : { projectId: string(input.projectId, "projectId") }), taskSpec, authority: defaultAuthority(input.authority), publicationRequested: publication };
+  const agreementId = input.agreementId ?? input.executionAgreementId;
+  const normalizedAgreementId = agreementId === undefined ? undefined : string(agreementId, "agreementId");
+  if (normalizedAgreementId && !/^ea_v1_[a-f0-9]{24}$/.test(normalizedAgreementId)) throw new ControlPlaneError(400, "invalid_request", "agreementId must be a RunForge Execution Agreement v1 identifier.");
+  return { ...(input.projectId === undefined ? {} : { projectId: string(input.projectId, "projectId") }), taskSpec, authority: defaultAuthority(input.authority), publicationRequested: publication, ...(normalizedAgreementId === undefined ? {} : { agreementId: normalizedAgreementId }) };
 }
 
 export function parseDecisionRequest(value: unknown, kind: "owner" | "publication"): { decisionId: string; decision: string; targetBranch?: string; note: string } {
