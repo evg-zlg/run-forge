@@ -87,20 +87,22 @@ export type ExecutionAgreement = {
 
 const PROFILE_OWNERSHIP: Record<Exclude<ExecutionProfile, "custom">, PhasePartyMap> = {
   "assist-only": ownership({
-    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "providerModelCalls"],
-    external_session: ["implementation", "localValidation", "independentReview", "repairIterations", "patchPackage"],
+    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "repairIterations", "patchPackage", "providerModelCalls"],
+    external_session: ["independentReview", "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring", "ciRepair", "prReview", "merge"],
+    owner: ["deploy", "postDeployValidation"],
   }),
   "local-ready": ownership({
-    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "providerModelCalls"],
+    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "providerModelCalls"],
+    external_session: ["remotePush", "draftPublication", "ciMonitoring", "ciRepair", "prReview"],
+    owner: ["merge", "deploy", "postDeployValidation"],
   }),
   "draft-pr": ownership({
     runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring", "ciRepair", "providerModelCalls"],
-    owner: ["prReview"],
+    external_session: ["prReview"],
+    owner: ["merge", "deploy", "postDeployValidation"],
   }),
   delivery: ownership({
-    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring", "ciRepair", "providerModelCalls"],
-    owner: ["prReview", "merge"],
-    external_system: ["deploy", "postDeployValidation"],
+    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring", "ciRepair", "prReview", "merge", "deploy", "postDeployValidation", "providerModelCalls"],
   }),
 };
 

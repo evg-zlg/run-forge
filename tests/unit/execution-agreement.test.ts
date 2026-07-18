@@ -8,6 +8,27 @@ import {
 
 const allTrue = Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, true]));
 
+const expectedProfileOwnership = {
+  "assist-only": {
+    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "repairIterations", "patchPackage", "providerModelCalls"],
+    external_session: ["independentReview", "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring", "ciRepair", "prReview", "merge"],
+    owner: ["deploy", "postDeployValidation"],
+  },
+  "local-ready": {
+    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "providerModelCalls"],
+    external_session: ["remotePush", "draftPublication", "ciMonitoring", "ciRepair", "prReview"],
+    owner: ["merge", "deploy", "postDeployValidation"],
+  },
+  "draft-pr": {
+    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring", "ciRepair", "providerModelCalls"],
+    external_session: ["prReview"],
+    owner: ["merge", "deploy", "postDeployValidation"],
+  },
+  delivery: {
+    runforge: ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring", "ciRepair", "prReview", "merge", "deploy", "postDeployValidation", "providerModelCalls"],
+  },
+} as const;
+
 describe("Execution Agreement v1", () => {
   it("represents all phases and profiles individually and validates against the schema", async () => {
     expect(EXECUTION_PHASE_IDS).toHaveLength(22);
@@ -18,6 +39,37 @@ describe("Execution Agreement v1", () => {
     expect(agreement.phases.map((phase) => phase.phaseId)).toEqual(EXECUTION_PHASE_IDS);
     const schema = JSON.parse(await readFile("schemas/execution-agreement-v1.schema.json", "utf8"));
     expect(new Ajv2020({ strict: true }).compile(schema)(agreement)).toBe(true);
+  });
+
+  it.each(Object.entries(expectedProfileOwnership))("assigns exact phase ownership for the %s preset", (profile, groups) => {
+    const expected = Object.fromEntries(EXECUTION_PHASE_IDS.map((phaseId) => [phaseId, "nobody"]));
+    for (const [party, phaseIds] of Object.entries(groups)) {
+      for (const phaseId of phaseIds) expected[phaseId] = party;
+    }
+
+    const agreement = negotiateExecutionAgreement({
+      profile: profile as keyof typeof expectedProfileOwnership,
+      technicalCapability: allTrue,
+      authority: allTrue,
+      policy: allTrue,
+    });
+
+    expect(Object.fromEntries(agreement.phases.map(({ phaseId, responsibleParty }) => [phaseId, responsibleParty]))).toEqual(expected);
+  });
+
+  it("surfaces delivery capability and authority conflicts before execution", () => {
+    const agreement = negotiateExecutionAgreement({
+      profile: "delivery",
+      technicalCapability: { ...allTrue, deploy: false },
+      authority: { ...allTrue, postDeployValidation: false },
+      policy: allTrue,
+    });
+
+    expect(agreement.status).toBe("conflicted");
+    expect(agreement.conflicts.map(({ phaseId, kind }) => ({ phaseId, kind }))).toEqual([
+      { phaseId: "deploy", kind: "unavailable" },
+      { phaseId: "postDeployValidation", kind: "unauthorized" },
+    ]);
   });
 
   it("keeps capability, authority, request, responsibility, and policy distinct", () => {
