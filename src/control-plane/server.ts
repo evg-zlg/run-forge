@@ -5,6 +5,7 @@ import { join, resolve } from "node:path";
 import { redactJson } from "../admin/redaction.js";
 import { getRunForgeVersionInfo } from "../core/version.js";
 import { publicTaskSpecContract, taskRuntimeIds, taskSpecSchemaPath, taskSpecV2Schema } from "../product/task-spec-contract.js";
+import { commandVersion } from "../product/project-inspection.js";
 import { ControlPlaneError, controlPlaneApiVersion, defaultControlPlaneHost, defaultControlPlanePort, defaultMaxRequestBytes, parseDecisionRequest, parseProjectRequest, parseTaskRequest } from "./contracts.js";
 import { ControlPlaneManager } from "./manager.js";
 import { ControlPlaneStore } from "./state.js";
@@ -14,6 +15,7 @@ import {
   executionAgreementNegotiatePath,
   executionAgreementSchemaPath,
   parseExecutionAgreementNegotiationRequest,
+  technicalCapabilitiesForExecutor,
 } from "./execution-agreements.js";
 
 export type ControlPlaneServerOptions = { host?: string; port?: number; stateRoot?: string; maxRequestBytes?: number; manager?: ControlPlaneManager };
@@ -72,26 +74,53 @@ export function isLoopbackHost(host: string): boolean { return host === "127.0.0
 
 async function discoveryManifest(request: IncomingMessage, host: string): Promise<Record<string, unknown>> {
   const version = getRunForgeVersionInfo();
+  const [implementationExecutors, dockerVersion] = await Promise.all([discoverImplementationExecutors(), commandVersion("docker", ["--version"])]);
   const authority = request.headers.host && isLocalHostHeader(request.headers.host) ? request.headers.host : `${host}:${defaultControlPlanePort}`;
   return {
     product: "RunForge", discoveryVersion: 5, apiVersion: controlPlaneApiVersion, version, localOnly: true, baseUrl: `http://${authority}`,
-    implementationExecutors: await discoverImplementationExecutors(), taskSpecContract: publicTaskSpecContract(),
-    executionAgreements: executionAgreementCapabilities(),
+    implementationExecutors: publicImplementationExecutors(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
+    executionAgreements: dynamicAgreementCapabilities(implementationExecutors, dockerVersion),
     endpoints: { health: "/healthz", readiness: "/readyz", capabilities: "/v1/capabilities", taskSpecSchema: taskSpecSchemaPath, executionAgreementSchema: executionAgreementSchemaPath, resultSchema: taskResultSchemaPath, executionAgreementNegotiation: executionAgreementNegotiatePath, executionAgreement: "/v1/execution-agreements/{id}", projectInspection: "/v1/projects/inspect", tasks: "/v1/tasks", task: "/v1/tasks/{id}", taskAgreement: "/v1/tasks/{id}/agreement", result: "/v1/tasks/{id}/result", ownerDecisions: "/v1/tasks/{id}/owner-decisions", continuation: "/v1/tasks/{id}/continue", retry: "/v1/tasks/{id}/retry", cancellation: "/v1/tasks/{id}/cancel", publicationDecisions: "/v1/tasks/{id}/publication-decisions" },
     lifecycle: { poll: "GET /v1/tasks/{id}", heartbeatField: "progress.lastHeartbeatAt", executionIdentityField: "progress.executionId", attemptField: "progress.attempt", phaseValues: ["understand_task", "implement", "validate", "repair", "finalize"], stalledAfterMs: 15000, terminal: ["completed", "failed", "interrupted"], recoveryAvailabilityField: "recovery.retryAvailable", ownerGate: "awaiting_owner_decision" },
     bootstrap: "Inspect discovery and capabilities, register the project, copy the published implementationRequest, poll progress, and follow only advertised recovery actions."
   };
 }
 async function capabilities(_stateRoot: string): Promise<Record<string, unknown>> {
+  const [implementationExecutors, dockerVersion] = await Promise.all([discoverImplementationExecutors(), commandVersion("docker", ["--version"])]);
+  const implementationReady = implementationExecutors.some((item) => item.status === "ready");
   return {
     schemaVersion: 5, apiVersion: controlPlaneApiVersion, transports: ["localhost-http"], projectLocators: ["absolute-path", "registration-id"], taskModes: ["inspection", "implementation", "validation", "repair"],
-    implementationExecutors: await discoverImplementationExecutors(), taskSpecContract: publicTaskSpecContract(),
-    executionAgreements: executionAgreementCapabilities(),
-    execution: { engine: "TaskSpec v2", runtimes: taskRuntimeIds, dependencyPreparation: ["required", "if-needed", "disabled", "reuse-existing"], persistentState: true, restartRecovery: true, heartbeat: true, watchdog: true, cancellation: true, executionGenerations: true, boundedCleanup: true, interruptedResult: true, journalSchemaVersion: 1, continuationSchemaVersion: 1 },
+    implementationExecutors: publicImplementationExecutors(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
+    executionAgreements: dynamicAgreementCapabilities(implementationExecutors, dockerVersion),
+    execution: { engine: "TaskSpec v2", runtimes: taskRuntimeIds, runtimeSupport: { "local-disposable": { available: implementationReady, implementation: implementationReady, reason: implementationReady ? "The implementation executor is ready for local disposable workspaces." : "No ready implementation executor is available." }, docker: { available: dockerVersion !== null, implementation: false, version: dockerVersion, reason: dockerVersion === null ? "Docker CLI is unavailable." : "Docker CLI is present for supported non-implementation lanes; the implementation executor does not support Docker." } }, dependencyPreparation: ["required", "if-needed", "disabled", "reuse-existing"], persistentState: true, restartRecovery: true, heartbeat: true, watchdog: true, cancellation: true, executionGenerations: true, boundedCleanup: true, interruptedResult: true, journalSchemaVersion: 1, continuationSchemaVersion: 1 },
     authority: { semantics: "explicit upper bounds; implementation requires implementation/providerCalls/network/localBranch/localCommit", inspect: true, implementation: true, providerCalls: "required-for-local-coding-agent", network: "required-for-provider-transport", localBranch: "required-for-disposable-worktree", localCommit: "required-for-local-result", remotePush: "separate-publication-decision", draftPublication: "separate-publication-decision", merge: false, deploy: false },
     safety: { defaultBind: defaultControlPlaneHost, maxRequestBytes: defaultMaxRequestBytes, secretsInResponses: false, providerCallsByDefault: false, networkByDefault: false, sharedCheckoutMutation: false },
     schemas: { taskSpec: taskSpecSchemaPath, executionAgreement: executionAgreementSchemaPath, result: taskResultSchemaPath, controlPlane: "/schemas/control-plane-v1.schema.json" }
   };
+}
+
+function dynamicAgreementCapabilities(implementationExecutors: Awaited<ReturnType<typeof discoverImplementationExecutors>>, dockerVersion: string | null): Record<string, unknown> {
+  const ready = implementationExecutors.some((item) => item.status === "ready");
+  return executionAgreementCapabilities(technicalCapabilitiesForExecutor(ready), {
+    implementationExecutorReady: ready,
+    runtimes: { "local-disposable": { ready }, docker: { cliReady: dockerVersion !== null, implementationSupported: false, reason: dockerVersion === null ? "Docker CLI is unavailable." : "Docker is not supported by the implementation executor." } },
+    providers: implementationExecutors.map((item) => ({
+      executorId: item.id, providerReady: item.status === "ready", credentialReady: item.status === "ready",
+      modelReady: item.status === "ready", model: item.model, modelSelection: item.model === null ? "provider_default" : "explicit",
+      supportedModes: item.supports, runtimes: item.runtime, limits: item.maxLimits,
+      providerTokenBudgetMaximum: item.maxLimits.providerTokens,
+      reason: item.status === "ready" ? "Executor and its existing credential mechanism are ready." : "No implementation executor with a ready existing credential mechanism is available.",
+    })),
+  });
+}
+
+function publicImplementationExecutors(executors: Awaited<ReturnType<typeof discoverImplementationExecutors>>): Record<string, unknown>[] {
+  return executors.map((item) => ({
+    id: item.id, status: item.status, supports: item.supports, providerCalls: item.providerCalls, runtime: item.runtime,
+    providerRequirements: item.providerRequirements, networkRequirements: item.networkRequirements, maxLimits: item.maxLimits,
+    limitations: item.status === "ready" ? [] : ["Implementation executor or its existing credential mechanism is not ready."], model: item.model,
+    credentialReady: item.status === "ready", credentialReason: item.status === "ready" ? "Existing credential mechanism is ready." : "Existing credential mechanism is not ready; no credential data is exposed.",
+  }));
 }
 
 async function readSchema(name: string): Promise<Record<string, unknown>> {

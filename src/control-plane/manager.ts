@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
-import { cp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { access, cp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { realpath } from "node:fs/promises";
-import { basename, join } from "node:path";
+import { basename, join, relative } from "node:path";
 import { buildDoctorReport } from "../product/doctor.js";
 import { runTaskSpecFile } from "../product/task-spec-runner.js";
 import { loadTaskSpecV2 } from "../product/task-spec-v2.js";
@@ -11,11 +11,14 @@ import { ControlPlaneError, type AgreementLifecycleProjection, type ControlAutho
 import { ControlPlaneStore } from "./state.js";
 import { discoverImplementationExecutors, selectImplementationExecutor } from "../implementation/executor.js";
 import type { ExecutionAgreement } from "../product/execution-agreement.js";
+import type { ExecutionAgreementContext } from "../product/execution-agreement.js";
+import { inspectProject } from "../product/project-inspection.js";
 import {
   assertAgreementAccepted,
   assertAgreementMatchesTask,
   negotiateControlPlaneAgreement,
   negotiateTaskAgreement,
+  technicalCapabilitiesForExecutor,
   type ExecutionAgreementNegotiationRequest,
 } from "./execution-agreements.js";
 
@@ -23,6 +26,15 @@ const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs;
 const heartbeatIntervalMs = 1_000;
 const staleHeartbeatMs = 15_000;
 const cleanupGraceMs = 2_000;
+
+function agreementHardBoundaries(): string[] {
+  return [
+    "No GitHub or GitLab push, PR/MR creation, or existing-change update adapter is available.",
+    "No CI, merge, deploy, database, production, or secret adapter is available.",
+    "Request maps may only narrow installation capability, authority, and policy.",
+    "RUNFORGE.md supplies project defaults only and cannot grant authority or relax hard boundaries.",
+  ];
+}
 
 type ActiveWorker = { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController };
 
@@ -49,11 +61,13 @@ export class ControlPlaneManager {
       const existing = (await this.store.listProjects()).find((item) => item.repository === repository && item.workingDirectory === report.targetRepository!.workingDirectory);
       project = { id: this.store.projectId(repository, report.targetRepository.workingDirectory), repository, workingDirectory: report.targetRepository.workingDirectory, createdAt: existing?.createdAt ?? now, updatedAt: now }; await this.store.saveProject(project);
     }
-    return { project, readiness: report };
+    return { project, readiness: { ...report, checks: report.checks.map((item) => item.id === "implementation_executor" && item.status !== "passed" ? { ...item, summary: "Implementation executor or its existing credential mechanism is not ready; no credential data is exposed." } : item), implementationExecutors: report.implementationExecutors.map((item) => ({ id: item.id, status: item.status, supports: item.supports, providerCalls: item.providerCalls, runtime: item.runtime, providerRequirements: item.providerRequirements, networkRequirements: item.networkRequirements, maxLimits: item.maxLimits, model: item.model, credentialReady: item.status === "ready", limitations: item.status === "ready" ? [] : ["Implementation executor or its existing credential mechanism is not ready; no credential data is exposed."] })) } };
   }
 
   async negotiateAgreement(input: ExecutionAgreementNegotiationRequest): Promise<ExecutionAgreement> {
-    const agreement = negotiateControlPlaneAgreement(input);
+    const project = input.projectId ? await this.requireProject(input.projectId) : null;
+    const [executors, context] = await Promise.all([discoverImplementationExecutors(), this.executionAgreementContext(project, input.publicationTarget ?? { kind: "none" })]);
+    const agreement = negotiateControlPlaneAgreement(input, technicalCapabilitiesForExecutor(executors.some((item) => item.status === "ready")), context);
     await this.store.saveAgreement(agreement);
     return agreement;
   }
@@ -175,7 +189,7 @@ export class ControlPlaneManager {
 
   async publicationDecision(id: string, input: { decisionId: string; decision: string; note: string }): Promise<Record<string, unknown>> { return this.withLock(id, async () => { const task = await this.readTask(id); const duplicate = task.decisions.find((item) => item.kind === "publication" && item.decisionId === input.decisionId); if (duplicate) return { idempotentReplay: true, ...duplicate.response }; if (!task.publicationGate.required) throw new ControlPlaneError(409, "publication_gate_not_open", "This task has no publication gate."); const permitted = task.authority.remotePush && task.authority.draftPublication; const status = input.decision === "approve" ? permitted ? "approved_adapter_required" : "blocked_missing_authority" : input.decision === "reject" ? "rejected" : "on_hold"; const response = { decisionId: input.decisionId, decision: input.decision, status, executed: false, providerCalls: false, reason: status === "blocked_missing_authority" ? "remotePush and draftPublication authority are required." : "Publication execution is separate." }; task.decisions.push(decisionRecord(input.decisionId, "publication", input.decision, response)); task.publicationGate = { required: status !== "rejected", status, reason: response.reason }; task.updatedAt = new Date().toISOString(); await this.persist(task, "publication_gate_created", status); return response; }); }
 
-  async health(): Promise<Record<string, unknown>> { await this.watchdogTick(); const [tasks, implementationExecutors] = await Promise.all([Promise.all((await this.store.listTasks()).map((task) => this.getTask(task.id))), discoverImplementationExecutors()]); const now = Date.now(); const active = tasks.filter((task) => Boolean(this.liveWorker(task))); const ages = active.map((t) => now - Date.parse(t.progress.lastHeartbeatAt ?? t.updatedAt)); const stalled = tasks.filter((t) => t.progress.workerStatus === "stalled" || t.recovery?.cleanupStatus === "pending" || t.recovery?.cleanupStatus === "detached"); const implementationReady = implementationExecutors.some((item) => item.status === "ready"); return { schemaVersion: 1, service: { status: "healthy", localOnly: true }, readiness: { acceptingNewTasks: true, acceptingImplementationTasks: implementationReady, status: stalled.length || !implementationReady ? "ready_with_degraded_capabilities" : "ready" }, implementationExecutors, tasks: { active: active.length, cleanupPending: tasks.filter((t) => t.recovery?.cleanupStatus === "pending").length, awaitingOwnerDecisions: tasks.filter((t) => t.status === "awaiting_owner_decision").length, interrupted: tasks.filter((t) => t.status === "interrupted").length, stalled: stalled.length, oldestHeartbeatAgeMs: ages.length ? Math.max(...ages) : 0 } }; }
+  async health(): Promise<Record<string, unknown>> { await this.watchdogTick(); const [tasks, implementationExecutors] = await Promise.all([Promise.all((await this.store.listTasks()).map((task) => this.getTask(task.id))), discoverImplementationExecutors()]); const now = Date.now(); const active = tasks.filter((task) => Boolean(this.liveWorker(task))); const ages = active.map((t) => now - Date.parse(t.progress.lastHeartbeatAt ?? t.updatedAt)); const stalled = tasks.filter((t) => t.progress.workerStatus === "stalled" || t.recovery?.cleanupStatus === "pending" || t.recovery?.cleanupStatus === "detached"); const implementationReady = implementationExecutors.some((item) => item.status === "ready"); return { schemaVersion: 1, service: { status: "healthy", localOnly: true }, readiness: { acceptingNewTasks: true, acceptingImplementationTasks: implementationReady, status: stalled.length || !implementationReady ? "ready_with_degraded_capabilities" : "ready" }, implementationExecutors: implementationExecutors.map((item) => ({ id: item.id, status: item.status, supports: item.supports, providerCalls: item.providerCalls, runtime: item.runtime, maxLimits: item.maxLimits, model: item.model, credentialReady: item.status === "ready", reason: item.status === "ready" ? "Existing credential mechanism is ready." : "Implementation executor or its existing credential mechanism is not ready; no credential data is exposed." })), tasks: { active: active.length, cleanupPending: tasks.filter((t) => t.recovery?.cleanupStatus === "pending").length, awaitingOwnerDecisions: tasks.filter((t) => t.status === "awaiting_owner_decision").length, interrupted: tasks.filter((t) => t.status === "interrupted").length, stalled: stalled.length, oldestHeartbeatAgeMs: ages.length ? Math.max(...ages) : 0 } }; }
 
   private async beginAttempt(task: ControlTaskRecord, operation: "execution" | "continuation", retrySource?: string): Promise<void> {
     const executionId = randomUUID(); const attempt = task.execution.attempt + 1; const now = new Date();
@@ -264,6 +278,32 @@ export class ControlPlaneManager {
   private async withLock<T>(id: string, action: () => Promise<T>): Promise<T> { const previous = this.locks.get(id) ?? Promise.resolve(); let release!: () => void; const next = new Promise<void>((done) => { release = done; }); const tail = previous.then(() => next); this.locks.set(id, tail); await previous; try { return await action(); } finally { release(); if (this.locks.get(id) === tail) this.locks.delete(id); } }
   private async readTask(id: string): Promise<ControlTaskRecord> { const task = await this.store.getTask(id); if (!task) throw new ControlPlaneError(404, "task_not_found", `Task not found: ${id}`, undefined, false, id); return normalizeTask(task); }
   private async requireProject(id: string): Promise<ProjectRecord> { const project = await this.store.getProject(id); if (!project) throw new ControlPlaneError(404, "project_not_found", `Project not found: ${id}`); return project; }
+
+  private async executionAgreementContext(project: ProjectRecord | null, publicationTarget: ExecutionAgreementContext["publicationTarget"]): Promise<ExecutionAgreementContext> {
+    if (!project) return {
+      project: null,
+      policy: { sources: ["runforge-installation-policy"], hardBoundaries: agreementHardBoundaries(), runforgeMd: { present: false, path: null, authorityEscalationTrusted: false } },
+      publicationTarget,
+    };
+    const inspection = await inspectProject(project.repository, project.workingDirectory);
+    const runforgeCandidates = [...new Set([join(project.repository, project.workingDirectory === "." ? "" : project.workingDirectory, "RUNFORGE.md"), join(project.repository, "RUNFORGE.md")])];
+    const runforgePath = (await Promise.all(runforgeCandidates.map(async (candidate) => await access(candidate).then(() => candidate, () => null)))).find((candidate): candidate is string => candidate !== null) ?? null;
+    const present = runforgePath !== null;
+    const protectedBranches = [...new Set([inspection.defaultBranch, "main", "master", "develop", "source"].filter((item): item is string => Boolean(item)))].sort();
+    return {
+      project: {
+        projectId: project.id, repository: project.repository, workingDirectory: project.workingDirectory,
+        source: { head: inspection.head, branch: inspection.branch, detachedHead: inspection.detachedHead },
+        defaultBranch: inspection.defaultBranch, protectedBranches,
+      },
+      policy: {
+        sources: ["runforge-installation-policy", ...(present ? ["project/RUNFORGE.md (defaults only; no authority escalation)"] : [])],
+        hardBoundaries: agreementHardBoundaries(),
+        runforgeMd: { present, path: runforgePath ? relative(project.repository, runforgePath) || "RUNFORGE.md" : null, authorityEscalationTrusted: false },
+      },
+      publicationTarget,
+    };
+  }
 }
 
 function progress(now: string, timeoutMs = executionTimeoutMs): ControlTaskRecord["progress"] { return { phase: "queued", operation: "execution", startedAt: null, updatedAt: now, lastHeartbeatAt: null, executionId: null, attempt: 0, workerStatus: "idle", timeoutMs, deadlineAt: null, summary: "Queued for execution.", diagnostic: null }; }

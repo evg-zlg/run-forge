@@ -2,9 +2,12 @@ import {
   EXECUTION_PARTIES,
   EXECUTION_PHASE_IDS,
   EXECUTION_PROFILES,
+  PUBLICATION_TARGET_KINDS,
   negotiateExecutionAgreement,
   type ExecutionAgreement,
   type ExecutionAgreementNegotiation,
+  type ExecutionAgreementContext,
+  type PublicationTarget,
   type ExecutionParty,
   type ExecutionPhaseId,
   type PhaseBooleanMap,
@@ -17,7 +20,11 @@ export const executionAgreementNegotiatePath = "/v1/execution-agreements/negotia
 export const executionAgreementPath = "/v1/execution-agreements/{id}" as const;
 export const taskAgreementPath = "/v1/tasks/{id}/agreement" as const;
 
-export type ExecutionAgreementNegotiationRequest = ExecutionAgreementNegotiation & { schemaVersion: 1 };
+export type ExecutionAgreementNegotiationRequest = Omit<ExecutionAgreementNegotiation, "context"> & {
+  schemaVersion: 1;
+  projectId?: string;
+  publicationTarget?: PublicationTarget;
+};
 
 export const controlPlaneTechnicalCapabilities = phaseFlags([
   "projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation",
@@ -31,12 +38,14 @@ export const controlPlaneAgreementPolicy = phaseFlags([
 
 export function parseExecutionAgreementNegotiationRequest(value: unknown): ExecutionAgreementNegotiationRequest {
   const input = object(value, "execution agreement negotiation request");
-  rejectUnknown(input, ["schemaVersion", "profile", "requested", "requestedOwnership", "technicalCapability", "authority", "policy", "prerequisites", "completionEvidence"], "execution agreement negotiation request");
+  rejectUnknown(input, ["schemaVersion", "profile", "projectId", "publicationTarget", "requested", "requestedOwnership", "technicalCapability", "authority", "policy", "prerequisites", "completionEvidence"], "execution agreement negotiation request");
   if (input.schemaVersion !== 1) throw new ControlPlaneError(400, "invalid_request", "schemaVersion must be 1.");
   const profile = choice(input.profile, EXECUTION_PROFILES, "profile");
   return {
     schemaVersion: 1,
     profile,
+    ...(input.projectId === undefined ? {} : { projectId: nonEmptyString(input.projectId, "projectId") }),
+    publicationTarget: parsePublicationTarget(input.publicationTarget),
     ...optionalBooleanMap(input.requested, "requested"),
     ...optionalPartyMap(input.requestedOwnership),
     ...optionalBooleanMap(input.technicalCapability, "technicalCapability"),
@@ -49,16 +58,22 @@ export function parseExecutionAgreementNegotiationRequest(value: unknown): Execu
 
 export const parseAgreementNegotiationRequest = parseExecutionAgreementNegotiationRequest;
 
-export function negotiateControlPlaneAgreement(request: ExecutionAgreementNegotiationRequest): ExecutionAgreement {
+export function negotiateControlPlaneAgreement(
+  request: ExecutionAgreementNegotiationRequest,
+  installationCapability: Record<ExecutionPhaseId, boolean> = controlPlaneTechnicalCapabilities,
+  context?: ExecutionAgreementContext,
+): ExecutionAgreement {
+  const targeted = publicationRequest(request);
   return negotiateExecutionAgreement({
     profile: request.profile,
-    requested: request.requested,
-    requestedOwnership: request.requestedOwnership,
-    technicalCapability: narrowCapabilities(controlPlaneTechnicalCapabilities, request.technicalCapability),
-    authority: narrowCapabilities(controlPlaneTechnicalCapabilities, request.authority),
+    requested: targeted.requested,
+    requestedOwnership: targeted.ownership,
+    technicalCapability: narrowCapabilities(installationCapability, request.technicalCapability),
+    authority: narrowCapabilities(installationCapability, request.authority),
     policy: narrowCapabilities(controlPlaneAgreementPolicy, request.policy),
     prerequisites: request.prerequisites,
     completionEvidence: request.completionEvidence,
+    context,
   });
 }
 
@@ -114,7 +129,10 @@ export function assertAgreementMatchesTask(agreement: ExecutionAgreement, spec: 
   }
 }
 
-export function executionAgreementCapabilities(): Record<string, unknown> {
+export function executionAgreementCapabilities(
+  technicalCapabilities: Record<ExecutionPhaseId, boolean> = controlPlaneTechnicalCapabilities,
+  readiness: Record<string, unknown> = {},
+): Record<string, unknown> {
   return {
     schemaVersion: 1,
     schemaUrl: executionAgreementSchemaPath,
@@ -122,9 +140,71 @@ export function executionAgreementCapabilities(): Record<string, unknown> {
     phases: EXECUTION_PHASE_IDS,
     parties: EXECUTION_PARTIES,
     endpoints: { negotiate: executionAgreementNegotiatePath, agreement: executionAgreementPath, taskAgreement: taskAgreementPath },
-    technicalCapabilities: controlPlaneTechnicalCapabilities,
-    minimalRequest: { schemaVersion: 1, profile: "assist-only" },
+    projectLevelNegotiation: true,
+    publicationTargetKinds: PUBLICATION_TARGET_KINDS,
+    technicalCapabilities,
+    readiness,
+    unavailableAdapters: unavailableAdapters(),
+    minimalRequest: { schemaVersion: 1, profile: "assist-only", projectId: "<registered-project-id>", publicationTarget: { kind: "none" } },
   };
+}
+
+export function technicalCapabilitiesForExecutor(ready: boolean): Record<ExecutionPhaseId, boolean> {
+  return phaseFlags([
+    "projectDiscovery", "taskAnalysis", "implementationPlanning", ...(ready ? ["implementation" as const] : []),
+    "localValidation", "independentReview", ...(ready ? ["repairIterations" as const] : []), "patchPackage",
+    "localBranch", "localCommit", ...(ready ? ["providerModelCalls" as const] : []),
+  ]);
+}
+
+export function unavailableAdapters(): Record<string, { available: false; credentialReady: false; reason: string }> {
+  const adapter = (reason: string) => ({ available: false as const, credentialReady: false as const, reason });
+  return {
+    githubPush: adapter("No GitHub push adapter is implemented."), githubPullRequest: adapter("No GitHub pull-request create or update adapter is implemented."),
+    gitlabPush: adapter("No GitLab push adapter is implemented."), gitlabMergeRequest: adapter("No GitLab merge-request create or update adapter is implemented."),
+    updateExistingChange: adapter("No existing PR, MR, or change update adapter is implemented."), ci: adapter("No CI adapter is implemented."),
+    merge: adapter("No merge adapter is implemented."), deploy: adapter("No deploy adapter is implemented."), database: adapter("No database adapter is implemented."),
+    production: adapter("No production adapter is implemented."), secrets: adapter("No secret adapter is implemented and credentials are never returned."),
+  };
+}
+
+function publicationRequest(request: ExecutionAgreementNegotiationRequest): { requested: PhaseBooleanMap | undefined; ownership: ExecutionAgreementNegotiation["requestedOwnership"] } {
+  const requested = { ...(request.requested ?? {}) };
+  const ownership = { ...(request.requestedOwnership ?? {}) };
+  const target = request.publicationTarget ?? { kind: "none" };
+  if (target.kind === "none") {
+    for (const phase of ["remotePush", "draftPublication", "ciMonitoring", "ciRepair"] as const) requested[phase] = false;
+  } else if (target.kind === "new_branch") {
+    requested.localBranch = true;
+  } else if (target.kind === "existing_branch") {
+    requested.localBranch = false;
+  } else {
+    requested.remotePush = true; requested.draftPublication = true;
+    if (target.kind === "externally_managed_existing_change") {
+      ownership.remotePush ??= target.responsibleParty;
+      ownership.draftPublication ??= target.responsibleParty;
+      requested.ciMonitoring ??= false;
+      requested.ciRepair ??= false;
+    }
+  }
+  return { requested, ownership };
+}
+
+function parsePublicationTarget(value: unknown): PublicationTarget {
+  if (value === undefined) return { kind: "none" };
+  const input = object(value, "publicationTarget");
+  const kind = choice(input.kind, PUBLICATION_TARGET_KINDS, "publicationTarget.kind");
+  if (kind === "none") { rejectUnknown(input, ["kind"], "publicationTarget"); return { kind }; }
+  if (kind === "new_branch" || kind === "existing_branch") {
+    rejectUnknown(input, ["kind", "branchName"], "publicationTarget");
+    return { kind, branchName: nonEmptyString(input.branchName, "publicationTarget.branchName") };
+  }
+  if (kind === "existing_change") {
+    rejectUnknown(input, ["kind", "provider", "changeId"], "publicationTarget");
+    return { kind, provider: choice(input.provider, ["github", "gitlab", "other"], "publicationTarget.provider"), changeId: nonEmptyString(input.changeId, "publicationTarget.changeId") };
+  }
+  rejectUnknown(input, ["kind", "provider", "changeId", "responsibleParty"], "publicationTarget");
+  return { kind, provider: choice(input.provider, ["github", "gitlab", "other"], "publicationTarget.provider"), changeId: nonEmptyString(input.changeId, "publicationTarget.changeId"), responsibleParty: choice(input.responsibleParty, ["external_session", "external_system", "owner"], "publicationTarget.responsibleParty") };
 }
 
 function taskPhaseAuthority(authority: ControlAuthority): PhaseBooleanMap {
@@ -180,5 +260,6 @@ function phaseMap(value: unknown, name: string): Record<string, unknown> {
   return input;
 }
 function object(value: unknown, name: string): Record<string, unknown> { if (!value || typeof value !== "object" || Array.isArray(value)) throw new ControlPlaneError(400, "invalid_request", `${name} must be an object.`); return value as Record<string, unknown>; }
+function nonEmptyString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} must be a non-empty string.`); return value.trim(); }
 function rejectUnknown(value: Record<string, unknown>, allowed: string[], name: string): void { const unknown = Object.keys(value).filter((key) => !allowed.includes(key)); if (unknown.length) throw new ControlPlaneError(400, "unknown_fields", `${name} contains unknown field(s): ${unknown.join(", ")}.`); }
 function choice<T extends string>(value: unknown, values: readonly T[], name: string): T { if (typeof value !== "string" || !values.includes(value as T)) throw new ControlPlaneError(400, "invalid_request", `${name} must be one of: ${values.join(", ")}.`); return value as T; }

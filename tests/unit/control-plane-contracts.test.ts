@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultAuthority, parseDecisionRequest, parseTaskRequest, type ControlTaskRecord } from "../../src/control-plane/contracts.js";
-import { negotiateControlPlaneAgreement, parseExecutionAgreementNegotiationRequest } from "../../src/control-plane/execution-agreements.js";
+import { negotiateControlPlaneAgreement, parseExecutionAgreementNegotiationRequest, technicalCapabilitiesForExecutor } from "../../src/control-plane/execution-agreements.js";
 import { boundPublicResult } from "../../src/control-plane/manager.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 
@@ -40,6 +40,24 @@ describe("control-plane contracts", () => {
     await first.saveAgreement(agreement);
     const restarted = new ControlPlaneStore(root); await restarted.initialize();
     expect(await restarted.getAgreement(agreement.agreementId)).toEqual(agreement);
+  });
+
+  it("strictly parses publication targets and never lets request maps enable degraded installation capability", () => {
+    expect(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "custom", publicationTarget: { kind: "existing_branch", branchName: "release/1" } })).toMatchObject({ publicationTarget: { kind: "existing_branch", branchName: "release/1" } });
+    expect(() => parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "custom", publicationTarget: { kind: "none", branchName: "not-allowed" } })).toThrow("unknown field");
+    const degraded = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "custom", requestedOwnership: { implementation: "runforge" }, technicalCapability: { implementation: true } }), technicalCapabilitiesForExecutor(false));
+    expect(degraded).toMatchObject({ status: "conflicted", conflicts: [{ phaseId: "implementation", kind: "unavailable" }] });
+  });
+
+  it("conflicts unsupported existing-change publication owned by RunForge and hands off external management", () => {
+    const owned = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "custom", publicationTarget: { kind: "existing_change", provider: "github", changeId: "42" }, requestedOwnership: { draftPublication: "runforge" }, technicalCapability: { draftPublication: true } }));
+    expect(owned.conflicts).toContainEqual(expect.objectContaining({ phaseId: "draftPublication", kind: "unavailable" }));
+    const delegated = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "custom", publicationTarget: { kind: "externally_managed_existing_change", provider: "gitlab", changeId: "9", responsibleParty: "external_session" } }));
+    expect(delegated.conflicts).toEqual([]);
+    expect(delegated.handoffs).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phaseId: "remotePush", responsibleParty: "external_session" }),
+      expect.objectContaining({ phaseId: "draftPublication", responsibleParty: "external_session" }),
+    ]));
   });
 
   it("bounds verbose public diagnostics while retaining compact result fields", () => {

@@ -29,9 +29,41 @@
     },
     "conflicts": { "type": "array", "items": { "$ref": "#/$defs/conflict" } },
     "handoffs": { "type": "array", "items": { "$ref": "#/$defs/handoff" } },
-    "humanSummary": { "type": "string", "minLength": 1 }
+    "humanSummary": { "type": "string", "minLength": 1 },
+    "context": { "$ref": "#/$defs/context" }
   },
   "$defs": {
+    "publicationTarget": {
+      "oneOf": [
+        { "type": "object", "additionalProperties": false, "required": ["kind"], "properties": { "kind": { "const": "none" } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "branchName"], "properties": { "kind": { "enum": ["new_branch", "existing_branch"] }, "branchName": { "type": "string", "minLength": 1 } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "provider", "changeId"], "properties": { "kind": { "const": "existing_change" }, "provider": { "enum": ["github", "gitlab", "other"] }, "changeId": { "type": "string", "minLength": 1 } } },
+        { "type": "object", "additionalProperties": false, "required": ["kind", "provider", "changeId", "responsibleParty"], "properties": { "kind": { "const": "externally_managed_existing_change" }, "provider": { "enum": ["github", "gitlab", "other"] }, "changeId": { "type": "string", "minLength": 1 }, "responsibleParty": { "enum": ["external_session", "external_system", "owner"] } } }
+      ]
+    },
+    "context": {
+      "type": "object", "additionalProperties": false, "required": ["project", "policy", "publicationTarget"],
+      "properties": {
+        "project": { "oneOf": [{ "type": "null" }, { "$ref": "#/$defs/projectContext" }] },
+        "policy": { "$ref": "#/$defs/policyContext" },
+        "publicationTarget": { "$ref": "#/$defs/publicationTarget" }
+      }
+    },
+    "projectContext": {
+      "type": "object", "additionalProperties": false, "required": ["projectId", "repository", "workingDirectory", "source", "defaultBranch", "protectedBranches"],
+      "properties": {
+        "projectId": { "type": "string", "minLength": 1 }, "repository": { "type": "string", "minLength": 1 }, "workingDirectory": { "type": "string", "minLength": 1 },
+        "source": { "type": "object", "additionalProperties": false, "required": ["head", "branch", "detachedHead"], "properties": { "head": { "type": ["string", "null"] }, "branch": { "type": ["string", "null"] }, "detachedHead": { "type": "boolean" } } },
+        "defaultBranch": { "type": ["string", "null"] }, "protectedBranches": { "$ref": "#/$defs/strings" }
+      }
+    },
+    "policyContext": {
+      "type": "object", "additionalProperties": false, "required": ["sources", "hardBoundaries", "runforgeMd"],
+      "properties": {
+        "sources": { "$ref": "#/$defs/strings" }, "hardBoundaries": { "$ref": "#/$defs/strings" },
+        "runforgeMd": { "type": "object", "additionalProperties": false, "required": ["present", "path", "authorityEscalationTrusted"], "properties": { "present": { "type": "boolean" }, "path": { "type": ["string", "null"] }, "authorityEscalationTrusted": { "const": false } } }
+      }
+    },
     "phaseId": { "enum": ["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "remotePush", "draftPublication", "ciMonitoring", "ciRepair", "prReview", "merge", "deploy", "postDeployValidation", "dbAccess", "productionAccess", "secretUse", "providerModelCalls"] },
     "party": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
     "strings": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } },

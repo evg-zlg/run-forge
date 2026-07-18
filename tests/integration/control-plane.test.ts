@@ -12,6 +12,31 @@ const servers: ControlPlaneServerInstance[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map((item) => item.close())); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("local control-plane HTTP lifecycle", () => {
+  it("publishes degraded adapter-honest capabilities and negotiates durable registered-project context", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-project-agreement-"))) - 1]!;
+    const previous = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = "/definitely/missing/super-secret-command-token";
+    const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
+    try {
+      const capabilities = await json(await fetch(`${instance.url}/v1/capabilities`));
+      expect(capabilities).toMatchObject({ executionAgreements: { projectLevelNegotiation: true, technicalCapabilities: { implementation: false, providerModelCalls: false, remotePush: false, draftPublication: false }, readiness: { implementationExecutorReady: false }, unavailableAdapters: { githubPush: { available: false, credentialReady: false }, updateExistingChange: { available: false }, ci: { available: false }, deploy: { available: false }, database: { available: false }, production: { available: false }, secrets: { available: false } } } });
+      expect(JSON.stringify(capabilities)).not.toContain("super-secret-command-token");
+
+      const unknown = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "assist-only", projectId: "missing-project", publicationTarget: { kind: "none" } }) });
+      expect(unknown.status).toBe(404); expect(await json(unknown)).toMatchObject({ error: { code: "project_not_found" } });
+
+      const inspected = await json(await fetch(`${instance.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: process.cwd(), workingDirectory: ".", register: true }) }));
+      const projectId = inspected.project.id as string;
+      const response = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "custom", projectId, publicationTarget: { kind: "externally_managed_existing_change", provider: "github", changeId: "17", responsibleParty: "external_session" } }) });
+      expect(response.status).toBe(201); const agreement = await json(response);
+      expect(agreement).toMatchObject({ status: "ready", context: { project: { projectId, repository: inspected.project.repository, source: { head: expect.any(String) }, protectedBranches: expect.arrayContaining(["main", "master"]) }, policy: { hardBoundaries: expect.arrayContaining([expect.stringContaining("No GitHub")]), runforgeMd: { authorityEscalationTrusted: false } }, publicationTarget: { kind: "externally_managed_existing_change", changeId: "17" } }, handoffs: expect.arrayContaining([{ phaseId: "remotePush", responsibleParty: "external_session", reason: expect.any(String), prerequisites: [], completionEvidence: [] }, { phaseId: "draftPublication", responsibleParty: "external_session", reason: expect.any(String), prerequisites: [], completionEvidence: [] }]) });
+      expect(agreement.humanSummary).toContain(projectId);
+      expect(await json(await fetch(`${instance.url}/v1/execution-agreements/${agreement.agreementId}`))).toEqual(agreement);
+    } finally {
+      if (previous === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previous;
+    }
+  });
+
   it("discovers the dynamic URL, runs a durable task, and keeps decisions idempotent", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-control-http-"))) - 1]!;
     let ownerWrites = 0;
@@ -54,7 +79,7 @@ describe("local control-plane HTTP lifecycle", () => {
     const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
 
     const discovery = await json(await fetch(`${instance.url}/.well-known/runforge`));
-    expect(discovery).toMatchObject({ executionAgreements: { schemaVersion: 1, schemaUrl: "/schemas/execution-agreement-v1.schema.json", profiles: expect.arrayContaining(["custom"]), parties: expect.arrayContaining(["runforge", "external_session", "owner"]), endpoints: { negotiate: "/v1/execution-agreements/negotiate", agreement: "/v1/execution-agreements/{id}", taskAgreement: "/v1/tasks/{id}/agreement" }, technicalCapabilities: { implementation: true, deploy: false }, minimalRequest: { schemaVersion: 1, profile: "assist-only" } } });
+    expect(discovery).toMatchObject({ executionAgreements: { schemaVersion: 1, schemaUrl: "/schemas/execution-agreement-v1.schema.json", profiles: expect.arrayContaining(["custom"]), parties: expect.arrayContaining(["runforge", "external_session", "owner"]), endpoints: { negotiate: "/v1/execution-agreements/negotiate", agreement: "/v1/execution-agreements/{id}", taskAgreement: "/v1/tasks/{id}/agreement" }, technicalCapabilities: { implementation: expect.any(Boolean), deploy: false }, minimalRequest: { schemaVersion: 1, profile: "assist-only" } } });
     expect(discovery.endpoints.resultSchema).toBe("/schemas/task-result-v1.schema.json");
     expect((await fetch(`${instance.url}/schemas/execution-agreement-v1.schema.json`)).status).toBe(200);
     const resultSchemaResponse = await fetch(`${instance.url}${discovery.endpoints.resultSchema}`);

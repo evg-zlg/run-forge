@@ -31,8 +31,35 @@ export type PhaseBooleanMap = Partial<Record<ExecutionPhaseId, boolean>>;
 export type PhasePartyMap = Partial<Record<ExecutionPhaseId, ExecutionParty>>;
 export type PhaseStringListMap = Partial<Record<ExecutionPhaseId, readonly string[]>>;
 
+export const PUBLICATION_TARGET_KINDS = ["none", "new_branch", "existing_branch", "existing_change", "externally_managed_existing_change"] as const;
+export type PublicationProvider = "github" | "gitlab" | "other";
+export type PublicationTarget =
+  | { kind: "none" }
+  | { kind: "new_branch"; branchName: string }
+  | { kind: "existing_branch"; branchName: string }
+  | { kind: "existing_change"; provider: PublicationProvider; changeId: string }
+  | { kind: "externally_managed_existing_change"; provider: PublicationProvider; changeId: string; responsibleParty: "external_session" | "external_system" | "owner" };
+
+export type ExecutionAgreementContext = {
+  project: {
+    projectId: string;
+    repository: string;
+    workingDirectory: string;
+    source: { head: string | null; branch: string | null; detachedHead: boolean };
+    defaultBranch: string | null;
+    protectedBranches: string[];
+  } | null;
+  policy: {
+    sources: string[];
+    hardBoundaries: string[];
+    runforgeMd: { present: boolean; path: string | null; authorityEscalationTrusted: false };
+  };
+  publicationTarget: PublicationTarget;
+};
+
 export type ExecutionAgreementNegotiation = {
   profile: ExecutionProfile;
+  context?: ExecutionAgreementContext;
   /** What the caller wants done, independently of who should do it. */
   requested?: PhaseBooleanMap;
   /** Requested ownership overrides the selected profile. `nobody` means not requested. */
@@ -83,6 +110,8 @@ export type ExecutionAgreement = {
   conflicts: ExecutionAgreementConflict[];
   handoffs: ExecutionHandoff[];
   humanSummary: string;
+  /** Optional so v1 agreements stored before project-aware negotiation remain readable. */
+  context?: ExecutionAgreementContext;
 };
 
 const PROFILE_OWNERSHIP: Record<Exclude<ExecutionProfile, "custom">, PhasePartyMap> = {
@@ -135,7 +164,7 @@ export function negotiateExecutionAgreement(input: ExecutionAgreementNegotiation
     const decision = decidePhase(phaseId, requested, normalizedParty, available, authorized, policyAllowed, completionEvidence);
     return { phaseId, requested, available, authorized, policyAllowed, responsibleParty: normalizedParty, ...decision, prerequisites, completionEvidence };
   });
-  return assembleAgreement(input.profile, phases);
+  return assembleAgreement(input.profile, phases, input.context);
 }
 
 /** Returns a new agreement with evidence recorded; the stable ID changes only when contract data changes. */
@@ -149,7 +178,7 @@ export function completeExecutionPhase(agreement: ExecutionAgreement, phaseId: E
   const phases = agreement.phases.map((phase) => phase.phaseId === phaseId
     ? { ...phase, status: "completed" as const, reason: `Completed by ${phase.responsibleParty}; evidence recorded.`, completionEvidence: normalizedEvidence }
     : { ...phase, prerequisites: [...phase.prerequisites], completionEvidence: [...phase.completionEvidence] });
-  return assembleAgreement(agreement.profile, phases);
+  return assembleAgreement(agreement.profile, phases, agreement.context);
 }
 
 /** Canonical handoffs are phase-ordered and contain no RunForge or unrequested work. */
@@ -166,12 +195,15 @@ export function normalizeExecutionHandoff(agreement: ExecutionAgreement): Execut
   });
 }
 
-export function renderExecutionAgreementSummary(agreement: Pick<ExecutionAgreement, "agreementId" | "profile" | "status" | "phases" | "conflicts" | "handoffs">): string {
+export function renderExecutionAgreementSummary(agreement: Pick<ExecutionAgreement, "agreementId" | "profile" | "status" | "phases" | "conflicts" | "handoffs" | "context">): string {
   const requested = agreement.phases.filter((phase) => phase.requested).length;
   const completed = agreement.phases.filter((phase) => phase.status === "completed").length;
   const runforgeCount = agreement.phases.filter((phase) => phase.requested && phase.responsibleParty === runforge).length;
   return [
     `Execution Agreement ${agreement.agreementId} (${agreement.profile}): ${agreement.status}.`,
+    ...(agreement.context ? [agreement.context.project
+      ? `Project ${agreement.context.project.projectId}: ${agreement.context.project.repository} (${agreement.context.project.workingDirectory}); publication target ${agreement.context.publicationTarget.kind}.`
+      : `No registered project was bound; publication target ${agreement.context.publicationTarget.kind}.`] : []),
     `${requested} of ${EXECUTION_PHASE_IDS.length} phases requested; ${completed} completed; RunForge owns ${runforgeCount}.`,
     agreement.conflicts.length ? `Conflicts: ${agreement.conflicts.map((item) => `${item.phaseId} (${item.kind})`).join(", ")}.` : "Conflicts: none.",
     agreement.handoffs.length ? `Handoffs: ${agreement.handoffs.map((item) => `${item.phaseId} -> ${item.responsibleParty}`).join(", ")}.` : "Handoffs: none.",
@@ -192,13 +224,13 @@ function decidePhase(phaseId: ExecutionPhaseId, requested: boolean, responsibleP
   return { status: "ready", reason: "Requested, technically available, authorized, and permitted by policy." };
 }
 
-function assembleAgreement(profile: ExecutionProfile, phases: ExecutionPhaseAgreement[]): ExecutionAgreement {
+function assembleAgreement(profile: ExecutionProfile, phases: ExecutionPhaseAgreement[], context?: ExecutionAgreementContext): ExecutionAgreement {
   const conflicts = phases.flatMap((phase): ExecutionAgreementConflict[] => {
     if (phase.status !== "conflict") return [];
     const kind: ExecutionConflictKind = !phase.available ? "unavailable" : !phase.authorized ? "unauthorized" : "policy_denied";
     return [{ phaseId: phase.phaseId, kind, reason: phase.reason }];
   });
-  const draft = { schemaVersion: 1 as const, profile, phases, conflicts };
+  const draft = { schemaVersion: 1 as const, profile, phases, conflicts, ...(context ? { context } : {}) };
   const agreementId = stableAgreementId(draft);
   const handoffs = normalizeExecutionHandoff({ ...draft, agreementId, status: "ready", handoffs: [], humanSummary: "" });
   const requested = phases.filter((phase) => phase.requested);

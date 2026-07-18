@@ -138,4 +138,24 @@ describe("Execution Agreement v1", () => {
     expect(completed.agreementId).not.toBe(initial.agreementId);
     expect(() => completeExecutionPhase(initial, "taskAnalysis", [])).toThrow("Completion evidence is required");
   });
+
+  it("includes project and publication context in the stable ID and summary while preserving legacy agreements", async () => {
+    const context = {
+      project: { projectId: "project-1", repository: "/repo", workingDirectory: ".", source: { head: "abc1234", branch: "main", detachedHead: false }, defaultBranch: "main", protectedBranches: ["main"] },
+      policy: { sources: ["runforge-installation-policy"], hardBoundaries: ["no remote publication"], runforgeMd: { present: true, path: "RUNFORGE.md", authorityEscalationTrusted: false as const } },
+      publicationTarget: { kind: "existing_branch" as const, branchName: "work/already-open" },
+    };
+    const first = negotiateExecutionAgreement({ profile: "custom", context });
+    const same = negotiateExecutionAgreement({ profile: "custom", context: structuredClone(context) });
+    const changed = negotiateExecutionAgreement({ profile: "custom", context: { ...context, publicationTarget: { kind: "none" } } });
+    expect(first.agreementId).toBe(same.agreementId);
+    expect(changed.agreementId).not.toBe(first.agreementId);
+    expect(first.humanSummary).toContain("project-1");
+    expect(first.humanSummary).toContain("existing_branch");
+    const schema = JSON.parse(await readFile("schemas/execution-agreement-v1.schema.json", "utf8"));
+    const validate = new Ajv2020({ strict: true }).compile(schema);
+    expect(validate(first)).toBe(true);
+    const legacy = { ...first }; delete legacy.context;
+    expect(validate(legacy)).toBe(true);
+  });
 });
