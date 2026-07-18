@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultAuthority, parseDecisionRequest, parseTaskRequest, type ControlTaskRecord } from "../../src/control-plane/contracts.js";
+import { negotiateControlPlaneAgreement, parseExecutionAgreementNegotiationRequest } from "../../src/control-plane/execution-agreements.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 
 const roots: string[] = [];
@@ -18,6 +19,26 @@ describe("control-plane contracts", () => {
   it("rejects unknown fields and constrains decision vocabularies", () => {
     expect(() => parseTaskRequest({ taskSpec: {}, surprise: true })).toThrow("unknown field");
     expect(() => parseDecisionRequest({ decision: "merge", note: "no" }, "publication")).toThrow("must be one of");
+  });
+
+  it("parses bounded agreement requests and keeps unavailable RunForge work conflicted", () => {
+    expect(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "assist-only" })).toMatchObject({ schemaVersion: 1, profile: "assist-only" });
+    expect(() => parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "custom", requestedOwnership: { imaginary: "runforge" } })).toThrow("unknown phase");
+    expect(() => parseTaskRequest({ taskSpec: {}, agreementId: "../../state.json" })).toThrow("Execution Agreement v1 identifier");
+
+    const conflicted = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "custom", requestedOwnership: { deploy: "runforge" }, technicalCapability: { deploy: true } }));
+    expect(conflicted).toMatchObject({ status: "conflicted", conflicts: [{ phaseId: "deploy", kind: "unavailable" }] });
+    const delegated = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "custom", requestedOwnership: { deploy: "external_system" } }));
+    expect(delegated).toMatchObject({ status: "ready", conflicts: [], handoffs: [{ phaseId: "deploy", responsibleParty: "external_system" }] });
+  });
+
+  it("stores agreements durably and retrieves them after store restart", async () => {
+    const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-agreement-store-"))) - 1]!;
+    const first = new ControlPlaneStore(root); await first.initialize();
+    const agreement = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "assist-only" }));
+    await first.saveAgreement(agreement);
+    const restarted = new ControlPlaneStore(root); await restarted.initialize();
+    expect(await restarted.getAgreement(agreement.agreementId)).toEqual(agreement);
   });
 
   it("recovers in-flight state as interrupted without inferring success", async () => {

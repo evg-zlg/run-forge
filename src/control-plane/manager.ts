@@ -10,6 +10,14 @@ import { continueExternalExecution, recordOwnerDecision } from "../run/external-
 import { ControlPlaneError, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
 import { ControlPlaneStore } from "./state.js";
 import { discoverImplementationExecutors, selectImplementationExecutor } from "../implementation/executor.js";
+import type { ExecutionAgreement } from "../product/execution-agreement.js";
+import {
+  assertAgreementAccepted,
+  assertAgreementMatchesTask,
+  negotiateControlPlaneAgreement,
+  negotiateTaskAgreement,
+  type ExecutionAgreementNegotiationRequest,
+} from "./execution-agreements.js";
 
 const executionTimeoutMs = 300_000;
 const heartbeatIntervalMs = 1_000;
@@ -44,7 +52,25 @@ export class ControlPlaneManager {
     return { project, readiness: report };
   }
 
-  async createTask(input: { projectId?: string; taskSpec: Record<string, unknown>; authority: ControlAuthority; publicationRequested: "none" | "draft-pr" }): Promise<ControlTaskRecord> {
+  async negotiateAgreement(input: ExecutionAgreementNegotiationRequest): Promise<ExecutionAgreement> {
+    const agreement = negotiateControlPlaneAgreement(input);
+    await this.store.saveAgreement(agreement);
+    return agreement;
+  }
+
+  async getAgreement(id: string): Promise<ExecutionAgreement> {
+    const agreement = await this.store.getAgreement(id);
+    if (!agreement) throw new ControlPlaneError(404, "execution_agreement_not_found", `Execution Agreement not found: ${id}`);
+    return agreement;
+  }
+
+  async getTaskAgreement(id: string): Promise<ExecutionAgreement> {
+    const task = await this.readTask(id);
+    if (!task.executionAgreement) throw new ControlPlaneError(404, "task_execution_agreement_not_found", `Task has no persisted Execution Agreement: ${id}`, undefined, false, id);
+    return task.executionAgreement;
+  }
+
+  async createTask(input: { projectId?: string; taskSpec: Record<string, unknown>; authority: ControlAuthority; publicationRequested: "none" | "draft-pr"; agreementId?: string }): Promise<ControlTaskRecord> {
     const raw = structuredClone(input.taskSpec); const project = input.projectId ? await this.requireProject(input.projectId) : null; const taskId = requiredString(raw.taskId, "taskSpec.taskId");
     if (await this.store.getTask(taskId)) throw new ControlPlaneError(409, "task_exists", `Task already exists: ${taskId}`, undefined, false, taskId);
     if (!input.authority.inspect) throw new ControlPlaneError(403, "authority_denied", "inspect authority is required to create a task.");
@@ -79,10 +105,16 @@ export class ControlPlaneManager {
     if ((normalized.authority.allowNetwork || normalized.runtime.externalNetwork === "allowed") && input.authority.network !== true) throw preflightError("network_authority_denied", "TaskSpec allows network but control-plane network authority is false.", normalized, input.authority);
     if (implementation && !normalized.authority.allowProviderCalls) throw preflightError("provider_permission_denied", "The implementation executor requires TaskSpec authority.allowProviderCalls=true.", normalized, input.authority);
     if (implementation && (!normalized.authority.allowNetwork || normalized.runtime.externalNetwork !== "allowed")) throw preflightError("network_permission_denied", "The implementation executor requires authority.allowNetwork=true and runtime.externalNetwork='allowed'.", normalized, input.authority);
+    const preflightAgreement = negotiateTaskAgreement(normalized, input.authority);
+    assertAgreementAccepted(preflightAgreement, taskId);
+    const executionAgreement = input.agreementId ? await this.getAgreement(input.agreementId) : preflightAgreement;
+    assertAgreementAccepted(executionAgreement, taskId);
+    assertAgreementMatchesTask(executionAgreement, normalized, preflightAgreement);
+    await this.store.saveAgreement(executionAgreement);
     const selected = ["implementation", "repair"].includes(normalized.execution.mode) ? await selectImplementationExecutor(normalized) : null;
     if (selected && !selected.selected) throw new ControlPlaneError(503, "implementation_executor_unavailable", selected.reason, { requestedMode: normalized.execution.mode, availableExecutors: selected.rejected.map((item) => item.id), rejectedAlternatives: selected.rejected, authorityFailures: [], operation: "start_new_task", newTaskRequired: true }, true, taskId);
     const now = new Date().toISOString(); const task: ControlTaskRecord = {
-      id: taskId, projectId: project?.id ?? null, status: "queued", specPath, artifactRoot, authority: input.authority, publicationRequested,
+      id: taskId, projectId: project?.id ?? null, status: "queued", specPath, artifactRoot, executionAgreement, authority: input.authority, publicationRequested,
       publicationGate: publicationRequested === "draft-pr" ? { required: true, status: "blocked_until_implementation_completes", reason: "Remote publication is a separate decision." } : { required: false, status: "not_requested" }, ownerGate: { required: false, status: "not_required" },
       createdAt: now, updatedAt: now, startedAt: null, finishedAt: null, error: null, decisions: [], events: [], progress: progress(now), recovery: null,
       execution: { attempt: 0, lease: null, attempts: [], lastRetry: null }, continuation: { schemaVersion: 1, state: "none", decisionId: null, executionId: null, sourceExecutionId: null },

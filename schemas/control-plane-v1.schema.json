@@ -2,8 +2,23 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://runforge.local/schemas/control-plane-v1.schema.json",
   "title": "RunForge Local Control Plane v1 requests",
-  "oneOf": [{ "$ref": "#/$defs/projectInspection" }, { "$ref": "#/$defs/taskSubmission" }, { "$ref": "#/$defs/ownerDecision" }, { "$ref": "#/$defs/publicationDecision" }, { "$ref": "#/$defs/emptyOperation" }],
+  "oneOf": [{ "$ref": "#/$defs/projectInspection" }, { "$ref": "#/$defs/agreementNegotiation" }, { "$ref": "#/$defs/taskSubmission" }, { "$ref": "#/$defs/ownerDecision" }, { "$ref": "#/$defs/publicationDecision" }, { "$ref": "#/$defs/emptyOperation" }],
   "$defs": {
+    "phaseBooleanMap": { "type": "object", "additionalProperties": false, "properties": {
+      "projectDiscovery": { "type": "boolean" }, "taskAnalysis": { "type": "boolean" }, "implementationPlanning": { "type": "boolean" }, "implementation": { "type": "boolean" }, "localValidation": { "type": "boolean" }, "independentReview": { "type": "boolean" }, "repairIterations": { "type": "boolean" }, "patchPackage": { "type": "boolean" }, "localBranch": { "type": "boolean" }, "localCommit": { "type": "boolean" }, "remotePush": { "type": "boolean" }, "draftPublication": { "type": "boolean" }, "ciMonitoring": { "type": "boolean" }, "ciRepair": { "type": "boolean" }, "prReview": { "type": "boolean" }, "merge": { "type": "boolean" }, "deploy": { "type": "boolean" }, "postDeployValidation": { "type": "boolean" }, "dbAccess": { "type": "boolean" }, "productionAccess": { "type": "boolean" }, "secretUse": { "type": "boolean" }, "providerModelCalls": { "type": "boolean" }
+    } },
+    "phasePartyMap": { "type": "object", "additionalProperties": false, "properties": {
+      "projectDiscovery": { "$ref": "#/$defs/party" }, "taskAnalysis": { "$ref": "#/$defs/party" }, "implementationPlanning": { "$ref": "#/$defs/party" }, "implementation": { "$ref": "#/$defs/party" }, "localValidation": { "$ref": "#/$defs/party" }, "independentReview": { "$ref": "#/$defs/party" }, "repairIterations": { "$ref": "#/$defs/party" }, "patchPackage": { "$ref": "#/$defs/party" }, "localBranch": { "$ref": "#/$defs/party" }, "localCommit": { "$ref": "#/$defs/party" }, "remotePush": { "$ref": "#/$defs/party" }, "draftPublication": { "$ref": "#/$defs/party" }, "ciMonitoring": { "$ref": "#/$defs/party" }, "ciRepair": { "$ref": "#/$defs/party" }, "prReview": { "$ref": "#/$defs/party" }, "merge": { "$ref": "#/$defs/party" }, "deploy": { "$ref": "#/$defs/party" }, "postDeployValidation": { "$ref": "#/$defs/party" }, "dbAccess": { "$ref": "#/$defs/party" }, "productionAccess": { "$ref": "#/$defs/party" }, "secretUse": { "$ref": "#/$defs/party" }, "providerModelCalls": { "$ref": "#/$defs/party" }
+    } },
+    "phaseStringListMap": { "type": "object", "additionalProperties": false, "properties": {
+      "projectDiscovery": { "$ref": "#/$defs/strings" }, "taskAnalysis": { "$ref": "#/$defs/strings" }, "implementationPlanning": { "$ref": "#/$defs/strings" }, "implementation": { "$ref": "#/$defs/strings" }, "localValidation": { "$ref": "#/$defs/strings" }, "independentReview": { "$ref": "#/$defs/strings" }, "repairIterations": { "$ref": "#/$defs/strings" }, "patchPackage": { "$ref": "#/$defs/strings" }, "localBranch": { "$ref": "#/$defs/strings" }, "localCommit": { "$ref": "#/$defs/strings" }, "remotePush": { "$ref": "#/$defs/strings" }, "draftPublication": { "$ref": "#/$defs/strings" }, "ciMonitoring": { "$ref": "#/$defs/strings" }, "ciRepair": { "$ref": "#/$defs/strings" }, "prReview": { "$ref": "#/$defs/strings" }, "merge": { "$ref": "#/$defs/strings" }, "deploy": { "$ref": "#/$defs/strings" }, "postDeployValidation": { "$ref": "#/$defs/strings" }, "dbAccess": { "$ref": "#/$defs/strings" }, "productionAccess": { "$ref": "#/$defs/strings" }, "secretUse": { "$ref": "#/$defs/strings" }, "providerModelCalls": { "$ref": "#/$defs/strings" }
+    } },
+    "party": { "enum": ["runforge", "external_session", "owner", "external_system", "nobody"] },
+    "strings": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+    "agreementNegotiation": { "type": "object", "additionalProperties": false, "required": ["schemaVersion", "profile"], "properties": {
+      "schemaVersion": { "const": 1 }, "profile": { "enum": ["assist-only", "local-ready", "draft-pr", "delivery", "custom"] },
+      "requested": { "$ref": "#/$defs/phaseBooleanMap" }, "requestedOwnership": { "$ref": "#/$defs/phasePartyMap" }, "technicalCapability": { "$ref": "#/$defs/phaseBooleanMap" }, "authority": { "$ref": "#/$defs/phaseBooleanMap" }, "policy": { "$ref": "#/$defs/phaseBooleanMap" }, "prerequisites": { "$ref": "#/$defs/phaseStringListMap" }, "completionEvidence": { "$ref": "#/$defs/phaseStringListMap" }
+    } },
     "authority": { "type": "object", "additionalProperties": false, "properties": {
       "inspect": { "type": "boolean" }, "implementation": { "type": "boolean" }, "providerCalls": { "type": "boolean" }, "network": { "type": "boolean" }, "localBranch": { "type": "boolean" }, "localCommit": { "type": "boolean" },
       "remotePush": { "type": "boolean" }, "draftPublication": { "type": "boolean" }, "merge": { "const": false }, "deploy": { "const": false }
@@ -13,8 +28,9 @@
       "runtime": { "enum": ["local", "docker"] }, "dependencyPreparation": { "enum": ["required", "if-needed", "disabled", "reuse-existing"] }
     } },
     "taskSubmission": { "type": "object", "additionalProperties": false, "required": ["taskSpec"], "properties": {
-      "projectId": { "type": "string", "minLength": 1 }, "taskSpec": { "$ref": "task-spec-v2.schema.json" }, "authority": { "$ref": "#/$defs/authority" }, "publication": { "enum": ["none", "draft-pr"] }
-    } },
+      "projectId": { "type": "string", "minLength": 1 }, "taskSpec": { "$ref": "task-spec-v2.schema.json" }, "authority": { "$ref": "#/$defs/authority" }, "publication": { "enum": ["none", "draft-pr"] },
+      "agreementId": { "type": "string", "pattern": "^ea_v1_[a-f0-9]{24}$" }, "executionAgreementId": { "type": "string", "pattern": "^ea_v1_[a-f0-9]{24}$" }
+    }, "not": { "required": ["agreementId", "executionAgreementId"] } },
     "ownerDecision": { "type": "object", "additionalProperties": false, "required": ["decision", "note"], "properties": {
       "decisionId": { "type": "string", "minLength": 1 }, "decision": { "enum": ["approve", "reject", "continue", "hold"] }, "targetBranch": { "type": "string", "minLength": 1 }, "note": { "type": "string", "minLength": 1 }
     } },

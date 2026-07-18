@@ -44,6 +44,42 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(publicationReplay.idempotentReplay).toBe(true);
   });
 
+  it("negotiates durable agreements, binds them to tasks, and rejects only RunForge conflicts", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-control-agreements-"))) - 1]!;
+    const store = new ControlPlaneStore(stateRoot);
+    const manager = new ControlPlaneManager(store, {
+      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
+      recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never)
+    });
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
+
+    const discovery = await json(await fetch(`${instance.url}/.well-known/runforge`));
+    expect(discovery).toMatchObject({ executionAgreements: { schemaVersion: 1, schemaUrl: "/schemas/execution-agreement-v1.schema.json", profiles: expect.arrayContaining(["custom"]), parties: expect.arrayContaining(["runforge", "external_session", "owner"]), endpoints: { negotiate: "/v1/execution-agreements/negotiate", agreement: "/v1/execution-agreements/{id}", taskAgreement: "/v1/tasks/{id}/agreement" }, technicalCapabilities: { implementation: true, deploy: false }, minimalRequest: { schemaVersion: 1, profile: "assist-only" } } });
+    expect((await fetch(`${instance.url}/schemas/execution-agreement-v1.schema.json`)).status).toBe(200);
+    expect(await json(await fetch(`${instance.url}/v1/capabilities`))).toMatchObject({ schemas: { executionAgreement: "/schemas/execution-agreement-v1.schema.json" }, executionAgreements: { phases: expect.arrayContaining(["implementation", "deploy"]) } });
+
+    const negotiation = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", deploy: "external_system" } }) });
+    expect(negotiation.status).toBe(201); const agreement = await json(negotiation);
+    expect(agreement).toMatchObject({ status: "ready", conflicts: [], handoffs: [{ phaseId: "deploy", responsibleParty: "external_system" }] });
+    expect(await json(await fetch(`${instance.url}/v1/execution-agreements/${agreement.agreementId}`))).toEqual(agreement);
+
+    const referencedSpec = { ...taskSpec("CONTROL-AGREEMENT-REF-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", deploy: "external_system" } } };
+    const created = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: referencedSpec, agreementId: agreement.agreementId }) });
+    expect(created.status).toBe(202); expect(await json(created)).toMatchObject({ executionAgreement: { agreementId: agreement.agreementId } });
+    await eventually(async () => (await manager.getTask("CONTROL-AGREEMENT-REF-1")).status === "completed");
+    expect(await json(await fetch(`${instance.url}/v1/tasks/CONTROL-AGREEMENT-REF-1/agreement`))).toEqual(agreement);
+    expect((await new ControlPlaneStore(stateRoot).getTask("CONTROL-AGREEMENT-REF-1"))?.executionAgreement).toEqual(agreement);
+
+    const conflictingSpec = { ...taskSpec("CONTROL-AGREEMENT-CONFLICT-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { deploy: "runforge" } } };
+    const rejected = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: conflictingSpec }) });
+    expect(rejected.status).toBe(409); expect(await json(rejected)).toMatchObject({ error: { code: "execution_agreement_conflict", taskId: "CONTROL-AGREEMENT-CONFLICT-1", details: { conflicts: [{ phaseId: "deploy", kind: "unavailable" }] } } });
+    expect(await store.getTask("CONTROL-AGREEMENT-CONFLICT-1")).toBeNull();
+
+    const delegatedSpec = { ...taskSpec("CONTROL-AGREEMENT-DELEGATED-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { implementation: "external_session", merge: "owner" } } };
+    const delegated = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: delegatedSpec }) });
+    expect(delegated.status).toBe(202); expect(await json(delegated)).toMatchObject({ executionAgreement: { status: "ready", conflicts: [], handoffs: [{ phaseId: "implementation", responsibleParty: "external_session" }, { phaseId: "merge", responsibleParty: "owner" }] } });
+  });
+
   it("rejects non-local binds, malformed input, oversized bodies, and foreign origins", async () => {
     await expect(startControlPlaneServer({ host: "0.0.0.0", port: 0 })).rejects.toThrow("localhost");
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-control-security-"))) - 1]!;
@@ -134,8 +170,8 @@ describe("local control-plane HTTP lifecycle", () => {
   it("reconstructs an interrupted result on restart and retries with a new execution identity", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-restart-retry-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let runs = 0;
     const operations = { runTaskSpec: async (specPath: string) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const run = ++runs; await mkdir(root, { recursive: true }); if (run === 1) await new Promise((done) => setTimeout(done, 100)); else await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", marker: "after-restart", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) };
-    const before = new ControlPlaneManager(store, operations as never, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 10_000, cleanupGraceMs: 5 }); await before.initialize(); await before.createTask({ taskSpec: taskSpec("CONTROL-RESTART-RETRY-1"), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); const oldExecutionId = (await before.getTask("CONTROL-RESTART-RETRY-1")).progress.executionId; before.close();
-    const after = new ControlPlaneManager(store, operations as never, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 10_000, cleanupGraceMs: 5 }); await after.initialize(); expect(await after.getResult("CONTROL-RESTART-RETRY-1")).toMatchObject({ status: "interrupted", interruption: { reason: "service_restart", originalExecutionId: oldExecutionId } }); const retried = await after.retryTask("CONTROL-RESTART-RETRY-1"); expect(retried.progress.executionId).not.toBe(oldExecutionId); await eventually(async () => (await after.getTask("CONTROL-RESTART-RETRY-1")).status === "completed"); expect(await after.getResult("CONTROL-RESTART-RETRY-1")).toMatchObject({ marker: "after-restart" }); after.close();
+    const before = new ControlPlaneManager(store, operations as never, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 10_000, cleanupGraceMs: 5 }); await before.initialize(); await before.createTask({ taskSpec: taskSpec("CONTROL-RESTART-RETRY-1"), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); const beforeRestartTask = await before.getTask("CONTROL-RESTART-RETRY-1"); const oldExecutionId = beforeRestartTask.progress.executionId; const agreementId = beforeRestartTask.executionAgreement?.agreementId; before.close();
+    const after = new ControlPlaneManager(store, operations as never, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 10_000, cleanupGraceMs: 5 }); await after.initialize(); expect((await after.getTask("CONTROL-RESTART-RETRY-1")).executionAgreement?.agreementId).toBe(agreementId); expect(await after.getResult("CONTROL-RESTART-RETRY-1")).toMatchObject({ status: "interrupted", interruption: { reason: "service_restart", originalExecutionId: oldExecutionId } }); const retried = await after.retryTask("CONTROL-RESTART-RETRY-1"); expect(retried.progress.executionId).not.toBe(oldExecutionId); expect(retried.executionAgreement?.agreementId).toBe(agreementId); await eventually(async () => (await after.getTask("CONTROL-RESTART-RETRY-1")).status === "completed"); expect(await after.getResult("CONTROL-RESTART-RETRY-1")).toMatchObject({ marker: "after-restart" }); after.close();
   });
 
   it("blocks retry after failed cleanup and publishes a terminal worker failure result", async () => {
