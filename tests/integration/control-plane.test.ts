@@ -58,26 +58,84 @@ describe("local control-plane HTTP lifecycle", () => {
     expect((await fetch(`${instance.url}/schemas/execution-agreement-v1.schema.json`)).status).toBe(200);
     expect(await json(await fetch(`${instance.url}/v1/capabilities`))).toMatchObject({ schemas: { executionAgreement: "/schemas/execution-agreement-v1.schema.json" }, executionAgreements: { phases: expect.arrayContaining(["implementation", "deploy"]) } });
 
-    const negotiation = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", deploy: "external_system" } }) });
+    const negotiation = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } }) });
     expect(negotiation.status).toBe(201); const agreement = await json(negotiation);
-    expect(agreement).toMatchObject({ status: "ready", conflicts: [], handoffs: [{ phaseId: "deploy", responsibleParty: "external_system" }] });
+    expect(agreement).toMatchObject({ status: "ready", conflicts: [], handoffs: [{ phaseId: "localValidation", responsibleParty: "external_system" }] });
     expect(await json(await fetch(`${instance.url}/v1/execution-agreements/${agreement.agreementId}`))).toEqual(agreement);
 
-    const referencedSpec = { ...taskSpec("CONTROL-AGREEMENT-REF-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", deploy: "external_system" } } };
+    const referencedSpec = { ...taskSpec("CONTROL-AGREEMENT-REF-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } } };
     const created = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: referencedSpec, agreementId: agreement.agreementId }) });
     expect(created.status).toBe(202); expect(await json(created)).toMatchObject({ executionAgreement: { agreementId: agreement.agreementId } });
     await eventually(async () => (await manager.getTask("CONTROL-AGREEMENT-REF-1")).status === "completed");
     expect(await json(await fetch(`${instance.url}/v1/tasks/CONTROL-AGREEMENT-REF-1/agreement`))).toEqual(agreement);
     expect((await new ControlPlaneStore(stateRoot).getTask("CONTROL-AGREEMENT-REF-1"))?.executionAgreement).toEqual(agreement);
 
-    const conflictingSpec = { ...taskSpec("CONTROL-AGREEMENT-CONFLICT-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { deploy: "runforge" } } };
-    const rejected = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: conflictingSpec }) });
+    const conflictingSpec = { ...implementationTaskSpec("CONTROL-AGREEMENT-CONFLICT-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { deploy: "runforge" } } };
+    const rejected = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: conflictingSpec, authority: implementationAuthority() }) });
     expect(rejected.status).toBe(409); expect(await json(rejected)).toMatchObject({ error: { code: "execution_agreement_conflict", taskId: "CONTROL-AGREEMENT-CONFLICT-1", details: { conflicts: [{ phaseId: "deploy", kind: "unavailable" }] } } });
     expect(await store.getTask("CONTROL-AGREEMENT-CONFLICT-1")).toBeNull();
 
     const delegatedSpec = { ...taskSpec("CONTROL-AGREEMENT-DELEGATED-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { implementation: "external_session", merge: "owner" } } };
     const delegated = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: delegatedSpec }) });
-    expect(delegated.status).toBe(202); expect(await json(delegated)).toMatchObject({ executionAgreement: { status: "ready", conflicts: [], handoffs: [{ phaseId: "implementation", responsibleParty: "external_session" }, { phaseId: "merge", responsibleParty: "owner" }] } });
+    expect(delegated.status).toBe(202); const delegatedAgreement = (await json(delegated)).executionAgreement;
+    expect(delegatedAgreement).toMatchObject({ status: "ready", conflicts: [], handoffs: [] });
+    expect(delegatedAgreement.phases).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phaseId: "implementation", requested: false, responsibleParty: "nobody", status: "not_requested" }),
+      expect.objectContaining({ phaseId: "merge", requested: false, responsibleParty: "nobody", status: "not_requested" }),
+    ]));
+  });
+
+  it("uses the normalized TaskSpec timeout up to the production ceiling and honors a smaller manager ceiling", async () => {
+    const operations = { runTaskSpec: async (specPath: string) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) };
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-timeout-http-"))) - 1]!;
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager: new ControlPlaneManager(new ControlPlaneStore(stateRoot), operations as never) }); servers.push(instance);
+    const thirtyMinutes = { ...taskSpec("CONTROL-TIMEOUT-30M-1"), execution: { mode: "validation", timeoutMs: 1_800_000 } };
+    const response = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: thirtyMinutes }) });
+    expect(response.status).toBe(202); const created = await json(response);
+    expect(created.progress.timeoutMs).toBe(1_800_000);
+    expect(Date.parse(created.progress.deadlineAt) - Date.parse(created.progress.startedAt)).toBe(1_800_000);
+
+    const boundedRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-timeout-ceiling-"))) - 1]!;
+    const bounded = new ControlPlaneManager(new ControlPlaneStore(boundedRoot), operations as never, { heartbeatIntervalMs: 5, staleHeartbeatMs: 5_000, executionTimeoutMs: 123_456 });
+    await bounded.initialize(); const boundedTask = await bounded.createTask({ taskSpec: { ...taskSpec("CONTROL-TIMEOUT-CEILING-1"), execution: { mode: "validation", timeoutMs: 1_800_000 } }, authority: { inspect: true, implementation: false, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" });
+    expect(boundedTask.progress.timeoutMs).toBe(123_456);
+    expect(Date.parse(boundedTask.progress.deadlineAt!) - Date.parse(boundedTask.progress.startedAt!)).toBe(123_456);
+    bounded.close();
+  });
+
+  it("limits requested phases by execution mode and applies local commit preflight only to requested RunForge ownership", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-mode-agreements-"))) - 1]!;
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) });
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
+    for (const mode of ["inspection", "validation"] as const) {
+      const response = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: { ...taskSpec(`CONTROL-MODE-${mode.toUpperCase()}-1`), execution: { mode }, executionAgreement: { schemaVersion: 1, profile: "local-ready" } } }) });
+      expect(response.status).toBe(202); const agreement = (await json(response)).executionAgreement;
+      const phases = Object.fromEntries(agreement.phases.map((phase: Record<string, unknown>) => [phase.phaseId, phase]));
+      expect(phases.taskAnalysis).toMatchObject({ requested: true, responsibleParty: "runforge" });
+      expect(phases.localValidation).toMatchObject({ requested: mode === "validation" });
+      for (const phase of ["implementationPlanning", "implementation", "repairIterations", "patchPackage", "localBranch", "localCommit", "remotePush", "draftPublication", "merge", "deploy"]) expect(phases[phase]).toMatchObject({ requested: false, responsibleParty: "nobody", status: "not_requested" });
+    }
+
+    const validationSpec = { ...taskSpec("CONTROL-MODE-LOCAL-COMMIT-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", localValidation: "external_system", localCommit: "runforge" } } };
+    const validation = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: validationSpec }) });
+    expect(validation.status).toBe(202); const validationAgreement = (await json(validation)).executionAgreement;
+    expect(validationAgreement.handoffs).toEqual([expect.objectContaining({ phaseId: "localValidation", responsibleParty: "external_system" })]);
+    expect(validationAgreement.phases).toContainEqual(expect.objectContaining({ phaseId: "localCommit", requested: false, responsibleParty: "nobody" }));
+
+    const ownedCommitSpec = { ...implementationTaskSpec("CONTROL-PREFLIGHT-LOCAL-COMMIT-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { implementation: "external_session", localBranch: "external_session", localCommit: "runforge" } } };
+    const ownedCommit = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: ownedCommitSpec, authority: { ...implementationAuthority(), localBranch: false, localCommit: false } }) });
+    expect(ownedCommit.status).toBe(403); expect(await json(ownedCommit)).toMatchObject({ error: { code: "local_commit_authority_denied", taskId: "CONTROL-PREFLIGHT-LOCAL-COMMIT-1" } });
+  });
+
+  it("reuses the task effective timeout for continuation", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-continuation-timeout-"))) - 1]!; let continuationTimeout: number | undefined;
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "continuation-state.json"), JSON.stringify({ repo: process.cwd(), sourceBranch: "main" })); await writeFile(join(root, "results.json"), JSON.stringify({ status: "awaiting_owner_decision", ownerGate: { required: true, status: "awaiting_owner_decision" } })); return {} as never; }, recordOwnerDecision: async ({ run }) => { const path = join(run, "owner-decision.json"); await writeFile(path, "{}\n"); return { decisionId: "timeout-decision", path }; }, continueExecution: async ({ run, timeoutMs }) => { continuationTimeout = timeoutMs; await writeFile(join(run, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; } }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 5_000, executionTimeoutMs: 120_000 });
+    await manager.initialize(); await manager.createTask({ taskSpec: { ...taskSpec("CONTROL-CONTINUATION-TIMEOUT-1"), execution: { mode: "validation", timeoutMs: 1_800_000 } }, authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" });
+    await eventually(async () => (await manager.getTask("CONTROL-CONTINUATION-TIMEOUT-1")).status === "awaiting_owner_decision");
+    expect((await manager.getTask("CONTROL-CONTINUATION-TIMEOUT-1")).progress.timeoutMs).toBe(120_000);
+    await manager.ownerDecision("CONTROL-CONTINUATION-TIMEOUT-1", { decisionId: "timeout-owner", decision: "approve", note: "approved" }); await manager.continueTask("CONTROL-CONTINUATION-TIMEOUT-1");
+    await eventually(async () => (await manager.getTask("CONTROL-CONTINUATION-TIMEOUT-1")).status === "completed");
+    expect(continuationTimeout).toBe(120_000); expect((await manager.getTask("CONTROL-CONTINUATION-TIMEOUT-1")).progress.timeoutMs).toBe(120_000); manager.close();
   });
 
   it("settles agreement-aware external handoffs successfully with durable, bounded public lifecycle projections", async () => {
@@ -85,13 +143,13 @@ describe("local control-plane HTTP lifecycle", () => {
     const store = new ControlPlaneStore(stateRoot);
     const manager = new ControlPlaneManager(store, {
       runTaskSpec: async (specPath) => {
-        const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const party = spec.executionAgreement.phaseOwnership.implementation as "external_session" | "external_system";
+        const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const party = spec.executionAgreement.phaseOwnership.localValidation as "external_session" | "external_system";
         const status = party === "external_session" ? "awaiting_external_session" : "runforge_scope_completed";
         await mkdir(root, { recursive: true });
         await writeFile(join(root, "results.json"), JSON.stringify({
           schemaVersion: 1, contract: "runforge-task-result", taskId: spec.taskId, status,
-          agreement: { agreementId: "ea_v1_aaaaaaaaaaaaaaaaaaaaaaaa", profile: "custom", status: "in_progress", phaseOwnership: [{ phaseId: "taskAnalysis", responsibleParty: "runforge" }, { phaseId: "implementation", responsibleParty: party }], runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "implementation", responsibleParty: party }], awaitingPhases: [{ phaseId: "implementation", responsibleParty: party, prerequisites: ["local evidence"] }] },
-          next: { party, exactAction: `Complete implementation in ${party}.`, gates: [], evidence: [] },
+          agreement: { agreementId: "ea_v1_aaaaaaaaaaaaaaaaaaaaaaaa", profile: "custom", status: "in_progress", phaseOwnership: [{ phaseId: "taskAnalysis", responsibleParty: "runforge" }, { phaseId: "localValidation", responsibleParty: party }], runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "localValidation", responsibleParty: party }], awaitingPhases: [{ phaseId: "localValidation", responsibleParty: party, prerequisites: ["local evidence"] }] },
+          next: { party, exactAction: `Complete validation in ${party}.`, gates: [], evidence: [] },
           providerCalls: [{ stdout: "x".repeat(2_000_000), stderr: "", stdoutArtifact: "provider/iteration-0.stdout.log" }], ownerGate: { required: false, status: "not_required" }
         }));
         return {} as never;
@@ -100,15 +158,15 @@ describe("local control-plane HTTP lifecycle", () => {
     const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
 
     for (const [suffix, party] of [["SESSION", "external_session"], ["SYSTEM", "external_system"]] as const) {
-      const id = `CONTROL-HANDOFF-${suffix}-1`; const spec = { ...taskSpec(id), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", implementation: party } } };
+      const id = `CONTROL-HANDOFF-${suffix}-1`; const spec = { ...taskSpec(id), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", localValidation: party } } };
       const created = await json(await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec, authority: { implementation: true } }) }));
       const agreementId = created.executionAgreement.agreementId;
       expect(created.progress.agreement).toMatchObject({ schemaVersion: 1, agreementId, profile: "custom", currentPhase: "taskAnalysis", responsibleParty: "runforge" });
       await eventually(async () => (await manager.getTask(id)).status === "completed");
       const task = await json(await fetch(`${instance.url}/v1/tasks/${id}`));
-      expect(task).toMatchObject({ status: "completed", executionAgreement: { agreementId }, progress: { agreement: { schemaVersion: 1, agreementId, profile: "custom", currentPhase: "implementation", responsibleParty: party, runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "implementation", responsibleParty: party }], awaitingPhases: [{ phaseId: "implementation", responsibleParty: party, prerequisites: ["local evidence"] }], nextParty: party, nextAction: `Complete implementation in ${party}.`, conflicts: [], ownerGate: { required: false } } } });
+      expect(task).toMatchObject({ status: "completed", executionAgreement: { agreementId }, progress: { agreement: { schemaVersion: 1, agreementId, profile: "custom", currentPhase: "localValidation", responsibleParty: party, runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "localValidation", responsibleParty: party }], awaitingPhases: [{ phaseId: "localValidation", responsibleParty: party, prerequisites: ["local evidence"] }], nextParty: party, nextAction: `Complete validation in ${party}.`, conflicts: [], ownerGate: { required: false } } } });
       const response = await fetch(`${instance.url}/v1/tasks/${id}/result`); expect(response.status).toBe(200); const body = await response.text(); expect(body.length).toBeLessThan(30_000); const result = JSON.parse(body);
-      expect(result).toMatchObject({ status: party === "external_session" ? "awaiting_external_session" : "runforge_scope_completed", providerCalls: [{ stdoutArtifact: "provider/iteration-0.stdout.log" }], controlPlane: { status: "completed", agreement: { agreementId, currentPhase: "implementation", responsibleParty: party, nextParty: party }, responseBounds: { truncated: true, truncatedFields: ["providerCalls.0.stdout"] } } });
+      expect(result).toMatchObject({ status: party === "external_session" ? "awaiting_external_session" : "runforge_scope_completed", providerCalls: [{ stdoutArtifact: "provider/iteration-0.stdout.log" }], controlPlane: { status: "completed", agreement: { agreementId, currentPhase: "localValidation", responsibleParty: party, nextParty: party }, responseBounds: { truncated: true, truncatedFields: ["providerCalls.0.stdout"] } } });
       expect((await manager.cancelTask(id)).executionAgreement?.agreementId).toBe(agreementId);
       expect((await new ControlPlaneStore(stateRoot).getTask(id))?.executionAgreement?.agreementId).toBe(agreementId);
     }
@@ -178,6 +236,7 @@ describe("local control-plane HTTP lifecycle", () => {
     const repository = await syntheticRepository(); const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-DEADLINE-RETRY-1", repository);
     await eventually(async () => { await fetch(`${instance.url}/healthz`); return (await manager.getTask("CONTROL-DEADLINE-RETRY-1")).status === "interrupted"; });
     const interrupted = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1`)); const oldExecutionId = interrupted.progress.executionId;
+    expect(interrupted.progress.timeoutMs).toBe(30);
     expect(interrupted.recovery).toMatchObject({ reason: "execution_deadline_exceeded", retryAvailable: false, cleanupStatus: "pending" }); expect(interrupted.recovery.operation).toBeUndefined();
     expect(await json(await fetch(`${instance.url}/healthz`))).toMatchObject({ tasks: { active: 0, cleanupPending: 1 } });
     expect(await json(await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/result`))).toMatchObject({ status: "interrupted", interruption: { originalExecutionId: oldExecutionId }, targetMutation: { status: "not_inferred" }, safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true } });
@@ -185,6 +244,7 @@ describe("local control-plane HTTP lifecycle", () => {
     await eventually(async () => (await manager.getTask("CONTROL-DEADLINE-RETRY-1")).recovery?.retryAvailable === true); expect((await manager.getTask("CONTROL-DEADLINE-RETRY-1")).recovery?.cleanupStatus).toBe("completed");
     const retries = await Promise.all([fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" }), fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" })]); expect(retries.every((response) => response.status === 202)).toBe(true);
     const retryBodies = await Promise.all(retries.map(json)); expect(retryBodies[0]!.progress.executionId).toBe(retryBodies[1]!.progress.executionId); expect(retryBodies[0]!.progress.executionId).not.toBe(oldExecutionId); expect(retryBodies[0]!.progress.attempt).toBe(2);
+    expect(retryBodies[0]!.progress.timeoutMs).toBe(30); expect(Date.parse(retryBodies[0]!.progress.deadlineAt) - Date.parse(retryBodies[0]!.progress.startedAt)).toBe(30);
     await eventually(async () => (await manager.getTask("CONTROL-DEADLINE-RETRY-1")).status === "completed"); await new Promise((done) => setTimeout(done, 150));
     expect(await json(await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/result`))).toMatchObject({ status: "completed", marker: "new-attempt" }); expect(runs).toBe(2);
     const finalTask = await manager.getTask("CONTROL-DEADLINE-RETRY-1"); expect(finalTask.execution.attempts).toHaveLength(2); expect(new Set(finalTask.execution.attempts.map((attempt) => attempt.artifactRoot)).size).toBe(2);
@@ -225,4 +285,6 @@ async function json(response: Response): Promise<Record<string, any>> { return r
 async function eventually(check: () => Promise<boolean>): Promise<void> { for (let attempt = 0; attempt < 1_500; attempt += 1) { if (await check()) return; await new Promise((done) => setTimeout(done, 10)); } throw new Error("timed out"); }
 async function submit(base: string, taskId: string, repository = process.cwd()): Promise<void> { const response = await fetch(`${base}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: taskSpec(taskId, repository), authority: { implementation: true } }) }); if (response.status !== 202) throw new Error(`Task submission failed (${response.status}): ${JSON.stringify(await json(response))}`); }
 function taskSpec(taskId: string, repository = process.cwd()): Record<string, unknown> { return { schemaVersion: 2, taskId, task: { text: "Synthetic lifecycle", goal: "Exercise control plane", acceptanceCriteria: ["formal result"] }, target: { repository, workingDirectory: "." }, execution: { mode: "validation" }, authority: { profile: "read-only", allowProviderCalls: false }, validation: { mode: "explicit", commands: ["git status --short"] }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
+function implementationTaskSpec(taskId: string, repository = process.cwd()): Record<string, unknown> { return { ...taskSpec(taskId, repository), execution: { mode: "implementation", timeoutMs: 300_000 }, runtime: { preference: "local-disposable", externalNetwork: "allowed" }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true } }; }
+function implementationAuthority(): Record<string, boolean> { return { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }; }
 async function syntheticRepository(): Promise<string> { const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-interrupted-dogfood-repo-"))) - 1]!; execFileSync("git", ["init", "-q", "-b", "main"], { cwd: root }); execFileSync("git", ["config", "user.name", "RunForge Dogfood"], { cwd: root }); execFileSync("git", ["config", "user.email", "runforge-dogfood@example.invalid"], { cwd: root }); await writeFile(join(root, "README.md"), "# Synthetic interrupted recovery fixture\n"); execFileSync("git", ["add", "README.md"], { cwd: root }); execFileSync("git", ["commit", "-q", "-m", "fixture"], { cwd: root }); return root; }

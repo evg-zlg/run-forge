@@ -19,7 +19,7 @@ import {
   type ExecutionAgreementNegotiationRequest,
 } from "./execution-agreements.js";
 
-const executionTimeoutMs = 300_000;
+const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs;
 const heartbeatIntervalMs = 1_000;
 const staleHeartbeatMs = 15_000;
 const cleanupGraceMs = 2_000;
@@ -99,13 +99,13 @@ export class ControlPlaneManager {
     const specPath = await this.store.writeSpec(taskId, raw); let normalized: Awaited<ReturnType<typeof loadTaskSpecV2>>; try { normalized = await loadTaskSpecV2(specPath); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error), { operation: "start_new_task", newTaskRequired: true }); }
     const implementation = ["implementation", "repair"].includes(normalized.execution.mode);
     if (implementation && !input.authority.implementation) throw preflightError("implementation_authority_denied", "Implementation mode requires control-plane implementation authority.", normalized, input.authority);
-    if (implementation && !input.authority.localBranch) throw preflightError("mutation_authority_denied", "Implementation mode requires localBranch mutation authority for the disposable worktree.", normalized, input.authority);
-    if (implementation && !input.authority.localCommit) throw preflightError("local_commit_authority_denied", "Implementation mode requires localCommit authority.", normalized, input.authority);
     if (normalized.authority.allowProviderCalls && input.authority.providerCalls !== true) throw preflightError("provider_authority_denied", "TaskSpec allows provider calls but control-plane providerCalls authority is false.", normalized, input.authority);
     if ((normalized.authority.allowNetwork || normalized.runtime.externalNetwork === "allowed") && input.authority.network !== true) throw preflightError("network_authority_denied", "TaskSpec allows network but control-plane network authority is false.", normalized, input.authority);
     if (implementation && !normalized.authority.allowProviderCalls) throw preflightError("provider_permission_denied", "The implementation executor requires TaskSpec authority.allowProviderCalls=true.", normalized, input.authority);
     if (implementation && (!normalized.authority.allowNetwork || normalized.runtime.externalNetwork !== "allowed")) throw preflightError("network_permission_denied", "The implementation executor requires authority.allowNetwork=true and runtime.externalNetwork='allowed'.", normalized, input.authority);
     const preflightAgreement = negotiateTaskAgreement(normalized, input.authority);
+    if (runforgeOwns(preflightAgreement, "localBranch") && !input.authority.localBranch) throw preflightError("mutation_authority_denied", "The effective agreement requires localBranch authority for the RunForge-owned localBranch phase.", normalized, input.authority);
+    if (runforgeOwns(preflightAgreement, "localCommit") && !input.authority.localCommit) throw preflightError("local_commit_authority_denied", "The effective agreement requires localCommit authority for the RunForge-owned localCommit phase.", normalized, input.authority);
     assertAgreementAccepted(preflightAgreement, taskId);
     const executionAgreement = input.agreementId ? await this.getAgreement(input.agreementId) : preflightAgreement;
     assertAgreementAccepted(executionAgreement, taskId);
@@ -113,12 +113,13 @@ export class ControlPlaneManager {
     await this.store.saveAgreement(executionAgreement);
     const selected = ["implementation", "repair"].includes(normalized.execution.mode) ? await selectImplementationExecutor(normalized) : null;
     if (selected && !selected.selected) throw new ControlPlaneError(503, "implementation_executor_unavailable", selected.reason, { requestedMode: normalized.execution.mode, availableExecutors: selected.rejected.map((item) => item.id), rejectedAlternatives: selected.rejected, authorityFailures: [], operation: "start_new_task", newTaskRequired: true }, true, taskId);
+    const effectiveTimeoutMs = Math.min(normalized.execution.timeoutMs, this.timing.executionTimeoutMs, implementationExecutorContract.maxLimits.timeoutMs);
     const now = new Date().toISOString(); const task: ControlTaskRecord = {
       id: taskId, projectId: project?.id ?? null, status: "queued", specPath, artifactRoot, executionAgreement, authority: input.authority, publicationRequested,
       publicationGate: publicationRequested === "draft-pr" ? { required: true, status: "blocked_until_implementation_completes", reason: "Remote publication is a separate decision." } : { required: false, status: "not_requested" }, ownerGate: { required: false, status: "not_required" },
-      createdAt: now, updatedAt: now, startedAt: null, finishedAt: null, error: null, decisions: [], events: [], progress: progress(now), recovery: null,
+      createdAt: now, updatedAt: now, startedAt: null, finishedAt: null, error: null, decisions: [], events: [], progress: progress(now, effectiveTimeoutMs), recovery: null,
       execution: { attempt: 0, lease: null, attempts: [], lastRetry: null }, continuation: { schemaVersion: 1, state: "none", decisionId: null, executionId: null, sourceExecutionId: null },
-      selection: { requestedMode: normalized.execution.mode, normalizedMode: normalized.execution.mode, selectedExecutor: selected?.selected?.id ?? (normalized.execution.mode === "validation" ? "validation-lane" : "inspection-lane"), selectedRuntime: normalized.runtime.preference, selectionReason: selected?.reason ?? `Explicit ${normalized.execution.mode} mode uses its dedicated lane.`, rejectedAlternatives: selected?.rejected ?? [], authorityChecks: { inspect: input.authority.inspect, implementation: !implementation || input.authority.implementation, providerCalls: !normalized.authority.allowProviderCalls || input.authority.providerCalls === true, network: !normalized.authority.allowNetwork || input.authority.network === true, localBranch: !implementation || input.authority.localBranch, localCommit: !implementation || input.authority.localCommit, publicationForbidden: normalized.git.publication === "none" }, providerDecision: normalized.authority.allowProviderCalls ? "allowed" : "not_requested", networkDecision: normalized.runtime.externalNetwork === "allowed" ? "allowed" : "denied", provider: selected?.selected?.providerCalls ? "configured-local-credential" : null, model: selected?.selected?.model ?? null }
+      selection: { requestedMode: normalized.execution.mode, normalizedMode: normalized.execution.mode, selectedExecutor: selected?.selected?.id ?? (normalized.execution.mode === "validation" ? "validation-lane" : "inspection-lane"), selectedRuntime: normalized.runtime.preference, selectionReason: selected?.reason ?? `Explicit ${normalized.execution.mode} mode uses its dedicated lane.`, rejectedAlternatives: selected?.rejected ?? [], authorityChecks: { inspect: input.authority.inspect, implementation: !implementation || input.authority.implementation, providerCalls: !normalized.authority.allowProviderCalls || input.authority.providerCalls === true, network: !normalized.authority.allowNetwork || input.authority.network === true, localBranch: !runforgeOwns(executionAgreement, "localBranch") || input.authority.localBranch, localCommit: !runforgeOwns(executionAgreement, "localCommit") || input.authority.localCommit, publicationForbidden: normalized.git.publication === "none" }, providerDecision: normalized.authority.allowProviderCalls ? "allowed" : "not_requested", networkDecision: normalized.runtime.externalNetwork === "allowed" ? "allowed" : "denied", provider: selected?.selected?.providerCalls ? "configured-local-credential" : null, model: selected?.selected?.model ?? null }
     };
     task.progress.agreement = projectAgreementLifecycle(task);
     await this.persist(task, "task_created"); if (publicationRequested === "draft-pr") await this.persist(task, "publication_gate_created", "blocked_until_implementation_completes"); await this.beginAttempt(task, "execution"); return task;
@@ -188,7 +189,8 @@ export class ControlPlaneManager {
       await cp(previousRoot, artifactRoot, { recursive: true, force: true }); await rm(join(artifactRoot, "results.json"), { force: true });
     }
     task.artifactRoot = artifactRoot; task.specPath = specPath; task.status = operation === "continuation" ? "continuing" : "running"; task.startedAt ??= now.toISOString(); task.updatedAt = now.toISOString(); task.finishedAt = null; task.error = null; task.recovery = null;
-    task.progress = { phase: operation === "continuation" ? "continuation" : "task_execution", operation, startedAt: now.toISOString(), updatedAt: now.toISOString(), lastHeartbeatAt: now.toISOString(), executionId, attempt, workerStatus: "active", timeoutMs: this.timing.executionTimeoutMs, deadlineAt: new Date(now.getTime() + this.timing.executionTimeoutMs).toISOString(), summary: `${operation} worker active`, diagnostic: "Durable execution lease and worker promise are live.", agreement: task.progress.agreement ?? projectAgreementLifecycle(task) };
+    const effectiveTimeoutMs = task.progress.timeoutMs;
+    task.progress = { phase: operation === "continuation" ? "continuation" : "task_execution", operation, startedAt: now.toISOString(), updatedAt: now.toISOString(), lastHeartbeatAt: now.toISOString(), executionId, attempt, workerStatus: "active", timeoutMs: effectiveTimeoutMs, deadlineAt: new Date(now.getTime() + effectiveTimeoutMs).toISOString(), summary: `${operation} worker active`, diagnostic: "Durable execution lease and worker promise are live.", agreement: task.progress.agreement ?? projectAgreementLifecycle(task) };
     task.execution.attempt = attempt; task.execution.lease = { executionId, attempt, operation, state: "active", startedAt: now.toISOString(), revokedAt: null, cleanupDeadlineAt: null };
     task.execution.attempts.push({ executionId, attempt, operation, artifactRoot, specPath, startedAt: now.toISOString(), finishedAt: null, outcome: "active" });
     this.active.set(task.id, { executionId, operation, cancelled: false, controller: new AbortController() });
@@ -201,7 +203,7 @@ export class ControlPlaneManager {
     const task = await this.getTask(id); const worker = this.active.get(id); if (!worker || worker.executionId !== executionId || worker.cancelled || task.execution.lease?.executionId !== executionId) return;
     const heartbeat = setInterval(() => void this.heartbeat(id, executionId), this.timing.heartbeatIntervalMs); heartbeat.unref();
     try {
-      const rawWork: Promise<unknown> = operation === "continuation" ? this.operations.continueExecution({ run: task.artifactRoot, timeoutMs: this.timing.executionTimeoutMs }) : this.operations.runTaskSpec(task.specPath, { signal: worker.controller.signal, attempt: task.progress.attempt, executionId, onProgress: (phase, detail) => this.updateProgress(id, executionId, phase, detail) });
+      const rawWork: Promise<unknown> = operation === "continuation" ? this.operations.continueExecution({ run: task.artifactRoot, timeoutMs: task.progress.timeoutMs }) : this.operations.runTaskSpec(task.specPath, { signal: worker.controller.signal, attempt: task.progress.attempt, executionId, onProgress: (phase, detail) => this.updateProgress(id, executionId, phase, detail) });
       const work = rawWork.then((value) => { this.settledExecutions.add(executionId); return value; }, (error) => { this.settledExecutions.add(executionId); throw error; });
       await abortable(work, worker.controller.signal); if (worker.cancelled) return;
       await this.withLock(id, async () => { const current = await this.readTask(id); if (!this.executionIsCurrent(current, executionId)) return; await this.refreshFromResult(current, executionId); });
@@ -264,7 +266,8 @@ export class ControlPlaneManager {
   private async requireProject(id: string): Promise<ProjectRecord> { const project = await this.store.getProject(id); if (!project) throw new ControlPlaneError(404, "project_not_found", `Project not found: ${id}`); return project; }
 }
 
-function progress(now: string): ControlTaskRecord["progress"] { return { phase: "queued", operation: "execution", startedAt: null, updatedAt: now, lastHeartbeatAt: null, executionId: null, attempt: 0, workerStatus: "idle", timeoutMs: executionTimeoutMs, deadlineAt: null, summary: "Queued for execution.", diagnostic: null }; }
+function progress(now: string, timeoutMs = executionTimeoutMs): ControlTaskRecord["progress"] { return { phase: "queued", operation: "execution", startedAt: null, updatedAt: now, lastHeartbeatAt: null, executionId: null, attempt: 0, workerStatus: "idle", timeoutMs, deadlineAt: null, summary: "Queued for execution.", diagnostic: null }; }
+function runforgeOwns(agreement: ExecutionAgreement, phaseId: "localBranch" | "localCommit"): boolean { const phase = agreement.phases.find((item) => item.phaseId === phaseId); return phase?.requested === true && phase.responsibleParty === "runforge"; }
 function normalizeTask(task: ControlTaskRecord): ControlTaskRecord {
   task.progress ??= progress(task.updatedAt); task.progress.attempt ??= 1;
   task.execution ??= { attempt: task.progress.attempt, lease: task.progress.executionId ? { executionId: task.progress.executionId, attempt: task.progress.attempt, operation: task.progress.operation as "execution" | "continuation", state: ["running", "continuing"].includes(task.status) ? "active" : "finished", startedAt: task.progress.startedAt ?? task.updatedAt, revokedAt: null, cleanupDeadlineAt: null } : null, attempts: [], lastRetry: null };

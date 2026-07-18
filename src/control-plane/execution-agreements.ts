@@ -63,7 +63,7 @@ export function negotiateControlPlaneAgreement(request: ExecutionAgreementNegoti
 }
 
 export function negotiateTaskAgreement(spec: TaskSpecV2, authority: ControlAuthority): ExecutionAgreement {
-  const requested = spec.authority.allowProviderCalls ? undefined : { providerModelCalls: false };
+  const requested = requestedPhasesForMode(spec);
   return negotiateExecutionAgreement({
     profile: spec.executionAgreement.profile,
     requested,
@@ -72,6 +72,16 @@ export function negotiateTaskAgreement(spec: TaskSpecV2, authority: ControlAutho
     authority: taskPhaseAuthority(authority),
     policy: controlPlaneAgreementPolicy,
   });
+}
+
+function requestedPhasesForMode(spec: TaskSpecV2): PhaseBooleanMap | undefined {
+  if (["implementation", "repair"].includes(spec.execution.mode)) {
+    return spec.authority.allowProviderCalls ? undefined : { providerModelCalls: false };
+  }
+  const allowed = new Set<ExecutionPhaseId>(spec.execution.mode === "inspection"
+    ? ["projectDiscovery", "taskAnalysis"]
+    : ["projectDiscovery", "taskAnalysis", "localValidation"]);
+  return Object.fromEntries(EXECUTION_PHASE_IDS.filter((phase) => !allowed.has(phase)).map((phase) => [phase, false])) as PhaseBooleanMap;
 }
 
 export function assertAgreementAccepted(agreement: ExecutionAgreement, taskId?: string): void {
@@ -89,6 +99,8 @@ export function assertAgreementMatchesTask(agreement: ExecutionAgreement, spec: 
     throw new ControlPlaneError(409, "execution_agreement_mismatch", `Stored agreement profile '${agreement.profile}' does not match TaskSpec profile '${spec.executionAgreement.profile}'.`, { agreementId: agreement.agreementId }, false, spec.taskId);
   }
   for (const [phaseId, party] of Object.entries(spec.executionAgreement.phaseOwnership ?? {})) {
+    const expectedPhase = expected?.phases.find((item) => item.phaseId === phaseId);
+    if (expectedPhase && !expectedPhase.requested) continue;
     const phase = agreement.phases.find((item) => item.phaseId === phaseId);
     if (!phase || phase.responsibleParty !== party) {
       throw new ControlPlaneError(409, "execution_agreement_mismatch", `Stored agreement ownership for '${phaseId}' does not match the TaskSpec.`, { agreementId: agreement.agreementId }, false, spec.taskId);
