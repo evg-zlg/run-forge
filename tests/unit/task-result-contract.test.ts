@@ -13,9 +13,14 @@ import {
   externalResultContract,
   validateTaskResultContract,
 } from "../../src/product/task-result-contract.js";
+import { validateTaskResultContract as validateTaskResultContractDirect } from "../../src/product/task-result-validation.js";
 import type { ExternalExecutionResult } from "../../src/run/external-execution.js";
 
 describe("agreement-aware task result contract", () => {
+  it("preserves the public validator import path", () => {
+    expect(validateTaskResultContract).toBe(validateTaskResultContractDirect);
+  });
+
   it("defines only the terminal completion statuses", () => {
     expect(RUNFORGE_COMPLETION_STATUSES).toEqual([
       "runforge_scope_completed", "workflow_completed", "awaiting_external_session", "awaiting_owner",
