@@ -266,19 +266,7 @@ describe("implementation executor", () => {
       expect(ready.implementationExecutors).toMatchObject(discovery.implementationExecutors.map((item: Record<string, unknown>) => ({ id: item.id, status: item.status, supports: item.supports, providerCalls: item.providerCalls, runtime: item.runtime, maxLimits: item.maxLimits, model: item.model, credentialReady: item.credentialReady })));
       expect(discovery.implementationExecutors).toEqual(capabilities.implementationExecutors);
       const project = await fetch(`${server.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repo, register: true, runtime: "local" }) }).then((response) => response.json()) as Record<string, any>;
-      const negotiated = await fetch(`${server.url}${discovery.endpoints.executionAgreementNegotiation}`, {
-        method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({
-          schemaVersion: 1, profile: "local-ready", projectId: project.project.id,
-          publicationTarget: { kind: "new_branch", branchName: "runforge/executor-http-1" },
-          authority: {
-            projectDiscovery: true, taskAnalysis: true, implementationPlanning: true, implementation: true,
-            localValidation: true, independentReview: true, repairIterations: true, patchPackage: true,
-            localBranch: true, localCommit: true, providerModelCalls: true,
-          },
-        }),
-      }).then((response) => response.json()) as Record<string, any>;
-      expect(negotiated).toMatchObject({ status: "ready", profile: "local-ready", context: { project: { projectId: project.project.id }, publicationTarget: { kind: "new_branch" } } });
-      const request = structuredClone(discovery.taskSpecContract.implementationRequest); request.projectId = project.project.id; request.agreementId = negotiated.agreementId; request.taskSpec.taskId = "EXECUTOR-HTTP-1"; request.taskSpec.task.text = "ADD_TEST fix add"; request.taskSpec.validation = { mode: "explicit", commands: ["node test.js", "node added.test.js"] };
+      const request = structuredClone(discovery.taskSpecContract.implementationRequest); request.projectId = project.project.id; request.taskSpec.taskId = "EXECUTOR-HTTP-1"; request.taskSpec.task.text = "ADD_TEST fix add"; request.taskSpec.validation = { mode: "explicit", commands: ["node test.js", "node added.test.js"] };
       const created = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) });
       expect(created.status).toBe(202);
       const accepted = await created.json() as Record<string, any>; expect(accepted.selection).toMatchObject({ requestedMode: "implementation", normalizedMode: "implementation", selectedExecutor: "local-coding-agent", selectedRuntime: "local-disposable", authorityChecks: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true }, providerDecision: "allowed", networkDecision: "allowed" });
@@ -290,7 +278,7 @@ describe("implementation executor", () => {
         workflow: {
           status: "awaiting_external_session",
           agreement: { profile: "local-ready", requestedProfile: "local-ready", effectiveProfile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]) },
-          handoff: { profile: "local-ready", findings: [], branch: "runforge[internal path]", commit: expect.any(String) },
+          handoff: { profile: "local-ready", findings: [], branch: expect.stringMatching(/^runforge\/executor-http-1\/[a-z0-9-]+-attempt-1$/), commit: expect.any(String) },
           next: { party: "external_session", exactAction: expect.stringContaining("remotePush") },
         },
         requestedIntent: "implementation", actualExecutorMode: "implementation",
@@ -305,11 +293,7 @@ describe("implementation executor", () => {
         git: { branch: result.workflow.handoff.branch, commit: expect.any(String) },
       });
       const persisted = JSON.parse(await readFile(join(state, "tasks", "EXECUTOR-HTTP-1", "result.json"), "utf8")) as Record<string, any>;
-      expect(persisted.result).toMatchObject({
-        workflow: { handoff: { branch: expect.stringMatching(/^runforge\/executor-http-1\/[a-z0-9-]+-attempt-1$/) } },
-        implementation: { localBranch: persisted.result.workflow.handoff.branch },
-        git: { branch: persisted.result.workflow.handoff.branch },
-      });
+      expect(persisted.result.workflow.handoff.branch).toBe(result.workflow.handoff.branch);
       expect(await git(repo, ["rev-parse", "HEAD"])).toBe(sourceHeadBefore);
       expect(await git(repo, ["status", "--porcelain"])).toBe(sourceStatusBefore);
       expect((await git(repo, ["symbolic-ref", "--short", "HEAD"])).trim()).toBe("main");

@@ -125,7 +125,7 @@ export function assertAgreementMatchesTask(agreement: ExecutionAgreement, spec: 
   }
   if (expected) for (const expectedPhase of expected.phases) {
     const phase = agreement.phases.find((item) => item.phaseId === expectedPhase.phaseId);
-    const expectedRequested = taskExpectedPhaseRequested(agreement, spec, expectedPhase.phaseId, expectedPhase.requested);
+    const expectedRequested = taskExpectedPhaseRequested(agreement, spec, expectedPhase.phaseId, expectedPhase.requested, agreement.agreementId !== expected.agreementId);
     const expectedParty = expectedRequested ? expectedPhase.responsibleParty : "nobody";
     if (!phase || phase.requested !== expectedRequested || phase.responsibleParty !== expectedParty) {
       throw new ControlPlaneError(409, "execution_agreement_mismatch", `Stored agreement request for '${expectedPhase.phaseId}' does not match the TaskSpec.`, { agreementId: agreement.agreementId }, false, spec.taskId);
@@ -138,9 +138,10 @@ function taskExpectedPhaseRequested(
   spec: TaskSpecV2,
   phaseId: ExecutionPhaseId,
   requested: boolean,
+  referencedAgreement: boolean,
 ): boolean {
   const target = agreement.context?.publicationTarget;
-  if (target?.kind !== "none" || !["assist-only", "local-ready"].includes(spec.executionAgreement.profile)) return requested;
+  if (!referencedAgreement || target?.kind !== "none" || !["assist-only", "local-ready"].includes(spec.executionAgreement.profile)) return requested;
   return (["remotePush", "draftPublication", "ciMonitoring", "ciRepair"] as readonly ExecutionPhaseId[]).includes(phaseId) ? false : requested;
 }
 

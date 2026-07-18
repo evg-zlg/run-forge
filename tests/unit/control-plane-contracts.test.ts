@@ -153,25 +153,52 @@ describe("control-plane contracts", () => {
     ]));
   });
 
-  it("matches a referenced local-ready task without re-requesting phases suppressed by its none target", () => {
+  it.each(["assist-only", "local-ready"] as const)("matches a referenced %s task without re-requesting phases suppressed by its none target", (profile) => {
     const context = {
       project: null,
       policy: { sources: ["installation"], hardBoundaries: [], runforgeMd: { present: false, path: null, authorityEscalationTrusted: false as const } },
       publicationTarget: { kind: "none" as const },
     };
     const agreement = negotiateControlPlaneAgreement(
-      parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "local-ready", publicationTarget: { kind: "none" }, authority: localReadyAuthority() }),
+      parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile, publicationTarget: { kind: "none" }, authority: localReadyAuthority() }),
       technicalCapabilitiesForExecutor(true),
       context,
     );
     const spec = {
-      taskId: "LOCAL-READY-REFERENCE-1",
+      taskId: `${profile.toUpperCase()}-REFERENCE-1`,
+      execution: { mode: "implementation" },
+      executionAgreement: { schemaVersion: 1, profile },
+      authority: { allowProviderCalls: true },
+    } as TaskSpecV2;
+    const authority = defaultAuthority({ implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true });
+    expect(() => assertAgreementMatchesTask(agreement, spec, negotiateTaskAgreement(spec, authority))).not.toThrow();
+  });
+
+  it("matches an auto-negotiated agreement against its own preflight identity", () => {
+    const spec = {
+      taskId: "AUTO-AGREEMENT-1",
       execution: { mode: "implementation" },
       executionAgreement: { schemaVersion: 1, profile: "local-ready" },
       authority: { allowProviderCalls: true },
     } as TaskSpecV2;
     const authority = defaultAuthority({ implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true });
-    expect(() => assertAgreementMatchesTask(agreement, spec, negotiateTaskAgreement(spec, authority))).not.toThrow();
+    const agreement = negotiateTaskAgreement(spec, authority, {
+      project: null,
+      policy: { sources: ["installation"], hardBoundaries: [], runforgeMd: { present: false, path: null, authorityEscalationTrusted: false } },
+      publicationTarget: { kind: "none" },
+    });
+    expect(agreement.phases).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phaseId: "remotePush", requested: true, responsibleParty: "external_session" }),
+    ]));
+    const identicalExpected = structuredClone(agreement);
+    expect(identicalExpected.agreementId).toBe(agreement.agreementId);
+    expect(() => assertAgreementMatchesTask(agreement, spec, identicalExpected)).not.toThrow();
+
+    const mismatched = structuredClone(agreement);
+    const remotePush = mismatched.phases.find((phase) => phase.phaseId === "remotePush");
+    if (!remotePush) throw new Error("remotePush phase missing from agreement");
+    remotePush.requested = false; remotePush.responsibleParty = "nobody";
+    expect(() => assertAgreementMatchesTask(mismatched, spec, identicalExpected)).toThrow("does not match the TaskSpec");
   });
 
   it("bounds verbose public diagnostics while retaining compact result fields", () => {
@@ -181,16 +208,18 @@ describe("control-plane contracts", () => {
     expect(bounded.truncatedFields).toEqual(["providerCalls.0.stdout"]);
   });
 
-  it("redacts token families and internal paths from public values", () => {
+  it("redacts token families and absolute paths while preserving relative Git branch refs", () => {
     const githubToken = ["gh", "o_", "d".repeat(24)].join("");
     const gitlabToken = ["gl", "pat-", "e".repeat(24)].join("");
     const bearerToken = ["Bear", "er ", "f".repeat(24)].join("");
     const internalPath = ["/pri", "vate/tmp/runforge/private.log"].join("");
-    const redacted = redactPublicValue({ message: `${githubToken} ${gitlabToken} ${bearerToken} ${internalPath}` });
+    const branch = "runforge/task/slug-attempt-1";
+    const redacted = redactPublicValue({ message: `${githubToken} ${gitlabToken} ${bearerToken} ${internalPath} ${branch}` });
     const publicText = JSON.stringify(redacted);
     for (const sensitive of [githubToken, gitlabToken, bearerToken, internalPath]) expect(publicText).not.toContain(sensitive);
     expect(publicText).toContain("[REDACTED_TOKEN]");
     expect(publicText).toContain("[internal path]");
+    expect(publicText).toContain(branch);
   });
 
   it("recovers in-flight state as interrupted without inferring success", async () => {
