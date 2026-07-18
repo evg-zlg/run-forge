@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { defaultAuthority, parseDecisionRequest, parseTaskRequest, type ControlTaskRecord } from "../../src/control-plane/contracts.js";
 import { assertAgreementMatchesTask, executionAgreementCapabilities, negotiateControlPlaneAgreement, negotiateTaskAgreement, parseExecutionAgreementNegotiationRequest, technicalCapabilitiesForExecutor } from "../../src/control-plane/execution-agreements.js";
-import { boundPublicResult, redactPublicValue } from "../../src/control-plane/manager.js";
+import { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "../../src/control-plane/manager.js";
+import { boundPublicResult as extractedBoundPublicResult, projectAgreementLifecycle as extractedProjectAgreementLifecycle, redactPublicValue as extractedRedactPublicValue } from "../../src/control-plane/manager-results.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 import type { TaskSpecV2 } from "../../src/product/task-spec-v2.js";
 
@@ -12,6 +13,12 @@ const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
 
 describe("control-plane contracts", () => {
+  it("preserves manager result helper exports after extraction", () => {
+    expect(boundPublicResult).toBe(extractedBoundPublicResult);
+    expect(projectAgreementLifecycle).toBe(extractedProjectAgreementLifecycle);
+    expect(redactPublicValue).toBe(extractedRedactPublicValue);
+  });
+
   it("defaults to inspect-only and enforces authority hierarchy", () => {
     expect(defaultAuthority(undefined)).toMatchObject({ inspect: true, implementation: false, remotePush: false, merge: false, deploy: false });
     expect(() => defaultAuthority({ localCommit: true })).toThrow("localBranch");

@@ -1,17 +1,15 @@
 import { createHash, randomUUID } from "node:crypto";
-import { access, cp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
-import { realpath } from "node:fs/promises";
+import { access, cp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { buildDoctorReport } from "../product/doctor.js";
 import { runTaskSpecFile } from "../product/task-spec-runner.js";
 import { loadTaskSpecV2 } from "../product/task-spec-v2.js";
 import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor, taskRuntimeIds } from "../product/task-spec-contract.js";
 import { continueExternalExecution, recordOwnerDecision } from "../run/external-execution.js";
-import { ControlPlaneError, type AgreementLifecycleProjection, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
+import { ControlPlaneError, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
 import { ControlPlaneStore } from "./state.js";
 import { discoverImplementationExecutors, selectImplementationExecutor } from "../implementation/executor.js";
-import type { ExecutionAgreement } from "../product/execution-agreement.js";
-import type { ExecutionAgreementContext } from "../product/execution-agreement.js";
+import type { ExecutionAgreement, ExecutionAgreementContext } from "../product/execution-agreement.js";
 import { inspectProject } from "../product/project-inspection.js";
 import {
   assertAgreementAccepted,
@@ -21,12 +19,12 @@ import {
   technicalCapabilitiesForExecutor,
   type ExecutionAgreementNegotiationRequest,
 } from "./execution-agreements.js";
-
+import { boundPublicResult, projectAgreementLifecycle, publicResultLimits, redactPublicValue, settleAcceptedAgreement } from "./manager-results.js";
+export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
 const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs;
 const heartbeatIntervalMs = 1_000;
 const staleHeartbeatMs = 15_000;
 const cleanupGraceMs = 2_000;
-
 function agreementHardBoundaries(): string[] {
   return [
     "No GitHub or GitLab push, PR/MR creation, or existing-change update adapter is available.",
@@ -35,10 +33,8 @@ function agreementHardBoundaries(): string[] {
     "RUNFORGE.md supplies project defaults only and cannot grant authority or relax hard boundaries.",
   ];
 }
-
 type ActiveWorker = { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController };
 type ContinuationBinding = { taskId: string; projectId: string | null; repository: string; workingDirectory: string; sourceBranch: string; sourceSha: string };
-
 export class ControlPlaneManager {
   private readonly active = new Map<string, ActiveWorker>();
   private readonly settledExecutions = new Set<string>();
@@ -50,10 +46,8 @@ export class ControlPlaneManager {
     private readonly operations: { runTaskSpec: typeof runTaskSpecFile; recordOwnerDecision: typeof recordOwnerDecision; continueExecution: typeof continueExternalExecution } = { runTaskSpec: runTaskSpecFile, recordOwnerDecision, continueExecution: continueExternalExecution },
     private readonly timing: { heartbeatIntervalMs: number; staleHeartbeatMs: number; executionTimeoutMs: number; cleanupGraceMs?: number } = { heartbeatIntervalMs, staleHeartbeatMs, executionTimeoutMs, cleanupGraceMs }
   ) {}
-
   async initialize(): Promise<void> { await this.store.initialize(); this.watchdog ??= setInterval(() => void this.watchdogTick(), Math.min(this.timing.staleHeartbeatMs, 5_000)); this.watchdog.unref(); }
   close(): void { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; for (const worker of this.active.values()) worker.controller.abort(); this.active.clear(); }
-
   async inspectProject(input: { path: string; workingDirectory: string; register: boolean; runtime?: "local" | "docker"; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing" }): Promise<Record<string, unknown>> {
     const report = await buildDoctorReport({ repo: input.path, workingDirectory: input.workingDirectory, runtime: input.runtime, dependencyPreparation: input.dependencyPreparation, publication: "none" });
     let project: ProjectRecord | null = null;
@@ -64,7 +58,6 @@ export class ControlPlaneManager {
     }
     return { project, readiness: { ...report, checks: report.checks.map((item) => item.id === "implementation_executor" && item.status !== "passed" ? { ...item, summary: "Implementation executor or its existing credential mechanism is not ready; no credential data is exposed." } : item), implementationExecutors: report.implementationExecutors.map((item) => ({ id: item.id, status: item.status, supports: item.supports, providerCalls: item.providerCalls, runtime: item.runtime, providerRequirements: item.providerRequirements, networkRequirements: item.networkRequirements, maxLimits: item.maxLimits, model: item.model, credentialReady: item.status === "ready", limitations: item.status === "ready" ? [] : ["Implementation executor or its existing credential mechanism is not ready; no credential data is exposed."] })) } };
   }
-
   async negotiateAgreement(input: ExecutionAgreementNegotiationRequest): Promise<ExecutionAgreement> {
     const project = input.projectId ? await this.requireProject(input.projectId) : null;
     const [executors, context] = await Promise.all([discoverImplementationExecutors(), this.executionAgreementContext(project, input.publicationTarget ?? { kind: "none" })]);
@@ -72,19 +65,16 @@ export class ControlPlaneManager {
     await this.store.saveAgreement(agreement);
     return agreement;
   }
-
   async getAgreement(id: string): Promise<ExecutionAgreement> {
     const agreement = await this.store.getAgreement(id);
     if (!agreement) throw new ControlPlaneError(404, "execution_agreement_not_found", `Execution Agreement not found: ${id}`);
     return agreement;
   }
-
   async getTaskAgreement(id: string): Promise<ExecutionAgreement> {
     const task = await this.readTask(id);
     if (!task.executionAgreement) throw new ControlPlaneError(404, "task_execution_agreement_not_found", `Task has no persisted Execution Agreement: ${id}`, undefined, false, id);
     return task.executionAgreement;
   }
-
   async createTask(input: { projectId?: string; taskSpec: Record<string, unknown>; authority: ControlAuthority; publicationRequested: "none" | "draft-pr"; agreementId?: string }): Promise<ControlTaskRecord> {
     const raw = structuredClone(input.taskSpec); const project = input.projectId ? await this.requireProject(input.projectId) : null; const taskId = requiredString(raw.taskId, "taskSpec.taskId");
     if (await this.store.getTask(taskId)) throw new ControlPlaneError(409, "task_exists", `Task already exists: ${taskId}`, undefined, false, taskId);
@@ -143,7 +133,6 @@ export class ControlPlaneManager {
     task.progress.agreement = projectAgreementLifecycle(task);
     await this.persist(task, "task_created"); if (publicationRequested === "draft-pr") await this.persist(task, "publication_gate_created", "blocked_until_implementation_completes"); await this.beginAttempt(task, "execution"); return task;
   }
-
   async getTask(id: string): Promise<ControlTaskRecord> { return this.withLock(id, async () => {
     const task = await this.readTask(id); await this.advanceRecovery(task);
     if (task.status === "failed" && !task.recovery) {
@@ -152,8 +141,7 @@ export class ControlPlaneManager {
     }
     return task;
   }); }
-  async getResult(id: string): Promise<Record<string, unknown>> { const task = await this.getTask(id); let published = await this.store.readPublishedResult(id); if (!published && task.status === "interrupted") { await this.writeInterruptedResult(task); published = await this.store.readPublishedResult(id); } if (!published || published.executionId !== task.progress.executionId) throw new ControlPlaneError(404, "result_not_ready", `Result is not available for active execution ${task.progress.executionId ?? "pending"}.`, undefined, true, id); const bounded = boundPublicResult(published.result); const agreement = projectAgreementLifecycle(task, published.result); return { ...bounded.result, ...(task.recovery ? { recovery: task.recovery } : {}), controlPlane: { status: task.status, progress: { ...task.progress, agreement }, agreement, ...(task.executionAgreement ? { executionAgreement: task.executionAgreement } : {}), recovery: task.recovery, ownerGate: task.ownerGate, publicationGate: task.publicationGate, authority: task.authority, ...(bounded.truncatedFields.length ? { responseBounds: { truncated: true, maxDiagnosticBytes: publicDiagnosticBytes, maxStringBytes: publicStringBytes, truncatedFields: bounded.truncatedFields } } : {}) } }; }
-
+  async getResult(id: string): Promise<Record<string, unknown>> { const task = await this.getTask(id); let published = await this.store.readPublishedResult(id); if (!published && task.status === "interrupted") { await this.writeInterruptedResult(task); published = await this.store.readPublishedResult(id); } if (!published || published.executionId !== task.progress.executionId) throw new ControlPlaneError(404, "result_not_ready", `Result is not available for active execution ${task.progress.executionId ?? "pending"}.`, undefined, true, id); const bounded = boundPublicResult(published.result); const agreement = projectAgreementLifecycle(task, published.result); return { ...bounded.result, ...(task.recovery ? { recovery: task.recovery } : {}), controlPlane: { status: task.status, progress: { ...task.progress, agreement }, agreement, ...(task.executionAgreement ? { executionAgreement: task.executionAgreement } : {}), recovery: task.recovery, ownerGate: task.ownerGate, publicationGate: task.publicationGate, authority: task.authority, ...(bounded.truncatedFields.length ? { responseBounds: { truncated: true, ...publicResultLimits, truncatedFields: bounded.truncatedFields } } : {}) } }; }
   async ownerDecision(id: string, input: { decisionId: string; decision: string; targetBranch?: string; note: string }): Promise<Record<string, unknown>> { return this.withLock(id, async () => {
     const task = await this.readTask(id); const duplicate = task.decisions.find((item) => item.kind === "owner" && item.decisionId === input.decisionId);
     if (duplicate) { if (duplicate.decision !== input.decision) throw new ControlPlaneError(409, "idempotency_conflict", "The decision ID was already used for a different decision.", undefined, false, id); return { idempotentReplay: true, ...duplicate.response }; }
@@ -165,7 +153,6 @@ export class ControlPlaneManager {
     const response = { decisionId: input.decisionId, runforgeDecisionId: recorded.decisionId, artifact: basename(recorded.path), decision: input.decision, targetBranch };
     task.decisions.push(decisionRecord(input.decisionId, "owner", input.decision, response)); task.continuation.decisionId = input.decisionId; const snapshot = await this.store.readContinuation(id); if (snapshot) await this.store.saveContinuation(id, { ...snapshot, decisionId: input.decisionId }); task.ownerGate = { required: ["approve", "continue"].includes(input.decision), status: input.decision === "reject" ? "rejected" : input.decision === "hold" ? "on_hold" : "decision_recorded" }; task.updatedAt = new Date().toISOString(); await this.persist(task, "owner_decision_recorded", input.decision); return response;
   }); }
-
   async continueTask(id: string): Promise<ControlTaskRecord> { return this.withLock(id, async () => {
     const task = await this.readTask(id); if (task.continuation.state === "consumed" || task.status === "completed") return task;
     const live = this.liveWorker(task); if (live?.operation === "continuation" || live && ["running", "continuing"].includes(task.status)) return task;
@@ -174,7 +161,6 @@ export class ControlPlaneManager {
     if (!(await this.restoreContinuation(task))) { await this.markContinuationUnrecoverable(task); throw new ControlPlaneError(409, "continuation_state_unrecoverable", "Continuation state is missing or corrupt and could not be safely reconstructed.", { recoveryActions: task.recovery?.actions }, false, id); }
     await this.persist(task, "continuation_requested"); await this.beginAttempt(task, "continuation"); return task;
   }); }
-
   async retryTask(id: string): Promise<ControlTaskRecord> { return this.withLock(id, async () => {
     const task = await this.readTask(id); await this.advanceRecovery(task);
     if (["running", "continuing"].includes(task.status) && task.execution.lastRetry?.executionId === task.progress.executionId) return task;
@@ -192,11 +178,8 @@ export class ControlPlaneManager {
     return task;
   }); }
   async cancelTask(id: string): Promise<ControlTaskRecord> { return this.withLock(id, async () => { const task = await this.readTask(id); if (["completed", "failed", "interrupted"].includes(task.status)) return task; await this.interrupt(task, "cancelled_by_operator", ["retry"]); task.progress.workerStatus = "cancelled"; task.progress.summary = "Cancelled by operator."; await this.store.saveTask(task); await this.writeInterruptedResult(task); return task; }); }
-
   async publicationDecision(id: string, input: { decisionId: string; decision: string; note: string }): Promise<Record<string, unknown>> { return this.withLock(id, async () => { const task = await this.readTask(id); const duplicate = task.decisions.find((item) => item.kind === "publication" && item.decisionId === input.decisionId); if (duplicate) return { idempotentReplay: true, ...duplicate.response }; if (!task.publicationGate.required) throw new ControlPlaneError(409, "publication_gate_not_open", "This task has no publication gate."); const permitted = task.authority.remotePush && task.authority.draftPublication; const status = input.decision === "approve" ? permitted ? "approved_adapter_required" : "blocked_missing_authority" : input.decision === "reject" ? "rejected" : "on_hold"; const response = { decisionId: input.decisionId, decision: input.decision, status, executed: false, providerCalls: false, reason: status === "blocked_missing_authority" ? "remotePush and draftPublication authority are required." : "Publication execution is separate." }; task.decisions.push(decisionRecord(input.decisionId, "publication", input.decision, response)); task.publicationGate = { required: status !== "rejected", status, reason: response.reason }; task.updatedAt = new Date().toISOString(); await this.persist(task, "publication_gate_created", status); return response; }); }
-
   async health(): Promise<Record<string, unknown>> { await this.watchdogTick(); const [tasks, implementationExecutors] = await Promise.all([Promise.all((await this.store.listTasks()).map((task) => this.getTask(task.id))), discoverImplementationExecutors()]); const now = Date.now(); const active = tasks.filter((task) => Boolean(this.liveWorker(task))); const ages = active.map((t) => now - Date.parse(t.progress.lastHeartbeatAt ?? t.updatedAt)); const stalled = tasks.filter((t) => t.progress.workerStatus === "stalled" || t.recovery?.cleanupStatus === "pending" || t.recovery?.cleanupStatus === "detached"); const implementationReady = implementationExecutors.some((item) => item.status === "ready"); return { schemaVersion: 1, service: { status: "healthy", localOnly: true }, readiness: { acceptingNewTasks: true, acceptingImplementationTasks: implementationReady, status: stalled.length || !implementationReady ? "ready_with_degraded_capabilities" : "ready" }, implementationExecutors: implementationExecutors.map((item) => ({ id: item.id, status: item.status, supports: item.supports, providerCalls: item.providerCalls, runtime: item.runtime, maxLimits: item.maxLimits, model: item.model, credentialReady: item.status === "ready", reason: item.status === "ready" ? "Existing credential mechanism is ready." : "Implementation executor or its existing credential mechanism is not ready; no credential data is exposed." })), tasks: { active: active.length, cleanupPending: tasks.filter((t) => t.recovery?.cleanupStatus === "pending").length, awaitingOwnerDecisions: tasks.filter((t) => t.status === "awaiting_owner_decision").length, interrupted: tasks.filter((t) => t.status === "interrupted").length, stalled: stalled.length, oldestHeartbeatAgeMs: ages.length ? Math.max(...ages) : 0 } }; }
-
   private async beginAttempt(task: ControlTaskRecord, operation: "execution" | "continuation", retrySource?: string): Promise<void> {
     const executionId = randomUUID(); const attempt = task.execution.attempt + 1; const now = new Date();
     let artifactRoot = task.artifactRoot; let specPath = task.specPath;
@@ -328,7 +311,6 @@ export class ControlPlaneManager {
   private async withLock<T>(id: string, action: () => Promise<T>): Promise<T> { const previous = this.locks.get(id) ?? Promise.resolve(); let release!: () => void; const next = new Promise<void>((done) => { release = done; }); const tail = previous.then(() => next); this.locks.set(id, tail); await previous; try { return await action(); } finally { release(); if (this.locks.get(id) === tail) this.locks.delete(id); } }
   private async readTask(id: string): Promise<ControlTaskRecord> { const task = await this.store.getTask(id); if (!task) throw new ControlPlaneError(404, "task_not_found", `Task not found: ${id}`, undefined, false, id); return normalizeTask(task); }
   private async requireProject(id: string): Promise<ProjectRecord> { const project = await this.store.getProject(id); if (!project) throw new ControlPlaneError(404, "project_not_found", `Project not found: ${id}`); return project; }
-
   private async assertAgreementProjectBinding(agreement: ExecutionAgreement, project: ProjectRecord | null, taskId: string): Promise<void> {
     const bound = agreement.context?.project;
     if (!bound) {
@@ -350,7 +332,6 @@ export class ControlPlaneManager {
       throw new ControlPlaneError(409, "execution_agreement_source_stale", "The referenced Execution Agreement was negotiated for a different project source identity.", { agreementId: agreement.agreementId, projectId: project.id, operation: "renegotiate_execution_agreement", newTaskRequired: true }, false, taskId);
     }
   }
-
   private async executionAgreementContext(project: ProjectRecord | null, publicationTarget: ExecutionAgreementContext["publicationTarget"]): Promise<ExecutionAgreementContext> {
     if (!project) return {
       project: null,
@@ -378,7 +359,6 @@ export class ControlPlaneManager {
     };
   }
 }
-
 function progress(now: string, timeoutMs = executionTimeoutMs): ControlTaskRecord["progress"] { return { phase: "queued", operation: "execution", startedAt: null, updatedAt: now, lastHeartbeatAt: null, executionId: null, attempt: 0, workerStatus: "idle", timeoutMs, deadlineAt: null, summary: "Queued for execution.", diagnostic: null }; }
 function runforgeOwns(agreement: ExecutionAgreement, phaseId: "localBranch" | "localCommit"): boolean { const phase = agreement.phases.find((item) => item.phaseId === phaseId); return phase?.requested === true && phase.responsibleParty === "runforge"; }
 function implementationParty(agreement: ExecutionAgreement): "external_session" | "external_system" | null { const phase = agreement.phases.find((item) => item.phaseId === "implementation"); return phase?.requested === true && (phase.responsibleParty === "external_session" || phase.responsibleParty === "external_system") ? phase.responsibleParty : null; }
@@ -389,120 +369,6 @@ function normalizeTask(task: ControlTaskRecord): ControlTaskRecord {
   if (task.recovery) { const retryAvailable = task.recovery.retryAvailable ?? Boolean(task.recovery.operation); const cleanupPending = ["pending", "detached"].includes(task.recovery.cleanupStatus); task.recovery = { ...task.recovery, originalExecutionId: task.recovery.originalExecutionId ?? task.progress.executionId, retryAvailable, cleanupStatus: task.recovery.cleanupStatus ?? "not_required", ...(!task.recovery.operation && !cleanupPending ? { operation: retryAvailable ? `/v1/tasks/${task.id}/retry` : "start_new_task" } : {}), prerequisites: task.recovery.prerequisites ?? (retryAvailable ? ["Previous worker cleanup must be complete.", "Target SHA must still match the accepted TaskSpec."] : cleanupPending ? ["Poll until bounded worker cleanup completes."] : ["Correct the reported failure.", "Submit a current TaskSpec v2."]), newTaskRequired: task.recovery.newTaskRequired ?? (!retryAvailable && !cleanupPending), previousArtifactsReusable: task.recovery.previousArtifactsReusable ?? true, targetShaChanged: task.recovery.targetShaChanged ?? null }; }
   task.recovery ??= null; task.continuation ??= { schemaVersion: 1, state: "none", decisionId: null, executionId: null, sourceExecutionId: null }; task.continuation.sourceExecutionId ??= null; task.progress.agreement ??= projectAgreementLifecycle(task); return task;
 }
-
-const publicDiagnosticBytes = 8_192;
-const publicStringBytes = 65_536;
-
-export function projectAgreementLifecycle(task: Pick<ControlTaskRecord, "executionAgreement" | "ownerGate" | "publicationGate" | "progress">, result?: Record<string, unknown>): AgreementLifecycleProjection | undefined {
-  const agreement = task.executionAgreement;
-  if (!agreement) return undefined;
-  const workflow = object(result?.workflow);
-  const directSummary = object(result?.agreement); const workflowSummary = object(workflow.agreement); const hasResultSummary = Object.keys(directSummary).length > 0 || Object.keys(workflowSummary).length > 0;
-  const summary = Object.keys(directSummary).length ? directSummary : workflowSummary;
-  const next = object(Object.keys(object(result?.next)).length ? result?.next : workflow.next);
-  const completed = acceptedRunforgeCompletions(agreement, summary.runforgeCompletedPhases ?? (hasResultSummary ? undefined : task.progress.agreement?.runforgeCompletedPhases));
-  const delegated = acceptedDelegatedPhases(agreement);
-  const awaiting = acceptedAwaitingPhases(agreement, summary.awaitingPhases ?? (hasResultSummary ? undefined : task.progress.agreement?.awaitingPhases));
-  const current = firstOutstandingPhase(agreement, completed);
-  const nextParty = current?.responsibleParty === "nobody" ? null : current?.responsibleParty ?? null;
-  const legacyNext = object(result?.nextAction);
-  const currentReason = current ? agreement.phases.find((phase) => phase.phaseId === current.phaseId)?.reason ?? null : null;
-  return {
-    schemaVersion: agreement.schemaVersion, agreementId: agreement.agreementId, profile: agreement.profile,
-    currentPhase: current?.phaseId ?? null, responsibleParty: current?.responsibleParty ?? null,
-    runforgeCompletedPhases: completed, delegatedPhases: delegated, awaitingPhases: awaiting,
-    nextParty, nextAction: textValue(next.exactAction) ?? textValue(legacyNext.recommendation) ?? currentReason,
-    conflicts: agreement.conflicts.map((conflict) => ({ ...conflict })), ownerGate: { ...task.ownerGate }, publicationGate: { ...task.publicationGate },
-  };
-}
-
-function settleAcceptedAgreement(result: Record<string, unknown>, agreement: ExecutionAgreement): Record<string, unknown> {
-  const settled = structuredClone(result);
-  const workflow = object(settled.workflow);
-  const direct = object(settled.agreement); const nested = object(workflow.agreement);
-  const source = Object.keys(direct).length ? direct : nested;
-  const hasDirect = Object.keys(direct).length > 0; const hasNested = Object.keys(nested).length > 0;
-  if (!hasDirect && !hasNested && !Object.keys(workflow).length) return settled;
-  const completed = acceptedRunforgeCompletions(agreement, source.runforgeCompletedPhases);
-  const requested = agreement.phases.filter((phase) => phase.requested);
-  const awaiting = acceptedAwaitingPhases(agreement, source.awaitingPhases);
-  const current = firstOutstandingPhase(agreement, completed);
-  const terminalStatus = lifecycleStatus(current);
-  const summary = {
-    ...source,
-    agreementId: agreement.agreementId,
-    profile: agreement.profile,
-    requestedProfile: agreement.profile,
-    effectiveProfile: agreement.profile,
-    status: current ? "in_progress" : "completed",
-    phaseOwnership: requested.map(({ phaseId, responsibleParty }) => ({ phaseId, responsibleParty })),
-    runforgeCompletedPhases: completed,
-    delegatedPhases: acceptedDelegatedPhases(agreement),
-    awaitingPhases: awaiting,
-  };
-  if (hasDirect) settled.agreement = summary;
-  else settled.workflow = { ...workflow, agreement: summary };
-  if (current) {
-    const next = hasDirect ? object(settled.next) : object(workflow.next);
-    const projected = awaiting.find((phase) => phase.phaseId === current.phaseId);
-    const prerequisites = projected?.prerequisites ?? current.prerequisites;
-    const gates = mergeResultGates(prerequisites, next.gates);
-    const correctedNext = { ...next, party: current.responsibleParty, gates };
-    if (hasDirect) settled.next = correctedNext;
-    else settled.workflow = { ...object(settled.workflow), next: correctedNext };
-  }
-  if (hasDirect) settled.status = terminalStatus;
-  if (Object.keys(workflow).length) settled.workflow = { ...object(settled.workflow), status: terminalStatus };
-  return settled;
-}
-
-export function boundPublicResult(result: Record<string, unknown>): { result: Record<string, unknown>; truncatedFields: string[] } {
-  const truncatedFields: string[] = [];
-  const visit = (value: unknown, path: string[]): unknown => {
-    if (typeof value === "string") {
-      const key = path.at(-1) ?? ""; const limit = key === "stdout" || key === "stderr" ? publicDiagnosticBytes : publicStringBytes;
-      if (Buffer.byteLength(value) <= limit) return redactPublicText(value);
-      truncatedFields.push(path.join("."));
-      return redactPublicText(`${Buffer.from(value).subarray(0, limit).toString("utf8")}\n[TRUNCATED: full output remains in the referenced artifact]`);
-    }
-    if (Array.isArray(value)) return value.map((item, index) => visit(item, [...path, String(index)]));
-    if (value && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, visit(item, [...path, key])]));
-    return value;
-  };
-  return { result: visit(result, []) as Record<string, unknown>, truncatedFields };
-}
-
-export function redactPublicValue<T>(value: T): T {
-  const visit = (item: unknown): unknown => {
-    if (typeof item === "string") return redactPublicText(item);
-    if (Array.isArray(item)) return item.map(visit);
-    if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, visit(child)]));
-    return item;
-  };
-  return visit(value) as T;
-}
-
-function redactPublicText(value: string): string {
-  return value
-    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [REDACTED]")
-    .replace(/\bgh(?:p|o|u|s|r)_[A-Za-z0-9]{20,}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\bgithub_pat_[A-Za-z0-9_]{20,}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\bglpat-[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\bsk-[A-Za-z0-9_-]{20,}\b/g, "[REDACTED_TOKEN]")
-    .replace(/\b((?:api[_-]?key|access[_-]?token|token|secret|password)\s*[:=]\s*["']?)[^\s"',;]{8,}/gi, "$1[REDACTED]")
-    .replace(/(?:\/[A-Za-z0-9_.@-]+){2,}/g, (path) => path.startsWith("/v1/") || path.startsWith("/schemas/") || path.startsWith("/.well-known/") ? path : "[internal path]")
-    .replace(/\b[A-Za-z]:\\(?:[^\\\s"'`,;:]+\\)*[^\\\s"'`,;:]+/g, "[internal path]");
-}
-
-function phaseIds(value: unknown): AgreementLifecycleProjection["runforgeCompletedPhases"] { return Array.isArray(value) ? value.filter((item): item is AgreementLifecycleProjection["runforgeCompletedPhases"][number] => typeof item === "string") : []; }
-function acceptedRunforgeCompletions(agreement: ExecutionAgreement, claimed: unknown): AgreementLifecycleProjection["runforgeCompletedPhases"] { const claims = new Set(phaseIds(claimed)); return agreement.phases.filter((phase) => phase.requested && phase.responsibleParty === "runforge" && (phase.status === "completed" || claims.has(phase.phaseId))).map((phase) => phase.phaseId); }
-function acceptedDelegatedPhases(agreement: ExecutionAgreement): AgreementLifecycleProjection["delegatedPhases"] { return agreement.phases.flatMap((phase) => phase.requested && phase.responsibleParty !== "runforge" && phase.responsibleParty !== "nobody" ? [{ phaseId: phase.phaseId, responsibleParty: phase.responsibleParty }] : []); }
-function acceptedAwaitingPhases(agreement: ExecutionAgreement, projected: unknown): AgreementLifecycleProjection["awaitingPhases"] { const evidence = new Map(Array.isArray(projected) ? projected.flatMap((item) => { const phase = object(item); return typeof phase.phaseId === "string" ? [[phase.phaseId, phase] as const] : []; }) : []); return agreement.handoffs.map(({ phaseId, responsibleParty, prerequisites }) => ({ phaseId, responsibleParty, prerequisites: mergePrerequisites(prerequisites, evidence.get(phaseId)?.prerequisites) })); }
-function firstOutstandingPhase(agreement: ExecutionAgreement, completed: AgreementLifecycleProjection["runforgeCompletedPhases"]): ExecutionAgreement["phases"][number] | undefined { return agreement.phases.find((phase) => phase.requested && phase.status !== "completed" && (phase.responsibleParty !== "runforge" || !completed.includes(phase.phaseId))); }
-function lifecycleStatus(current: ExecutionAgreement["phases"][number] | undefined): "workflow_completed" | "awaiting_external_session" | "awaiting_owner" | "runforge_scope_completed" | "failed" { if (!current) return "workflow_completed"; if (current.responsibleParty === "external_session") return "awaiting_external_session"; if (current.responsibleParty === "owner") return "awaiting_owner"; return current.responsibleParty === "external_system" ? "runforge_scope_completed" : "failed"; }
-function mergeResultGates(prerequisites: readonly string[], projected: unknown): Array<Record<string, unknown>> { const source = new Map(Array.isArray(projected) ? projected.flatMap((item) => { const gate = object(item); return typeof gate.name === "string" ? [[gate.name, gate] as const] : []; }) : []); return prerequisites.map((name) => ({ name, status: source.get(name)?.status ?? "pending", evidence: Array.isArray(source.get(name)?.evidence) ? source.get(name)!.evidence : [] })); }
-function mergePrerequisites(accepted: readonly string[], projected: unknown): string[] { return [...new Set([...accepted, ...(Array.isArray(projected) ? projected.map(String) : [])])]; }
-function textValue(value: unknown): string | null { return typeof value === "string" && value.trim() ? value : null; }
 function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} is required.`); return value.trim(); }
 function continuationBindingHash(binding: ContinuationBinding, authority: ControlAuthority, taskSpec: Record<string, unknown>): string { return createHash("sha256").update(JSON.stringify({ binding, authority, taskSpec })).digest("hex"); }
@@ -511,7 +377,7 @@ function nativeMatchesContinuationContext(native: Record<string, unknown>, bindi
   return native.schemaVersion === 1 && native.taskId === binding.taskId && native.repo === binding.repository && native.workingDirectory === binding.workingDirectory && native.sourceBranch === binding.sourceBranch && sourceBefore.path === binding.repository && sourceBefore.head === binding.sourceSha;
 }
 function decisionRecord(decisionId: string, kind: "owner" | "publication", decision: string, response: Record<string, unknown>): DecisionRecord { return { decisionId, kind, decision, response, createdAt: new Date().toISOString() }; }
-function safeMessage(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return redactPublicText(message).slice(0, 500); }
+function safeMessage(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return redactPublicValue(message).slice(0, 500); }
 function preflightError(code: string, message: string, spec: Awaited<ReturnType<typeof loadTaskSpecV2>>, authority: ControlAuthority): ControlPlaneError {
   return new ControlPlaneError(403, code, message, {
     requestedMode: spec.execution.mode,

@@ -400,7 +400,7 @@ describe("local control-plane HTTP lifecycle", () => {
       const task = await json(await fetch(`${instance.url}/v1/tasks/${id}`));
       expect(task).toMatchObject({ status: "completed", executionAgreement: { agreementId }, progress: { agreement: { schemaVersion: 1, agreementId, profile: "custom", currentPhase: "localValidation", responsibleParty: party, runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "localValidation", responsibleParty: party }], awaitingPhases: [{ phaseId: "localValidation", responsibleParty: party, prerequisites: ["local evidence"] }], nextParty: party, nextAction: `Complete validation in ${party}.`, conflicts: [], ownerGate: { required: false } } } });
       const response = await fetch(`${instance.url}/v1/tasks/${id}/result`); expect(response.status).toBe(200); const body = await response.text(); expect(body.length).toBeLessThan(30_000); const result = JSON.parse(body);
-      expect(result).toMatchObject({ status: party === "external_session" ? "awaiting_external_session" : "runforge_scope_completed", providerCalls: [{ stdoutArtifact: "provider/iteration-0.stdout.log" }], controlPlane: { status: "completed", agreement: { agreementId, currentPhase: "localValidation", responsibleParty: party, nextParty: party }, responseBounds: { truncated: true, truncatedFields: ["providerCalls.0.stdout"] } } });
+      expect(result).toMatchObject({ status: party === "external_session" ? "awaiting_external_session" : "runforge_scope_completed", agreement: { agreementId, profile: "custom", status: "in_progress", runforgeCompletedPhases: ["taskAnalysis"], delegatedPhases: [{ phaseId: "localValidation", responsibleParty: party }] }, providerCalls: [{ stdoutArtifact: "provider/iteration-0.stdout.log" }], controlPlane: { status: "completed", agreement: { agreementId, currentPhase: "localValidation", responsibleParty: party, nextParty: party }, responseBounds: { truncated: true, truncatedFields: ["providerCalls.0.stdout"] } } });
       expect((await manager.cancelTask(id)).executionAgreement?.agreementId).toBe(agreementId);
       expect((await new ControlPlaneStore(stateRoot).getTask(id))?.executionAgreement?.agreementId).toBe(agreementId);
     }
@@ -462,11 +462,11 @@ describe("local control-plane HTTP lifecycle", () => {
   });
 
   it("recovers a deadline interruption through HTTP without allowing a late worker to overwrite the retry", async () => {
-    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-interrupted-retry-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let runs = 0;
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-interrupted-retry-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let runs = 0; let releaseFirstRun!: () => void; const firstRunBlocked = new Promise<void>((resolve) => { releaseFirstRun = resolve; });
     const manager = new ControlPlaneManager(store, {
-      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const run = ++runs; await mkdir(root, { recursive: true }); if (run === 1) await new Promise((done) => setTimeout(done, 140)); await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", marker: run === 1 ? "late-old" : "new-attempt", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
+      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const run = ++runs; await mkdir(root, { recursive: true }); if (run === 1) await firstRunBlocked; await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", marker: run === 1 ? "late-old" : "new-attempt", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
       recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never)
-    }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 30, cleanupGraceMs: 180 });
+    }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 30, cleanupGraceMs: 2_000 });
     const repository = await syntheticRepository(); const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-DEADLINE-RETRY-1", repository);
     await eventually(async () => { await fetch(`${instance.url}/healthz`); return (await manager.getTask("CONTROL-DEADLINE-RETRY-1")).status === "interrupted"; });
     const interrupted = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1`)); const oldExecutionId = interrupted.progress.executionId;
@@ -477,6 +477,7 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(interruptedResult).toMatchObject({ status: "interrupted", interruption: { originalExecutionId: oldExecutionId }, targetMutation: { status: "not_inferred" }, safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true } });
     await expectValidPublicResult(interruptedResult);
     const pendingRetry = await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" }); expect(pendingRetry.status).toBe(409); expect(await json(pendingRetry)).toMatchObject({ error: { code: "recovery_pending", retryable: true } });
+    releaseFirstRun();
     await eventually(async () => (await manager.getTask("CONTROL-DEADLINE-RETRY-1")).recovery?.retryAvailable === true); expect((await manager.getTask("CONTROL-DEADLINE-RETRY-1")).recovery?.cleanupStatus).toBe("completed");
     const retries = await Promise.all([fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" }), fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" })]); expect(retries.every((response) => response.status === 202)).toBe(true);
     const retryBodies = await Promise.all(retries.map(json)); expect(retryBodies[0]!.progress.executionId).toBe(retryBodies[1]!.progress.executionId); expect(retryBodies[0]!.progress.executionId).not.toBe(oldExecutionId); expect(retryBodies[0]!.progress.attempt).toBe(2);
