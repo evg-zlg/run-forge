@@ -104,12 +104,17 @@ export class ControlPlaneManager {
     if (implementation && !normalized.authority.allowProviderCalls) throw preflightError("provider_permission_denied", "The implementation executor requires TaskSpec authority.allowProviderCalls=true.", normalized, input.authority);
     if (implementation && (!normalized.authority.allowNetwork || normalized.runtime.externalNetwork !== "allowed")) throw preflightError("network_permission_denied", "The implementation executor requires authority.allowNetwork=true and runtime.externalNetwork='allowed'.", normalized, input.authority);
     const preflightAgreement = negotiateTaskAgreement(normalized, input.authority);
-    if (runforgeOwns(preflightAgreement, "localBranch") && !input.authority.localBranch) throw preflightError("mutation_authority_denied", "The effective agreement requires localBranch authority for the RunForge-owned localBranch phase.", normalized, input.authority);
-    if (runforgeOwns(preflightAgreement, "localCommit") && !input.authority.localCommit) throw preflightError("local_commit_authority_denied", "The effective agreement requires localCommit authority for the RunForge-owned localCommit phase.", normalized, input.authority);
-    assertAgreementAccepted(preflightAgreement, taskId);
     const executionAgreement = input.agreementId ? await this.getAgreement(input.agreementId) : preflightAgreement;
-    assertAgreementAccepted(executionAgreement, taskId);
-    assertAgreementMatchesTask(executionAgreement, normalized, preflightAgreement);
+    if (input.agreementId) {
+      assertAgreementAccepted(executionAgreement, taskId);
+      assertAgreementMatchesTask(executionAgreement, normalized, preflightAgreement);
+    }
+    if (runforgeOwns(executionAgreement, "localBranch") && !input.authority.localBranch) throw preflightError("mutation_authority_denied", "The effective agreement requires localBranch authority for the RunForge-owned localBranch phase.", normalized, input.authority);
+    if (runforgeOwns(executionAgreement, "localCommit") && !input.authority.localCommit) throw preflightError("local_commit_authority_denied", "The effective agreement requires localCommit authority for the RunForge-owned localCommit phase.", normalized, input.authority);
+    if (!input.agreementId) {
+      assertAgreementAccepted(executionAgreement, taskId);
+      assertAgreementMatchesTask(executionAgreement, normalized, preflightAgreement);
+    }
     await this.store.saveAgreement(executionAgreement);
     const selected = ["implementation", "repair"].includes(normalized.execution.mode) ? await selectImplementationExecutor(normalized) : null;
     if (selected && !selected.selected) throw new ControlPlaneError(503, "implementation_executor_unavailable", selected.reason, { requestedMode: normalized.execution.mode, availableExecutors: selected.rejected.map((item) => item.id), rejectedAlternatives: selected.rejected, authorityFailures: [], operation: "start_new_task", newTaskRequired: true }, true, taskId);

@@ -127,6 +127,29 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(ownedCommit.status).toBe(403); expect(await json(ownedCommit)).toMatchObject({ error: { code: "local_commit_authority_denied", taskId: "CONTROL-PREFLIGHT-LOCAL-COMMIT-1" } });
   });
 
+  it("checks local mutation authority against referenced effective ownership", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-effective-authority-"))) - 1]!;
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) });
+    await manager.initialize();
+    type LocalOwnership = Record<"implementation" | "localBranch" | "localCommit", "runforge" | "external_session">;
+    const negotiate = (requestedOwnership: LocalOwnership, authority: Partial<Record<"localBranch" | "localCommit", boolean>> = {}) => manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", requestedOwnership, authority });
+    const create = (taskId: string, phaseOwnership: LocalOwnership, agreementId: string) => manager.createTask({ taskSpec: { ...implementationTaskSpec(taskId), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership } }, agreementId, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" });
+
+    const branchOwnership: LocalOwnership = { implementation: "external_session", localBranch: "runforge", localCommit: "external_session" };
+    const branchAgreement = await negotiate(branchOwnership, { localBranch: true });
+    await expect(create("CONTROL-EFFECTIVE-BRANCH-1", branchOwnership, branchAgreement.agreementId)).rejects.toMatchObject({ status: 403, code: "mutation_authority_denied", taskId: "CONTROL-EFFECTIVE-BRANCH-1" });
+
+    const commitOwnership: LocalOwnership = { implementation: "external_session", localBranch: "external_session", localCommit: "runforge" };
+    const commitAgreement = await negotiate(commitOwnership, { localCommit: true });
+    await expect(create("CONTROL-EFFECTIVE-COMMIT-1", commitOwnership, commitAgreement.agreementId)).rejects.toMatchObject({ status: 403, code: "local_commit_authority_denied", taskId: "CONTROL-EFFECTIVE-COMMIT-1" });
+
+    const externalOwnership: LocalOwnership = { implementation: "external_session", localBranch: "external_session", localCommit: "external_session" };
+    const externalAgreement = await negotiate(externalOwnership);
+    const externalCreated = await create("CONTROL-EFFECTIVE-EXTERNAL-1", externalOwnership, externalAgreement.agreementId);
+    expect(externalCreated).toMatchObject({ executionAgreement: { agreementId: externalAgreement.agreementId }, selection: { authorityChecks: { localBranch: true, localCommit: true } } });
+    manager.close();
+  });
+
   it("reuses the task effective timeout for continuation", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-continuation-timeout-"))) - 1]!; let continuationTimeout: number | undefined;
     const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "continuation-state.json"), JSON.stringify({ repo: process.cwd(), sourceBranch: "main" })); await writeFile(join(root, "results.json"), JSON.stringify({ status: "awaiting_owner_decision", ownerGate: { required: true, status: "awaiting_owner_decision" } })); return {} as never; }, recordOwnerDecision: async ({ run }) => { const path = join(run, "owner-decision.json"); await writeFile(path, "{}\n"); return { decisionId: "timeout-decision", path }; }, continueExecution: async ({ run, timeoutMs }) => { continuationTimeout = timeoutMs; await writeFile(join(run, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; } }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 5_000, executionTimeoutMs: 120_000 });
