@@ -34,6 +34,45 @@ describe("control-plane contracts", () => {
     expect(delegated).toMatchObject({ status: "ready", conflicts: [], handoffs: [{ phaseId: "deploy", responsibleParty: "external_system" }] });
   });
 
+  it("treats standalone authority as an explicit per-phase allowlist", () => {
+    const omitted = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "assist-only" }));
+    expect(omitted).toMatchObject({ status: "conflicted" });
+    expect(omitted.conflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phaseId: "projectDiscovery", kind: "unauthorized" }),
+      expect.objectContaining({ phaseId: "taskAnalysis", kind: "unauthorized" }),
+    ]));
+
+    const explicit = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({
+      schemaVersion: 1,
+      profile: "custom",
+      requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_session", prReview: "owner", deploy: "external_system" },
+      authority: { taskAnalysis: true },
+    }));
+    expect(explicit).toMatchObject({
+      status: "ready",
+      conflicts: [],
+      handoffs: [
+        { phaseId: "localValidation", responsibleParty: "external_session" },
+        { phaseId: "prReview", responsibleParty: "owner" },
+        { phaseId: "deploy", responsibleParty: "external_system" },
+      ],
+    });
+    expect(explicit.phases).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phaseId: "taskAnalysis", authorized: true, status: "ready" }),
+      expect.objectContaining({ phaseId: "localValidation", authorized: false, status: "handoff" }),
+    ]));
+
+    const unavailable = negotiateControlPlaneAgreement(parseExecutionAgreementNegotiationRequest({
+      schemaVersion: 1,
+      profile: "custom",
+      requestedOwnership: { deploy: "runforge" },
+      technicalCapability: { deploy: true },
+      authority: { deploy: true },
+    }));
+    expect(unavailable).toMatchObject({ status: "conflicted", conflicts: [{ phaseId: "deploy", kind: "unavailable" }] });
+    expect(unavailable.phases).toContainEqual(expect.objectContaining({ phaseId: "deploy", available: false, authorized: true, status: "conflict" }));
+  });
+
   it("stores agreements durably and retrieves them after store restart", async () => {
     const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-agreement-store-"))) - 1]!;
     const first = new ControlPlaneStore(root); await first.initialize();
@@ -82,7 +121,7 @@ describe("control-plane contracts", () => {
       publicationTarget: { kind: "none" as const },
     };
     const agreement = negotiateControlPlaneAgreement(
-      parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "local-ready", publicationTarget: { kind: "none" } }),
+      parseExecutionAgreementNegotiationRequest({ schemaVersion: 1, profile: "local-ready", publicationTarget: { kind: "none" }, authority: localReadyAuthority() }),
       technicalCapabilitiesForExecutor(true),
       context,
     );
@@ -125,3 +164,10 @@ describe("control-plane contracts", () => {
     const replacement = structuredClone(base) as unknown as ControlTaskRecord; replacement.id = "LATE-TERMINAL-REPLACED-1"; replacement.status = "completed"; replacement.progress.executionId = "replacement-worker"; replacement.progress.workerStatus = "finished"; replacement.execution.lease!.executionId = "replacement-worker"; replacement.execution.lease!.state = "finished"; replacement.recovery = null; await store.saveTask(replacement); await store.appendEvent(replacement.id, { at: now, type: "task_interrupted", detail: "execution_deadline_exceeded", executionId: "revoked-worker" }); await store.appendEvent(replacement.id, { at: now, type: "retry_requested", executionId: "replacement-worker" }); await store.appendEvent(replacement.id, { at: now, type: "task_started", executionId: "replacement-worker" }); await store.appendEvent(replacement.id, { at: now, type: "task_failed", detail: "late old failure", executionId: "revoked-worker" }); await store.appendEvent(replacement.id, { at: now, type: "task_completed", executionId: "replacement-worker" }); await new ControlPlaneStore(root).initialize(); expect(await store.getTask(replacement.id)).toMatchObject({ status: "completed", progress: { executionId: "replacement-worker" }, execution: { lease: { state: "finished" } } }); expect(await store.readPublishedResult(replacement.id)).toBeNull();
   });
 });
+
+function localReadyAuthority(): Record<string, boolean> {
+  return Object.fromEntries([
+    "projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview",
+    "repairIterations", "patchPackage", "localBranch", "localCommit", "providerModelCalls",
+  ].map((phase) => [phase, true]));
+}

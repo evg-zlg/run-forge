@@ -69,7 +69,7 @@ export function negotiateControlPlaneAgreement(
     requested: targeted.requested,
     requestedOwnership: targeted.ownership,
     technicalCapability: narrowCapabilities(installationCapability, request.technicalCapability),
-    authority: narrowCapabilities(installationCapability, request.authority),
+    authority: explicitPhaseAuthority(request.authority),
     policy: narrowCapabilities(controlPlaneAgreementPolicy, request.policy),
     prerequisites: request.prerequisites,
     completionEvidence: request.completionEvidence,
@@ -242,6 +242,10 @@ function phaseFlags(enabled: readonly ExecutionPhaseId[]): Record<ExecutionPhase
 
 function narrowCapabilities(base: Record<ExecutionPhaseId, boolean>, requested?: PhaseBooleanMap): Record<ExecutionPhaseId, boolean> {
   return Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, base[phase] && requested?.[phase] !== false])) as Record<ExecutionPhaseId, boolean>;
+}
+
+function explicitPhaseAuthority(authority?: PhaseBooleanMap): Record<ExecutionPhaseId, boolean> {
+  return Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, authority?.[phase] === true])) as Record<ExecutionPhaseId, boolean>;
 }
 
 function optionalBooleanMap(value: unknown, name: "requested" | "technicalCapability" | "authority" | "policy"): Partial<ExecutionAgreementNegotiation> {

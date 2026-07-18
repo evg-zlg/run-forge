@@ -61,7 +61,7 @@ describe("local control-plane HTTP lifecycle", () => {
       }));
       const negotiationResponse = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ schemaVersion: 1, profile: "local-ready", projectId: inspected.project.id, publicationTarget: { kind: "none" } }),
+        body: JSON.stringify({ schemaVersion: 1, profile: "local-ready", projectId: inspected.project.id, publicationTarget: { kind: "none" }, authority: localReadyAuthority() }),
       });
       expect(negotiationResponse.status).toBe(201);
       const agreement = await json(negotiationResponse);
@@ -138,7 +138,11 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(await json(resultSchemaResponse)).toEqual(JSON.parse(await readFile("schemas/task-result-v1.schema.json", "utf8")));
     expect(await json(await fetch(`${instance.url}/v1/capabilities`))).toMatchObject({ schemas: { executionAgreement: "/schemas/execution-agreement-v1.schema.json", result: discovery.endpoints.resultSchema }, executionAgreements: { phases: expect.arrayContaining(["implementation", "deploy"]) } });
 
-    const negotiation = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } }) });
+    const omittedAuthority = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "assist-only" }) });
+    expect(omittedAuthority.status).toBe(201);
+    expect(await json(omittedAuthority)).toMatchObject({ status: "conflicted", conflicts: expect.arrayContaining([{ phaseId: "projectDiscovery", kind: "unauthorized", reason: expect.any(String) }]) });
+
+    const negotiation = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" }, authority: { taskAnalysis: true } }) });
     expect(negotiation.status).toBe(201); const agreement = await json(negotiation);
     expect(agreement).toMatchObject({ status: "ready", conflicts: [], handoffs: [{ phaseId: "localValidation", responsibleParty: "external_system" }] });
     expect(await json(await fetch(`${instance.url}/v1/execution-agreements/${agreement.agreementId}`))).toEqual(agreement);
@@ -172,7 +176,7 @@ describe("local control-plane HTTP lifecycle", () => {
     const store = new ControlPlaneStore(stateRoot); const manager = new ControlPlaneManager(store, operations as never); await manager.initialize();
     const firstProject = (await manager.inspectProject({ path: firstRepo, workingDirectory: ".", register: true })).project as Record<string, unknown>;
     const secondProject = (await manager.inspectProject({ path: secondRepo, workingDirectory: ".", register: true })).project as Record<string, unknown>;
-    const bound = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", projectId: String(firstProject.id), requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } });
+    const bound = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", projectId: String(firstProject.id), requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" }, authority: { taskAnalysis: true } });
     const referencedSpec = (taskId: string, repository: string) => ({ ...taskSpec(taskId, repository), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } } });
 
     await expect(manager.createTask({ taskSpec: referencedSpec("CONTROL-BOUND-UNREGISTERED-1", firstRepo), agreementId: bound.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_project_mismatch" });
@@ -181,7 +185,7 @@ describe("local control-plane HTTP lifecycle", () => {
     await writeFile(join(firstRepo, "changed.txt"), "changed\n"); execFileSync("git", ["add", "changed.txt"], { cwd: firstRepo }); execFileSync("git", ["commit", "-q", "-m", "changed"], { cwd: firstRepo });
     await expect(manager.createTask({ projectId: String(firstProject.id), taskSpec: referencedSpec("CONTROL-BOUND-STALE-1", firstRepo), agreementId: bound.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" })).rejects.toMatchObject({ code: "execution_agreement_source_stale" });
 
-    const projectless = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } });
+    const projectless = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" }, authority: { taskAnalysis: true } });
     const legacy = structuredClone(projectless); delete legacy.context; await store.saveAgreement(legacy);
     const created = await manager.createTask({ taskSpec: referencedSpec("CONTROL-PROJECTLESS-LEGACY-1", firstRepo), agreementId: legacy.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" });
     expect(created.executionAgreement).toEqual(legacy); manager.close();
@@ -194,7 +198,7 @@ describe("local control-plane HTTP lifecycle", () => {
       recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never)
     });
     await manager.initialize(); const project = (await manager.inspectProject({ path: repository, workingDirectory: ".", register: true })).project as Record<string, unknown>;
-    const accepted = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", projectId: String(project.id), requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" }, prerequisites: { localValidation: ["accepted validation evidence"] } });
+    const accepted = await manager.negotiateAgreement({ schemaVersion: 1, profile: "custom", projectId: String(project.id), requestedOwnership: { taskAnalysis: "runforge", localValidation: "external_system" }, authority: { taskAnalysis: true }, prerequisites: { localValidation: ["accepted validation evidence"] } });
     await manager.createTask({ projectId: String(project.id), taskSpec: { ...taskSpec("CONTROL-ACCEPTED-SETTLEMENT-1"), executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { taskAnalysis: "runforge", localValidation: "external_system" } } }, agreementId: accepted.agreementId, authority: implementationAuthority() as never, publicationRequested: "none" });
     await eventually(async () => (await manager.getTask("CONTROL-ACCEPTED-SETTLEMENT-1")).status === "completed"); const task = await manager.getTask("CONTROL-ACCEPTED-SETTLEMENT-1");
     expect(task).toMatchObject({ executionAgreement: { agreementId: accepted.agreementId, context: { project: { projectId: project.id } } }, progress: { agreement: { agreementId: accepted.agreementId, awaitingPhases: [{ phaseId: "localValidation", responsibleParty: "external_system", prerequisites: ["accepted validation evidence", "result validation evidence"] }] } } });
@@ -456,4 +460,5 @@ async function submit(base: string, taskId: string, repository = process.cwd()):
 function taskSpec(taskId: string, repository = process.cwd()): Record<string, unknown> { return { schemaVersion: 2, taskId, task: { text: "Synthetic lifecycle", goal: "Exercise control plane", acceptanceCriteria: ["formal result"] }, target: { repository, workingDirectory: "." }, execution: { mode: "validation" }, authority: { profile: "read-only", allowProviderCalls: false }, validation: { mode: "explicit", commands: ["git status --short"] }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
 function implementationTaskSpec(taskId: string, repository = process.cwd()): Record<string, unknown> { return { ...taskSpec(taskId, repository), execution: { mode: "implementation", timeoutMs: 300_000 }, runtime: { preference: "local-disposable", externalNetwork: "allowed" }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true } }; }
 function implementationAuthority(): Record<string, boolean> { return { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }; }
+function localReadyAuthority(): Record<string, boolean> { return Object.fromEntries(["projectDiscovery", "taskAnalysis", "implementationPlanning", "implementation", "localValidation", "independentReview", "repairIterations", "patchPackage", "localBranch", "localCommit", "providerModelCalls"].map((phase) => [phase, true])); }
 async function syntheticRepository(): Promise<string> { const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-interrupted-dogfood-repo-"))) - 1]!; execFileSync("git", ["init", "-q", "-b", "main"], { cwd: root }); execFileSync("git", ["config", "user.name", "RunForge Dogfood"], { cwd: root }); execFileSync("git", ["config", "user.email", "runforge-dogfood@example.invalid"], { cwd: root }); await writeFile(join(root, "README.md"), "# Synthetic interrupted recovery fixture\n"); execFileSync("git", ["add", "README.md"], { cwd: root }); execFileSync("git", ["commit", "-q", "-m", "fixture"], { cwd: root }); return root; }
