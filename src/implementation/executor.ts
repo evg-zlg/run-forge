@@ -7,6 +7,7 @@ import { loadAdminConfig } from "../admin/config.js";
 import { scanSecrets } from "../security/secret-scan.js";
 import type { TaskSpecV2, TaskExecutionMode } from "../product/task-spec-v2.js";
 import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor } from "../product/task-spec-contract.js";
+import { persistDurableCheckpoint } from "./durable-checkpoint.js";
 import { executionPhaseOwner } from "../product/execution-agreement.js";
 
 const execFileAsync = promisify(execFile);
@@ -39,6 +40,8 @@ export type ImplementationExecutorResult = {
   ownerGate: { required: boolean; reason: string | null }; safetyAssertions: Record<string, boolean>;
   diagnostics: Record<string, unknown>; localBranch: string | null; localCommit: string | null; patchPackage: string | null;
   providerCalls: Array<Record<string, unknown>>; selectedExecutor: { id: string; model: string | null };
+  checkpoints: Array<{ id: string; path: string; patchPath: string; iteration: number; validationPassed: boolean }>;
+  budget: { exceeded: boolean; overrunPhase: "implementation" | "repair" | null; requestedTokens: number; actualTokens: number; accounting: "provider" | "synthetic"; costUsd: null };
 };
 
 export async function discoverImplementationExecutors(): Promise<ImplementationExecutorCapability[]> {
@@ -75,7 +78,8 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   const sourceBefore = await git(request.targetRepository, ["rev-parse", "HEAD"]);
   if (sourceBefore.trim() !== request.spec.target.expectedSha) throw new Error(`target_sha_mismatch: expected ${request.spec.target.expectedSha}, current ${sourceBefore.trim()}`);
   const sourceStatusBefore = await git(request.targetRepository, ["status", "--porcelain=v1"]);
-  if (sourceStatusBefore.trim()) throw new Error("active_human_work_conflict: implementation requires a clean known source worktree; existing changes were preserved.");
+  const dirtyPolicy = request.spec.target.dirtyPolicy ?? "use_disposable_from_base_sha";
+  if (sourceStatusBefore.trim() && (dirtyPolicy === "require_clean" || dirtyPolicy === "allow_known_generated" && unsafeDirtyLines(sourceStatusBefore).length)) throw new Error(`active_human_work_conflict: dirtyPolicy=${dirtyPolicy} preserved existing changes.`);
   const workspace = join(dirname(request.artifactRoot), "workspace");
   await rm(workspace, { recursive: true, force: true });
   await mkdir(dirname(workspace), { recursive: true });
@@ -100,9 +104,12 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   const executionRoot = resolve(workspace, request.workingDirectory);
   if (!isInside(workspace, executionRoot)) throw new Error("working_directory_escape");
   const plan = ["Inspect the target and acceptance criteria", "Implement only bounded changes in the disposable worktree", "Run declared validation", "Repair in-scope failures within the iteration budget", "Finalize patch/commit evidence without publication"];
+  const contextPlan = await buildContextPlan(request, executionRoot);
   await mkdir(request.artifactRoot, { recursive: true });
   await writeFile(join(request.artifactRoot, "implementation-plan.json"), JSON.stringify(plan, null, 2) + "\n");
+  await writeFile(join(request.artifactRoot, "context-plan.json"), JSON.stringify(contextPlan, null, 2) + "\n");
   const providerCalls: Array<Record<string, unknown>> = [];
+  const checkpoints: ImplementationExecutorResult["checkpoints"] = [];
   const validations: CommandDiagnostic[] = [];
   let agentSummary = "";
   let status: ImplementationExecutorResult["status"] = "failed_with_diagnostics";
@@ -110,17 +117,19 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   let patch = "";
   let changedFiles: string[] = [];
   let localCommit: string | null = null;
+  let budgetExceeded = false;
+  let overrunPhase: ImplementationExecutorResult["budget"]["overrunPhase"] = null;
+  let overrunActual = 0, overrunLimit = request.spec.execution.maxProviderTokens;
   try {
     for (let iteration = 0; iteration <= request.spec.execution.maxRepairIterations; iteration += 1) {
       const phase = iteration === 0 ? "implement" : "repair";
       await progress(request, phase, iteration === 0 ? "Coding executor is implementing the bounded task." : `Repair iteration ${iteration} is addressing validation failures.`);
       const prompt = buildPrompt(request, iteration, validations);
       const call = await runAgent(executorCommand, executor.model, executionRoot, prompt, request.spec.execution.timeoutMs, request.signal, request.artifactRoot, iteration);
-      providerCalls.push({ command: "local-coding-agent", cwd: executionRoot, executor: executor.id, runtime: "local-disposable", executorId: executor.id, model: executor.model, providerCalls: true, networkAuthorized: true, iteration, startedAt: call.startedAt, finishedAt: call.finishedAt, durationMs: call.durationMs, exitCode: call.exitCode, signal: call.signal, timedOut: call.timedOut, stdout: call.stdout, stderr: call.stderr, truncation: call.truncation, artifactPaths: [call.stdoutArtifact, call.stderrArtifact], failureReason: call.failureReason, classification: call.exitCode === 0 ? null : "provider", diagnosticGap: call.exitCode !== 0 && !call.stdout.trim() && !call.stderr.trim(), tokenUsage: call.tokenUsage, tokenBudget: request.spec.execution.maxProviderTokens, stdoutArtifact: call.stdoutArtifact, stderrArtifact: call.stderrArtifact });
+      providerCalls.push({ command: "local-coding-agent", cwd: executionRoot, executor: executor.id, runtime: "local-disposable", executorId: executor.id, model: executor.model, providerCalls: true, networkAuthorized: true, usageAccounting: process.env.RUNFORGE_USAGE_ACCOUNTING === "synthetic" ? "synthetic" : "provider", iteration, startedAt: call.startedAt, finishedAt: call.finishedAt, durationMs: call.durationMs, exitCode: call.exitCode, signal: call.signal, timedOut: call.timedOut, stdout: call.stdout, stderr: call.stderr, truncation: call.truncation, artifactPaths: [call.stdoutArtifact, call.stderrArtifact], failureReason: call.failureReason, classification: call.exitCode === 0 ? null : "provider", diagnosticGap: call.exitCode !== 0 && !call.stdout.trim() && !call.stderr.trim(), tokenUsage: call.tokenUsage, tokenBudget: request.spec.execution.maxProviderTokens, stdoutArtifact: call.stdoutArtifact, stderrArtifact: call.stderrArtifact });
       agentSummary = call.summary;
       if (call.cancelled) throw new Error("cancelled");
       if (call.exitCode !== 0) { unresolved = [`Coding agent failed with exit ${call.exitCode ?? "signal"}.`]; break; }
-      if (call.tokenUsage !== null && call.tokenUsage > request.spec.execution.maxProviderTokens) { unresolved = [`Provider token budget exceeded: ${call.tokenUsage} > ${request.spec.execution.maxProviderTokens}.`]; status = "blocked_with_owner_gate"; break; }
       await git(workspace, ["add", "-N", "."]);
       patch = await git(workspace, ["diff", "--binary", "--no-ext-diff", request.spec.target.expectedSha]);
       changedFiles = lines(await git(workspace, ["diff", "--name-only", request.spec.target.expectedSha]));
@@ -134,12 +143,29 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       if (Buffer.byteLength(patch) > request.spec.execution.maxPatchBytes) safetyErrors.push(`Patch exceeds ${request.spec.execution.maxPatchBytes} bytes.`);
       const secretScan = scanSecrets(addedPatchLines(patch));
       if (secretScan.status === "failed") safetyErrors.push("Secret scan rejected the patch.");
-      if (safetyErrors.length) { unresolved = safetyErrors; status = "blocked_with_owner_gate"; break; }
+      if (safetyErrors.length) { unresolved = safetyErrors; status = "blocked_with_owner_gate"; }
       await progress(request, "validate", `Running ${request.validationProfile.commands.length} validation command(s).`);
       validations.splice(0, validations.length);
-      for (let index = 0; index < request.validationProfile.commands.length; index += 1) validations.push(await runValidation(request.validationProfile.commands[index]!, executionRoot, request.artifactRoot, iteration, index, request.spec.execution.timeoutMs, request.signal));
-      if (validations.every((item) => item.exitCode === 0)) { status = "implemented_and_validated"; break; }
-      unresolved = validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}: exit ${item.exitCode}${item.infrastructureDefect ? ` (${item.infrastructureDefect})` : ""}`);
+      if (!safetyErrors.length) for (let index = 0; index < request.validationProfile.commands.length; index += 1) validations.push(await runValidation(request.validationProfile.commands[index]!, executionRoot, request.artifactRoot, iteration, index, request.spec.execution.timeoutMs, request.signal));
+      const validationPassed = !safetyErrors.length && validations.every((item) => item.exitCode === 0);
+      if (!validationPassed && !safetyErrors.length) unresolved = validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}: exit ${item.exitCode}${item.infrastructureDefect ? ` (${item.infrastructureDefect})` : ""}`);
+      const actualTokens = providerCalls.reduce((sum, item) => sum + (typeof item.tokenUsage === "number" ? item.tokenUsage : 0), 0);
+      const phaseLimit = request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"];
+      const checkpoint = await persistDurableCheckpoint(request.artifactRoot, {
+        checkpointId: `${iteration === 0 ? "implementation" : "repair"}-${iteration}`,
+        iteration, kind: iteration === 0 ? "implementation" : "repair", baseSha: request.spec.target.expectedSha,
+        workspaceSha: null, workspaceState: "dirty", patch, changedFiles, validation: validations,
+        usage: { accounting: providerCalls.at(-1)?.usageAccounting ?? "provider", phase, providerCalls: providerCalls.length, totalTokens: actualTokens, costUsd: null },
+        executor: { id: executor.id, model: executor.model, runtime: "local-disposable", attempt: request.attempt, generation: request.generation },
+        safetyAssertions: { targetMainMutation: false, targetMainPush: false, forbiddenZonesRespected: safetyErrors.length === 0, secretScanPassed: !safetyErrors.includes("Secret scan rejected the patch.") },
+        unresolvedFindings: unresolved
+      });
+      checkpoints.push({ id: checkpoint.id, path: relative(request.artifactRoot, checkpoint.path), patchPath: relative(request.artifactRoot, checkpoint.patchPath), iteration, validationPassed });
+      const phaseExceeded = (call.tokenUsage ?? 0) > phaseLimit, totalExceeded = actualTokens > request.spec.execution.maxProviderTokens;
+      budgetExceeded = totalExceeded || phaseExceeded;
+      if (budgetExceeded) { overrunPhase = phase === "implement" ? "implementation" : "repair"; overrunActual = phaseExceeded ? call.tokenUsage ?? 0 : actualTokens; overrunLimit = phaseExceeded ? phaseLimit : request.spec.execution.maxProviderTokens; }
+      if (validationPassed) { status = "implemented_and_validated"; break; }
+      if (budgetExceeded || safetyErrors.length) { status = "blocked_with_owner_gate"; break; }
     }
     if (status === "implemented_and_validated" || status === "no_change_required") {
       if (commitOwnedByRunForge) {
@@ -159,10 +185,12 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
     const sourceStatusAfter = await git(request.targetRepository, ["status", "--porcelain=v1"]);
     return {
       plan, changedFiles, patch, validationResults: validations, unresolvedFindings: unresolved, status,
-      ownerGate: { required: status === "blocked_with_owner_gate", reason: status === "blocked_with_owner_gate" ? unresolved.join(" ") : null },
+      ownerGate: { required: status === "blocked_with_owner_gate" || budgetExceeded, reason: budgetExceeded ? `Provider token budget exceeded after durable checkpoint in ${overrunPhase}: ${overrunActual} > ${overrunLimit}.` : status === "blocked_with_owner_gate" ? unresolved.join(" ") : null },
       safetyAssertions: { sourceShaUnchanged: sourceAfter === sourceBefore.trim(), sourceWorktreeStateUnchanged: sourceStatusAfter === sourceStatusBefore, targetMainMutation: false, targetMainPush: false, merge: false, deploy: false, publicationPerformed: false, forbiddenZonesRespected: !unresolved.some((item) => item.includes("forbidden")), secretScanPassed: !unresolved.includes("Secret scan rejected the patch.") },
-      diagnostics: { agentSummary, sourceBefore: sourceBefore.trim(), sourceAfter, sourceWorktreeStatusBefore: sourceStatusBefore, sourceWorktreeStatusAfter: sourceStatusAfter, selectionReason: selection.reason, rejectedAlternatives: selection.rejected, workspace: relative(request.targetRepository, workspace) },
-      localBranch, localCommit, patchPackage, providerCalls, selectedExecutor: { id: executor.id, model: executor.model }
+      diagnostics: { agentSummary, sourceBefore: sourceBefore.trim(), sourceAfter, sourceWorktreeStatusBefore: sourceStatusBefore, sourceWorktreeStatusAfter: sourceStatusAfter, dirtyPolicy, contextPlan, selectionReason: selection.reason, rejectedAlternatives: selection.rejected, workspace: relative(request.targetRepository, workspace) },
+      localBranch, localCommit, patchPackage, providerCalls, checkpoints,
+      budget: { exceeded: budgetExceeded, overrunPhase, requestedTokens: request.spec.execution.maxProviderTokens, actualTokens: providerCalls.reduce((sum, item) => sum + (typeof item.tokenUsage === "number" ? item.tokenUsage : 0), 0), accounting: providerCalls.some((item) => item.usageAccounting === "synthetic") ? "synthetic" : "provider", costUsd: null },
+      selectedExecutor: { id: executor.id, model: executor.model }
     };
   } finally {
     await git(request.targetRepository, ["worktree", "remove", "--force", workspace]).catch(() => undefined);
@@ -204,7 +232,16 @@ function lines(text: string): string[] { return text.split(/\r?\n/).map((item) =
 function isInside(root: string, path: string): boolean { const rel = relative(root, path); return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/")); }
 async function progress(request: ImplementationExecutorRequest, phase: string, detail: string): Promise<void> { await request.onProgress?.(phase, detail); }
 function validateChangedPaths(files: string[], zones: string[], max: number): string[] { const errors: string[] = []; if (files.length > max) errors.push(`Changed files exceed limit ${max}.`); const pathZones = zones.filter((zone) => !/\s/.test(zone)).map((zone) => zone.replace(/^\.\//, "").replace(/\*\*|\*/g, "").replace(/\/$/, "")); for (const file of files) { if (file.startsWith("../") || file.startsWith("/")) errors.push(`Path escapes workspace: ${file}.`); const zone = pathZones.find((item) => item && (file === item || file.startsWith(`${item}/`))); if (zone) errors.push(`Changed path is forbidden: ${file} (${zone}).`); } return errors; }
-function buildPrompt(request: ImplementationExecutorRequest, iteration: number, validations: CommandDiagnostic[]): string { return [`You are the RunForge bounded implementation executor. Work only in the current disposable Git worktree.`, `Task: ${request.spec.task.text}`, `Goal: ${request.spec.task.goal}`, `Acceptance criteria:\n${request.acceptanceCriteria.map((item) => `- ${item}`).join("\n")}`, `Forbidden zones:\n${request.forbiddenZones.map((item) => `- ${item}`).join("\n")}`, `Validation commands:\n${request.validationProfile.commands.map((item) => `- ${item}`).join("\n")}`, `Provider token budget: at most ${request.spec.execution.maxProviderTokens} total tokens for this call.`, `Iteration: ${iteration}. ${iteration ? `Repair these failures:\n${validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}\nstdout: ${item.stdout}\nstderr: ${item.stderr}`).join("\n")}` : "Inspect, plan, implement, and add/update tests as required."}`, `Do not create a Git commit; leave changes uncommitted so RunForge can validate and create the final local commit.`, `Do not push, open a PR, merge, deploy, access secrets/DB/production, or modify forbidden paths. Do not merely propose a patch: edit files and validate. If no change is required, say exactly 'no change required' with evidence. If semantics are ambiguous, stop and say 'ambiguous product decision'.`].join("\n\n"); }
+function unsafeDirtyLines(status: string): string[] { return lines(status).filter((line) => { const path = line.slice(3).replace(/^"|"$/g, ""); return !path.startsWith(".runforge/") && !path.startsWith(".runforge-") && !path.startsWith("artifacts/"); }); }
+function buildPrompt(request: ImplementationExecutorRequest, iteration: number, validations: CommandDiagnostic[]): string { const context = request.spec.discovery.explicitFiles; return [`You are the RunForge bounded implementation executor. Work only in the current disposable Git worktree.`, `Task: ${request.spec.task.text}`, `Goal: ${request.spec.task.goal}`, `Acceptance criteria:\n${request.acceptanceCriteria.map((item) => `- ${item}`).join("\n")}`, `Bounded context profile: ${request.spec.discovery.profile}; max ${request.spec.discovery.maxFiles} files, ${request.spec.discovery.maxBytes} bytes, approximately ${request.spec.discovery.maxTokens} tokens. Start with only these explicit files:\n${context.length ? context.map((item) => `- ${item}`).join("\n") : "- Files named by the task and validation commands"}\nStop condition: ${request.spec.discovery.stopCondition}\nDo not enumerate or read the full repository/governance corpus. If context must expand, state the exact file and reason first.`, `Forbidden zones:\n${request.forbiddenZones.map((item) => `- ${item}`).join("\n")}`, `Validation commands:\n${request.validationProfile.commands.map((item) => `- ${item}`).join("\n")}`, `Provider token budget: at most ${request.spec.execution.maxProviderTokens} total and ${request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"]} for this phase.`, `Iteration: ${iteration}. ${iteration ? `Repair these failures:\n${validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}\nstdout: ${item.stdout}\nstderr: ${item.stderr}`).join("\n")}` : "Inspect, plan, implement, and add/update tests as required."}`, `Do not create a Git commit; leave changes uncommitted so RunForge can validate and create the final local commit.`, `Do not push, open a PR, merge, deploy, access secrets/DB/production, or modify forbidden paths. Do not merely propose a patch: edit files and validate. If no change is required, say exactly 'no change required' with evidence. If semantics are ambiguous, stop and say 'ambiguous product decision'.`].join("\n\n"); }
+
+async function buildContextPlan(request: ImplementationExecutorRequest, root: string): Promise<Record<string, unknown>> {
+  const mentioned = request.spec.task.text.match(/(?:src|tests|scripts|schemas|docs|config)\/[A-Za-z0-9._/-]+/g) ?? [];
+  const files = [...new Set([...request.spec.discovery.explicitFiles, ...mentioned])].slice(0, request.spec.discovery.maxFiles);
+  const reads = await Promise.all(files.map(async (file) => { const path = resolve(root, file); if (!isInside(root, path)) return { file, status: "rejected", reason: "path escapes workspace" }; const bytes = await readFile(path).then((value) => value.byteLength, () => 0); return { file, status: bytes ? "planned" : "missing_or_new", bytes, reason: "explicit task scope" }; }));
+  const totalBytes = reads.reduce((sum, item) => sum + ("bytes" in item && typeof item.bytes === "number" ? item.bytes : 0), 0);
+  return { schemaVersion: 1, profile: request.spec.discovery.profile, limits: { maxFiles: request.spec.discovery.maxFiles, maxBytes: request.spec.discovery.maxBytes, maxTokens: request.spec.discovery.maxTokens }, reads, deduplicated: true, totalFiles: reads.length, totalBytes, withinBounds: reads.length <= request.spec.discovery.maxFiles && totalBytes <= request.spec.discovery.maxBytes, stopCondition: request.spec.discovery.stopCondition, expansionPolicy: "Every additional file requires an explicit reason in provider evidence." };
+}
 
 async function runAgent(commandText: string, model: string | null, cwd: string, prompt: string, timeoutMs: number, signal: AbortSignal | undefined, root: string, iteration: number): Promise<{ startedAt: string; finishedAt: string; durationMs: number; exitCode: number | null; signal: NodeJS.Signals | null; summary: string; cancelled: boolean; timedOut: boolean; stdout: string; stderr: string; truncation: { stdout: boolean; stderr: boolean; limitBytes: number }; failureReason: string | null; tokenUsage: number | null; stdoutArtifact: string; stderrArtifact: string }> {
   const argv = splitCommand(commandText); const command = argv.shift()!; const isCodex = /(?:^|\/)codex$/.test(command);

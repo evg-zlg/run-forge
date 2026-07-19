@@ -30,6 +30,7 @@ export function projectAgreementLifecycle(task: Pick<ControlTaskRecord, "executi
 
 export function settleAcceptedAgreement(result: Record<string, unknown>, agreement: ExecutionAgreement): Record<string, unknown> {
   const settled = structuredClone(result);
+  const ownerGated = object(settled.ownerGate).required === true;
   const workflow = object(settled.workflow);
   const direct = object(settled.agreement); const nested = object(workflow.agreement);
   const source = Object.keys(direct).length ? direct : nested;
@@ -63,8 +64,8 @@ export function settleAcceptedAgreement(result: Record<string, unknown>, agreeme
     if (hasDirect) settled.next = correctedNext;
     else settled.workflow = { ...object(settled.workflow), next: correctedNext };
   }
-  if (hasDirect) settled.status = terminalStatus;
-  if (Object.keys(workflow).length) settled.workflow = { ...object(settled.workflow), status: terminalStatus };
+  if (hasDirect) settled.status = ownerGated ? "awaiting_owner" : terminalStatus;
+  if (Object.keys(workflow).length) settled.workflow = { ...object(settled.workflow), status: ownerGated ? "awaiting_owner" : terminalStatus };
   return settled;
 }
 

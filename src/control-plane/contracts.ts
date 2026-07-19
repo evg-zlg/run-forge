@@ -31,7 +31,7 @@ export type ControlTaskStatus = "queued" | "running" | "awaiting_owner_decision"
 
 export type DecisionRecord = {
   decisionId: string;
-  kind: "owner" | "publication";
+  kind: "owner" | "publication" | "accept_completed" | "discard_result";
   decision: string;
   createdAt: string;
   response: Record<string, unknown>;
@@ -117,6 +117,7 @@ export type ControlTaskRecord = {
   publicationRequested: "none" | "draft-pr";
   publicationGate: { required: boolean; status: string; reason?: string };
   ownerGate: { required: boolean; status: string; reason?: string };
+  timeout?: { requestedMs: number; effectiveMs: number; limitingSource: "requested" | "control_plane_cap" | "executor_cap"; phaseDeadlines: Record<string, { timeoutMs: number; deadlineAt: string }>; watchdogPolicy: string };
   createdAt: string;
   updatedAt: string;
   startedAt: string | null;
@@ -183,6 +184,16 @@ export function parseDecisionRequest(value: unknown, kind: "owner" | "publicatio
   rejectUnknown(input, ["decisionId", "decision", "targetBranch", "note"], `${kind} decision`);
   const decision = choice(input.decision, kind === "owner" ? ["approve", "reject", "continue", "hold"] : ["approve", "reject", "hold"], "decision");
   return { decisionId: optionalString(input.decisionId, "decisionId") ?? randomUUID(), decision, ...(input.targetBranch === undefined ? {} : { targetBranch: string(input.targetBranch, "targetBranch") }), note: string(input.note, "note") };
+}
+
+export function parseAcceptCompletedRequest(value: unknown): { decisionId: string; checkpointId: string; delivery: "patch" | "local_commit" } {
+  const input = asObject(value, "accept completed result");
+  rejectUnknown(input, ["decisionId", "checkpointId", "delivery"], "accept completed result");
+  return { decisionId: optionalString(input.decisionId, "decisionId") ?? randomUUID(), checkpointId: string(input.checkpointId, "checkpointId"), delivery: choice(input.delivery ?? "patch", ["patch", "local_commit"], "delivery") };
+}
+export function parseDiscardResultRequest(value: unknown): { decisionId: string; checkpointId: string; confirmation: "discard_result" } {
+  const input = asObject(value, "discard result"); rejectUnknown(input, ["decisionId", "checkpointId", "confirmation"], "discard result");
+  return { decisionId: optionalString(input.decisionId, "decisionId") ?? randomUUID(), checkpointId: string(input.checkpointId, "checkpointId"), confirmation: choice(input.confirmation, ["discard_result"], "confirmation") };
 }
 
 export class ControlPlaneError extends Error {

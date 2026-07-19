@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://runforge.local/schemas/control-plane-v1.schema.json",
   "title": "RunForge Local Control Plane v1 requests",
-  "oneOf": [{ "$ref": "#/$defs/projectInspection" }, { "$ref": "#/$defs/agreementNegotiation" }, { "$ref": "#/$defs/taskSubmission" }, { "$ref": "#/$defs/ownerDecision" }, { "$ref": "#/$defs/publicationDecision" }, { "$ref": "#/$defs/emptyOperation" }],
+  "oneOf": [{ "$ref": "#/$defs/projectInspection" }, { "$ref": "#/$defs/agreementNegotiation" }, { "$ref": "#/$defs/taskSubmission" }, { "$ref": "#/$defs/ownerDecision" }, { "$ref": "#/$defs/publicationDecision" }, { "$ref": "#/$defs/acceptCompletedResult" }, { "$ref": "#/$defs/discardResult" }, { "$ref": "#/$defs/emptyOperation" }],
   "$defs": {
     "phaseBooleanMap": { "type": "object", "additionalProperties": false, "properties": {
       "projectDiscovery": { "type": "boolean" }, "taskAnalysis": { "type": "boolean" }, "implementationPlanning": { "type": "boolean" }, "implementation": { "type": "boolean" }, "localValidation": { "type": "boolean" }, "independentReview": { "type": "boolean" }, "repairIterations": { "type": "boolean" }, "patchPackage": { "type": "boolean" }, "localBranch": { "type": "boolean" }, "localCommit": { "type": "boolean" }, "remotePush": { "type": "boolean" }, "draftPublication": { "type": "boolean" }, "ciMonitoring": { "type": "boolean" }, "ciRepair": { "type": "boolean" }, "prReview": { "type": "boolean" }, "merge": { "type": "boolean" }, "deploy": { "type": "boolean" }, "postDeployValidation": { "type": "boolean" }, "dbAccess": { "type": "boolean" }, "productionAccess": { "type": "boolean" }, "secretUse": { "type": "boolean" }, "providerModelCalls": { "type": "boolean" }
@@ -43,6 +43,12 @@
     } },
     "publicationDecision": { "type": "object", "additionalProperties": false, "required": ["decision", "note"], "properties": {
       "decisionId": { "type": "string", "minLength": 1 }, "decision": { "enum": ["approve", "reject", "hold"] }, "note": { "type": "string", "minLength": 1 }
+    } },
+    "acceptCompletedResult": { "type": "object", "additionalProperties": false, "required": ["checkpointId"], "properties": {
+      "decisionId": { "type": "string", "minLength": 1 }, "checkpointId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$" }, "delivery": { "enum": ["patch", "local_commit"] }
+    } },
+    "discardResult": { "type": "object", "additionalProperties": false, "required": ["checkpointId", "confirmation"], "properties": {
+      "decisionId": { "type": "string", "minLength": 1 }, "checkpointId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$" }, "confirmation": { "const": "discard_result" }
     } },
     "emptyOperation": { "type": "object", "additionalProperties": false, "description": "Body for continue, retry, and cancel lifecycle operations. Retry is accepted only when recovery.retryAvailable is true; cleanup-pending retries return HTTP 409 recovery_pending with retryAfter and a polling action, while failed bounded cleanup returns non-retryable worker_cleanup_failed." }
   }
