@@ -24,10 +24,10 @@ export type TaskSpecV2 = {
   schemaVersion: 2;
   taskId: string;
   task: { text: string; goal: string; acceptanceCriteria: string[] };
-  target: { repository: string; workingDirectory: string; expectedSha: string };
-  execution: { mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number };
+  target: { repository: string; workingDirectory: string; expectedSha: string; dirtyPolicy?: "require_clean" | "allow_known_generated" | "snapshot_from_sha" | "use_disposable_from_base_sha" };
+  execution: { mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number; budgetMode: "soft" | "hard"; phaseBudgets: Record<"startup" | "analysis" | "implementation" | "validation" | "repair" | "review" | "publication", number> };
   executionAgreement: TaskSpecExecutionAgreement;
-  discovery: { policy: "auto" | "explicit" };
+  discovery: { policy: "auto" | "explicit"; profile: "small-scope" | "standard"; explicitFiles: string[]; maxFiles: number; maxBytes: number; maxTokens: number; stopCondition: string };
   runtime: { preference: TaskRuntimeId; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" | "allowed" };
   validation: { mode: "auto" | "explicit"; commands: string[] };
   authority: { profile: "read-only" | "bounded-implementation"; envelopeFile: string | null; forbiddenAreas: string[]; allowProviderCalls: boolean; allowNetwork: boolean };
@@ -60,7 +60,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const task = object(raw.task, "task must be an object.");
   rejectUnknown(task, ["text", "goal", "acceptanceCriteria"], "task");
   const target = object(raw.target, "target must be an object.");
-  rejectUnknown(target, ["repository", "workingDirectory", "expectedSha"], "target");
+  rejectUnknown(target, ["repository", "workingDirectory", "expectedSha", "dirtyPolicy"], "target");
   const repositoryInput = string(target.repository, "target.repository");
   const repository = resolve(baseDir, repositoryInput);
   const workingDirectory = optionalString(target.workingDirectory, "target.workingDirectory") ?? ".";
@@ -71,7 +71,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const expectedSha = optionalString(target.expectedSha, "target.expectedSha") ?? inspection.head;
   if (expectedSha !== inspection.head) throw new Error(`target.expectedSha mismatch: expected ${expectedSha}, current ${inspection.head}.`);
   const executionRaw = object(raw.execution, "execution is required and must be an object.");
-  rejectUnknown(executionRaw, ["mode", "maxRepairIterations", "timeoutMs", "maxChangedFiles", "maxPatchBytes", "maxProviderTokens"], "execution");
+  rejectUnknown(executionRaw, ["mode", "maxRepairIterations", "timeoutMs", "maxChangedFiles", "maxPatchBytes", "maxProviderTokens", "budgetMode", "phaseBudgets"], "execution");
   const artifactsRaw = optionalObject(raw.artifacts, "artifacts");
   rejectUnknown(artifactsRaw, ["root", "resultFormat"], "artifacts");
   const artifactInput = optionalString(artifactsRaw.root, "artifacts.root") ?? join(defaultArtifactRoot(inspection.path), taskId);
@@ -88,7 +88,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const blocked = blockedCommandReports(commands, "main");
   if (blocked[0]) throw new Error(`Unsafe validation command: ${blocked[0].reason}`);
   const discoveryRaw = optionalObject(raw.discovery, "discovery");
-  rejectUnknown(discoveryRaw, ["policy"], "discovery");
+  rejectUnknown(discoveryRaw, ["policy", "profile", "explicitFiles", "maxFiles", "maxBytes", "maxTokens", "stopCondition"], "discovery");
   const runtimeRaw = optionalObject(raw.runtime, "runtime");
   rejectUnknown(runtimeRaw, ["preference", "dockerImage", "prepareDependencies", "dependencyPreparation", "externalNetwork"], "runtime");
   const authorityRaw = optionalObject(raw.authority, "authority");
@@ -137,10 +137,10 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
     schemaVersion: 2,
     taskId,
     task: { text: string(task.text, "task.text"), goal: string(task.goal, "task.goal"), acceptanceCriteria: strings(task.acceptanceCriteria, "task.acceptanceCriteria", true) },
-    target: { repository: await realpath(inspection.path), workingDirectory: inspection.workingDirectory ?? ".", expectedSha },
-    execution: { mode: executionMode, maxRepairIterations: integer(executionRaw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(executionRaw.timeoutMs, "execution.timeoutMs", 1_000, 1_800_000, 300_000), maxChangedFiles: integer(executionRaw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(executionRaw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: integer(executionRaw.maxProviderTokens, "execution.maxProviderTokens", 1_000, 200_000, 100_000) },
+    target: { repository: await realpath(inspection.path), workingDirectory: inspection.workingDirectory ?? ".", expectedSha, ...(target.dirtyPolicy !== undefined || executionMode === "implementation" ? { dirtyPolicy: choice(target.dirtyPolicy ?? "use_disposable_from_base_sha", ["require_clean", "allow_known_generated", "snapshot_from_sha", "use_disposable_from_base_sha"] as const, "target.dirtyPolicy") } : {}) },
+    execution: normalizeExecution(executionRaw, executionMode),
     executionAgreement,
-    discovery: { policy: choice(discoveryRaw.policy ?? "auto", ["auto", "explicit"], "discovery.policy") },
+    discovery: normalizeDiscovery(discoveryRaw),
     runtime: {
       preference: runtimePreference,
       dockerImage: optionalString(runtimeRaw.dockerImage, "runtime.dockerImage") ?? "runforge:local",
@@ -158,6 +158,19 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   };
   await assertArtifactRootSafe(artifactRoot, spec);
   return spec;
+}
+
+const budgetPhases = ["startup", "analysis", "implementation", "validation", "repair", "review", "publication"] as const;
+function normalizeExecution(raw: Record<string, unknown>, mode: TaskExecutionMode): TaskSpecV2["execution"] {
+  const total = integer(raw.maxProviderTokens, "execution.maxProviderTokens", 1_000, 200_000, 100_000);
+  const phaseRaw = optionalObject(raw.phaseBudgets, "execution.phaseBudgets"); rejectUnknown(phaseRaw, [...budgetPhases], "execution.phaseBudgets");
+  const defaults = { startup: .05, analysis: .1, implementation: .45, validation: .1, repair: .2, review: .07, publication: .03 };
+  const phaseBudgets = Object.fromEntries(budgetPhases.map((phase) => [phase, integer(phaseRaw[phase], `execution.phaseBudgets.${phase}`, 0, 200_000, Math.floor(total * defaults[phase]))])) as TaskSpecV2["execution"]["phaseBudgets"];
+  return { mode, maxRepairIterations: integer(raw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(raw.timeoutMs, "execution.timeoutMs", 1_000, 1_800_000, 300_000), maxChangedFiles: integer(raw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(raw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: total, budgetMode: choice(raw.budgetMode ?? "soft", ["soft", "hard"], "execution.budgetMode"), phaseBudgets };
+}
+function normalizeDiscovery(raw: Record<string, unknown>): TaskSpecV2["discovery"] {
+  const profile = choice(raw.profile ?? "standard", ["small-scope", "standard"], "discovery.profile");
+  return { policy: choice(raw.policy ?? "auto", ["auto", "explicit"], "discovery.policy"), profile, explicitFiles: strings(raw.explicitFiles ?? [], "discovery.explicitFiles"), maxFiles: integer(raw.maxFiles, "discovery.maxFiles", 1, 1_000, profile === "small-scope" ? 20 : 100), maxBytes: integer(raw.maxBytes, "discovery.maxBytes", 1_000, 10_000_000, profile === "small-scope" ? 240_000 : 1_000_000), maxTokens: integer(raw.maxTokens, "discovery.maxTokens", 100, 500_000, profile === "small-scope" ? 30_000 : 100_000), stopCondition: optionalString(raw.stopCondition, "discovery.stopCondition") ?? "Stop when the task, declared files, directly related tests/config, and minimum mandatory policy are sufficient." };
 }
 
 export function redactedTaskSpec(spec: TaskSpecV2): TaskSpecV2 {

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://runforge.local/schemas/implementation-checkpoint-v1.schema.json",
+  "title": "RunForge immutable implementation checkpoint v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "checkpointId", "iteration", "kind", "createdAt", "baseSha", "workspaceSha", "workspaceState", "status", "files"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "checkpointId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$" },
+    "iteration": { "type": "integer", "minimum": 0 },
+    "kind": { "enum": ["implementation", "repair"] },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "baseSha": { "type": "string", "minLength": 7 },
+    "workspaceSha": { "type": ["string", "null"] },
+    "workspaceState": { "enum": ["dirty", "committed"] },
+    "status": { "const": "available" },
+    "files": {
+      "type": "array", "minItems": 7, "maxItems": 7,
+      "items": { "type": "object", "additionalProperties": false, "required": ["path", "bytes", "sha256"], "properties": {
+        "path": { "enum": ["patch.diff", "changed-files.json", "validation.json", "usage.json", "executor.json", "safety.json", "unresolved-findings.json"] },
+        "bytes": { "type": "integer", "minimum": 0 }, "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      } }
+    }
+  }
+}
