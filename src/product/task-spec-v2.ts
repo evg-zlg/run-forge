@@ -4,6 +4,7 @@ import { blockedCommandReports } from "../run/external-command-check-helpers.js"
 import { loadCodeRepairPlan } from "../run/code-repair.js";
 import { EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES, type ExecutionParty, type ExecutionPhaseId, type ExecutionProfile } from "./execution-agreement.js";
 import { defaultArtifactRoot, inspectProject, isPathInside } from "./project-inspection.js";
+import { assertNoCredentialLikeKey, normalizeProviderRouting, type ProviderRouting } from "./provider-routing.js";
 import { defaultRuntimeForMode, implementationExecutorContract, runtimeCompatibleWithImplementationExecutor, taskExecutionModes, taskRuntimeIds, taskSpecSchemaVersion, type TaskExecutionMode, type TaskRuntimeId } from "./task-spec-contract.js";
 import {
   VALIDATION_ACCEPTANCE, VALIDATION_CAPABILITIES, defaultValidationProfile, normalizeValidationRequirements,
@@ -11,7 +12,7 @@ import {
 } from "../validation/capability-contract.js";
 
 export { taskSpecSchemaVersion } from "./task-spec-contract.js";
-const topKeys = ["schemaVersion", "taskId", "task", "target", "execution", "executionAgreement", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
+const topKeys = ["schemaVersion", "taskId", "task", "target", "execution", "providerRouting", "executionAgreement", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
 
 export type { TaskExecutionMode } from "./task-spec-contract.js";
 
@@ -30,6 +31,7 @@ export type TaskSpecV2 = {
   task: { text: string; goal: string; acceptanceCriteria: string[] };
   target: { repository: string; workingDirectory: string; expectedSha: string; dirtyPolicy?: "require_clean" | "allow_known_generated" | "snapshot_from_sha" | "use_disposable_from_base_sha" };
   execution: { mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number; budgetMode: "soft" | "hard"; phaseBudgets: Record<"startup" | "analysis" | "implementation" | "validation" | "repair" | "review" | "publication", number> };
+  providerRouting: ProviderRouting;
   executionAgreement: TaskSpecExecutionAgreement;
   discovery: { policy: "auto" | "explicit"; profile: "small-scope" | "standard"; explicitFiles: string[]; maxFiles: number; maxBytes: number; maxTokens: number; stopCondition: string };
   runtime: { preference: TaskRuntimeId; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" | "allowed" };
@@ -141,6 +143,8 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const forbiddenAreas = strings(authorityRaw.forbiddenAreas ?? defaultForbidden(), "authority.forbiddenAreas");
   const repairMode = choice(repairRaw.mode ?? "none", ["none", "disposable", "code"], "repair.mode");
   const executionMode = choice(executionRaw.mode, taskExecutionModes, "execution.mode");
+  const execution = normalizeExecution(executionRaw, executionMode);
+  const providerRouting = normalizeProviderRouting(raw.providerRouting, execution);
   const executionAgreement = normalizeExecutionAgreementRequest(raw.executionAgreement, executionMode);
   if (["implementation", "repair"].includes(executionMode) !== (profile === "bounded-implementation")) throw new Error(`execution.mode='${executionMode}' is inconsistent with authority.profile='${profile}'.`);
   const authorityFile = authorityRaw.envelopeFile === undefined || authorityRaw.envelopeFile === null ? null : resolve(baseDir, string(authorityRaw.envelopeFile, "authority.envelopeFile"));
@@ -172,7 +176,8 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
     taskId,
     task: { text: string(task.text, "task.text"), goal: string(task.goal, "task.goal"), acceptanceCriteria: strings(task.acceptanceCriteria, "task.acceptanceCriteria", true) },
     target: { repository: await realpath(inspection.path), workingDirectory: inspection.workingDirectory ?? ".", expectedSha, ...(target.dirtyPolicy !== undefined || executionMode === "implementation" ? { dirtyPolicy: choice(target.dirtyPolicy ?? "use_disposable_from_base_sha", ["require_clean", "allow_known_generated", "snapshot_from_sha", "use_disposable_from_base_sha"] as const, "target.dirtyPolicy") } : {}) },
-    execution: normalizeExecution(executionRaw, executionMode),
+    execution,
+    providerRouting,
     executionAgreement,
     discovery: normalizeDiscovery(discoveryRaw),
     runtime: {
@@ -291,7 +296,10 @@ function assertNoCredentialLikeValues(value: unknown, path = "TaskSpec"): void {
   }
   if (Array.isArray(value)) value.forEach((item, index) => assertNoCredentialLikeValues(item, `${path}[${index}]`));
   else if (typeof value === "object" && value !== null) {
-    for (const [key, item] of Object.entries(value)) assertNoCredentialLikeValues(item, `${path}.${key}`);
+    for (const [key, item] of Object.entries(value)) {
+      assertNoCredentialLikeKey(key, path);
+      assertNoCredentialLikeValues(item, `${path}.${key}`);
+    }
   }
 }
 

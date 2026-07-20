@@ -20,6 +20,13 @@ export type ControlAuthority = {
   deploy: boolean;
 };
 
+export type CheckpointResumeRequest = {
+  artifactRoot: string; projectId: string; targetRepository: string; workingDirectory: string;
+  expectedBaseSha: string; executionAgreementId: string; authoritySnapshot: Record<string, unknown>;
+  candidateBinary: { path: string; sha256: string; sourceRunforgeSha: string; minimumCheckpointSchemaVersion: number; maximumCheckpointSchemaVersion: number; features: string[] };
+  dependency: { strategy: "verified_read_only_cache" | "candidate_local_offline_install" | "no_dependencies"; cacheRoot?: string; cacheSha256?: string; packageManager?: "npm" | "pnpm" | "yarn" | "bun" };
+};
+
 export type ProjectRecord = {
   id: string;
   repository: string;
@@ -136,12 +143,19 @@ export type ControlTaskRecord = {
     lastRetry: { sourceExecutionId: string; executionId: string; requestedAt: string } | null;
   };
   continuation: { schemaVersion: 1; state: "none" | "available" | "consumed" | "unrecoverable"; decisionId: string | null; executionId: string | null; sourceExecutionId: string | null };
-  checkpointRepair?: { schemaVersion: 1; decisionId: string; checkpointId: string; checkpointDigest: string; checkpointArtifactRoot: string; baseSha: string; executionAgreementId: string; choice: "grant_additional_budget" | "retry_from_checkpoint"; additionalProviderTokens: number; repairIntent: string | null; sourceExecutionId: string; repairExecutionId: string | null };
+  checkpointRepair?: { schemaVersion: 1; decisionId: string; checkpointId: string; checkpointDigest: string; checkpointArtifactRoot: string; checkpointPatchPath: string; baseSha: string; executionAgreementId: string; choice: "grant_additional_budget" | "retry_from_checkpoint"; additionalProviderTokens: number; repairIntent: string | null; sourceExecutionId: string; repairExecutionId: string | null };
   selection?: {
     requestedMode: string; normalizedMode: string; selectedExecutor: string | null; selectedRuntime: string | null;
     selectionReason: string; rejectedAlternatives: Array<{ id: string; reason: string }>;
     authorityChecks: Record<string, boolean>; providerDecision: string; networkDecision: string;
     provider: string | null; model: string | null;
+    /** Routing is declarative and intentionally excludes credential references and headers. */
+    requestedProvider?: "local" | "openrouter" | null;
+    effectiveProvider?: "local" | "openrouter" | null;
+    phaseModels?: Partial<Record<"planner" | "implementer" | "repair" | "reviewer", string>>;
+    fallbackPolicy?: "none" | "same_provider";
+    noLocalFallback?: boolean;
+    budgets?: { maxCalls: number; tokenBudget: { total: number; perPhase: Record<"planner" | "implementer" | "repair" | "reviewer", number> }; costBudgetUsd?: number; timeoutMs: number; maxAttempts: number };
   };
 };
 
@@ -193,6 +207,19 @@ export function parseAcceptCompletedRequest(value: unknown): { decisionId: strin
   const input = asObject(value, "accept completed result");
   rejectUnknown(input, ["decisionId", "checkpointId", "delivery"], "accept completed result");
   return { decisionId: optionalString(input.decisionId, "decisionId") ?? randomUUID(), checkpointId: string(input.checkpointId, "checkpointId"), delivery: choice(input.delivery ?? "patch", ["patch", "local_commit"], "delivery") };
+}
+export function parseCheckpointResumeRequest(value: unknown): CheckpointResumeRequest {
+  const input = asObject(value, "checkpoint resume");
+  rejectUnknown(input, ["artifactRoot", "projectId", "targetRepository", "workingDirectory", "expectedBaseSha", "executionAgreementId", "authoritySnapshot", "candidateBinary", "dependency"], "checkpoint resume");
+  const binary = asObject(input.candidateBinary, "candidateBinary"), dependency = asObject(input.dependency, "dependency");
+  rejectUnknown(binary, ["path", "sha256", "sourceRunforgeSha", "minimumCheckpointSchemaVersion", "maximumCheckpointSchemaVersion", "features"], "candidateBinary");
+  rejectUnknown(dependency, ["strategy", "cacheRoot", "cacheSha256", "packageManager"], "dependency");
+  const sha256 = string(binary.sha256, "candidateBinary.sha256"), baseSha = string(input.expectedBaseSha, "expectedBaseSha");
+  const sourceRunforgeSha = string(binary.sourceRunforgeSha, "candidateBinary.sourceRunforgeSha");
+  if (!/^[a-f0-9]{64}$/.test(sha256) || !/^[a-f0-9]{40,64}$/.test(baseSha) || !/^[a-f0-9]{40,64}$/.test(sourceRunforgeSha)) throw new ControlPlaneError(400, "invalid_request", "Candidate binary SHA-256, source SHA, and expected base SHA must be lowercase full digests.");
+  const features = binary.features === undefined ? [] : Array.isArray(binary.features) && binary.features.every((item) => typeof item === "string") ? binary.features as string[] : (() => { throw new ControlPlaneError(400, "invalid_request", "candidateBinary.features must be a string array."); })();
+  const strategy = choice(dependency.strategy ?? "no_dependencies", ["verified_read_only_cache", "candidate_local_offline_install", "no_dependencies"], "dependency.strategy");
+  return { artifactRoot: string(input.artifactRoot, "artifactRoot"), projectId: string(input.projectId, "projectId"), targetRepository: string(input.targetRepository, "targetRepository"), workingDirectory: string(input.workingDirectory, "workingDirectory"), expectedBaseSha: baseSha, executionAgreementId: string(input.executionAgreementId, "executionAgreementId"), authoritySnapshot: asObject(input.authoritySnapshot, "authoritySnapshot"), candidateBinary: { path: string(binary.path, "candidateBinary.path"), sha256, sourceRunforgeSha, minimumCheckpointSchemaVersion: integer(binary.minimumCheckpointSchemaVersion, "candidateBinary.minimumCheckpointSchemaVersion", 1, 100), maximumCheckpointSchemaVersion: integer(binary.maximumCheckpointSchemaVersion, "candidateBinary.maximumCheckpointSchemaVersion", 1, 100), features: [...new Set(features)].sort() }, dependency: { strategy, ...(dependency.cacheRoot === undefined ? {} : { cacheRoot: string(dependency.cacheRoot, "dependency.cacheRoot") }), ...(dependency.cacheSha256 === undefined ? {} : { cacheSha256: string(dependency.cacheSha256, "dependency.cacheSha256") }), ...(dependency.packageManager === undefined ? {} : { packageManager: choice(dependency.packageManager, ["npm", "pnpm", "yarn", "bun"] as const, "dependency.packageManager") }) } };
 }
 export function parseDiscardResultRequest(value: unknown): { decisionId: string; checkpointId: string; confirmation: "discard_result" } {
   const input = asObject(value, "discard result"); rejectUnknown(input, ["decisionId", "checkpointId", "confirmation"], "discard result");

@@ -14,6 +14,21 @@
     },
     "target": { "type": "object", "additionalProperties": false, "required": ["repository"], "properties": { "repository": { "type": "string", "minLength": 1 }, "workingDirectory": { "type": "string", "minLength": 1 }, "expectedSha": { "type": "string", "minLength": 7 }, "dirtyPolicy": { "enum": ["require_clean", "allow_known_generated", "snapshot_from_sha", "use_disposable_from_base_sha"] } } },
     "execution": { "type": "object", "additionalProperties": false, "required": ["mode"], "properties": { "mode": { "enum": ["inspection", "implementation", "validation", "repair"] }, "maxRepairIterations": { "type": "integer", "minimum": 0, "maximum": 3 }, "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 1800000 }, "maxChangedFiles": { "type": "integer", "minimum": 1, "maximum": 100 }, "maxPatchBytes": { "type": "integer", "minimum": 1000, "maximum": 5000000 }, "maxProviderTokens": { "type": "integer", "minimum": 1000, "maximum": 200000 }, "budgetMode": { "enum": ["soft", "hard"] }, "phaseBudgets": { "type": "object", "additionalProperties": false, "properties": { "startup": { "type": "integer", "minimum": 0, "maximum": 200000 }, "analysis": { "type": "integer", "minimum": 0, "maximum": 200000 }, "implementation": { "type": "integer", "minimum": 0, "maximum": 200000 }, "validation": { "type": "integer", "minimum": 0, "maximum": 200000 }, "repair": { "type": "integer", "minimum": 0, "maximum": 200000 }, "review": { "type": "integer", "minimum": 0, "maximum": 200000 }, "publication": { "type": "integer", "minimum": 0, "maximum": 200000 } } } } },
+    "providerRouting": {
+      "type": "object", "additionalProperties": false, "required": ["provider", "maxCalls", "tokenBudget", "timeoutMs", "retry"],
+      "properties": {
+        "provider": { "enum": ["local", "openrouter"] }, "fallbackPolicy": { "enum": ["none", "same_provider"] },
+        "models": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "string", "minLength": 1 }, "implementer": { "type": "string", "minLength": 1 }, "repair": { "type": "string", "minLength": 1 }, "reviewer": { "type": "string", "minLength": 1 } } },
+        "maxCalls": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "tokenBudget": { "type": "object", "additionalProperties": false, "required": ["total", "perPhase"], "properties": { "total": { "type": "integer", "minimum": 1000, "maximum": 200000 }, "perPhase": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "integer", "minimum": 0, "maximum": 200000 }, "implementer": { "type": "integer", "minimum": 0, "maximum": 200000 }, "repair": { "type": "integer", "minimum": 0, "maximum": 200000 }, "reviewer": { "type": "integer", "minimum": 0, "maximum": 200000 } } } } },
+        "costBudgetUsd": { "type": "number", "minimum": 0, "maximum": 1000 }, "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 1800000 },
+        "retry": { "type": "object", "additionalProperties": false, "required": ["maxAttempts"], "properties": { "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 3 } } }
+      },
+      "allOf": [
+        { "if": { "properties": { "provider": { "const": "local" } }, "required": ["provider"] }, "then": { "properties": { "fallbackPolicy": { "const": "none" } } } },
+        { "if": { "properties": { "fallbackPolicy": { "const": "same_provider" } }, "required": ["fallbackPolicy"] }, "then": { "properties": { "provider": { "const": "openrouter" }, "retry": { "type": "object", "properties": { "maxAttempts": { "type": "integer", "minimum": 2 } } } } } }
+      ]
+    },
     "executionAgreement": {
       "type": "object", "additionalProperties": false, "required": ["schemaVersion", "profile"],
       "properties": {

@@ -1,0 +1,48 @@
+import { mkdtemp, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+import { buildContextPlan } from "../../src/implementation/bounded-context.js";
+
+describe("bounded implementation context", () => {
+  it("includes only regular in-root secret-free explicit files and keeps the plan metadata-only", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-context-root-"));
+    const outside = join(await mkdtemp(join(tmpdir(), "runforge-context-outside-")), "outside.ts");
+    await writeFile(join(root, "safe.ts"), "export const value = 1;\n");
+    await writeFile(join(root, "secret.ts"), `API_KEY=sk-${"x".repeat(30)}\n`);
+    await writeFile(join(root, "empty.ts"), "");
+    await writeFile(outside, "outside sentinel\n");
+    await symlink(outside, join(root, "linked.ts"));
+    const request = { spec: { task: { text: "bounded context" }, discovery: { explicitFiles: ["safe.ts", "secret.ts", "empty.ts", "linked.ts", "../escape.ts"], maxFiles: 5, maxBytes: 10_000, maxTokens: 10_000, profile: "small-scope", stopCondition: "bounded" } } } as any;
+
+    const result = await buildContextPlan(request, root);
+    const serializedPlan = JSON.stringify(result.plan);
+    expect(result.prompt).toContain("--- BEGIN FILE safe.ts ---\nexport const value = 1;");
+    expect(result.prompt).toContain("--- BEGIN FILE empty.ts ---");
+    expect(result.prompt).not.toContain("outside sentinel");
+    expect(result.prompt).not.toContain("sk-");
+    expect(serializedPlan).not.toContain("export const value");
+    expect(result.plan).toMatchObject({ withinBounds: true, totalFiles: 5, expansionHistory: [] });
+    expect((result.plan.omitted as Array<Record<string, unknown>>)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ file: "secret.ts", status: "rejected", reason: "secret-like content" }),
+      expect.objectContaining({ file: "linked.ts", status: "rejected", reason: "non-regular file", bytes: 0 }),
+      expect.objectContaining({ file: "../escape.ts", status: "rejected", reason: "path escapes workspace" }),
+    ]));
+    expect((result.plan.omitted as Array<Record<string, unknown>>)).toHaveLength(3);
+    expect((result.plan.reads as Array<Record<string, unknown>>)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ file: "secret.ts", status: "rejected", reason: "secret-like content" }),
+      expect.objectContaining({ file: "linked.ts", status: "rejected", reason: "non-regular file" }),
+      expect.objectContaining({ file: "../escape.ts", status: "rejected", reason: "path escapes workspace" }),
+      expect.objectContaining({ file: "empty.ts", status: "planned", bytes: 0 }),
+    ]));
+  });
+
+  it("does not read a file whose declared size exceeds the bounded byte limit", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-context-limit-"));
+    await writeFile(join(root, "large.ts"), "x".repeat(2_000));
+    const request = { spec: { task: { text: "bounded context" }, discovery: { explicitFiles: ["large.ts"], maxFiles: 1, maxBytes: 1_000, maxTokens: 10_000, profile: "small-scope", stopCondition: "bounded" } } } as any;
+    const result = await buildContextPlan(request, root);
+    expect(result.prompt).toBe("");
+    expect(result.plan).toMatchObject({ withinBounds: false, totalBytes: 2_000, reads: [expect.objectContaining({ status: "rejected", reason: "context byte limit exceeded" })] });
+  });
+});

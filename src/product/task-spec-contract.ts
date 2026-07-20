@@ -56,6 +56,21 @@ export const taskSpecV2Schema: Record<string, unknown> = {
     task: { type: "object", additionalProperties: false, required: ["text", "goal", "acceptanceCriteria"], properties: { text: { type: "string", minLength: 1 }, goal: { type: "string", minLength: 1 }, acceptanceCriteria: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } } } },
     target: { type: "object", additionalProperties: false, required: ["repository"], properties: { repository: { type: "string", minLength: 1 }, workingDirectory: { type: "string", minLength: 1 }, expectedSha: { type: "string", minLength: 7 }, dirtyPolicy: { enum: ["require_clean", "allow_known_generated", "snapshot_from_sha", "use_disposable_from_base_sha"] } } },
     execution: { type: "object", additionalProperties: false, required: ["mode"], properties: { mode: { enum: taskExecutionModes }, maxRepairIterations: { type: "integer", minimum: 0, maximum: 3 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 1800000 }, maxChangedFiles: { type: "integer", minimum: 1, maximum: 100 }, maxPatchBytes: { type: "integer", minimum: 1000, maximum: 5000000 }, maxProviderTokens: { type: "integer", minimum: 1000, maximum: 200000 }, budgetMode: { enum: ["soft", "hard"] }, phaseBudgets: { type: "object", additionalProperties: false, properties: Object.fromEntries(["startup", "analysis", "implementation", "validation", "repair", "review", "publication"].map((phase) => [phase, { type: "integer", minimum: 0, maximum: 200000 }])) } } },
+    providerRouting: {
+      type: "object", additionalProperties: false, required: ["provider", "maxCalls", "tokenBudget", "timeoutMs", "retry"],
+      properties: {
+        provider: { enum: ["local", "openrouter"] }, fallbackPolicy: { enum: ["none", "same_provider"] },
+        models: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer"].map((phase) => [phase, { type: "string", minLength: 1 }])) },
+        maxCalls: { type: "integer", minimum: 1, maximum: 32 },
+        tokenBudget: { type: "object", additionalProperties: false, required: ["total", "perPhase"], properties: { total: { type: "integer", minimum: 1000, maximum: 200000 }, perPhase: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer"].map((phase) => [phase, { type: "integer", minimum: 0, maximum: 200000 }])) } } },
+        costBudgetUsd: { type: "number", minimum: 0, maximum: 1000 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 1800000 },
+        retry: { type: "object", additionalProperties: false, required: ["maxAttempts"], properties: { maxAttempts: { type: "integer", minimum: 1, maximum: 3 } } }
+      },
+      allOf: [
+        { if: { properties: { provider: { const: "local" } }, required: ["provider"] }, then: { properties: { fallbackPolicy: { const: "none" } } } },
+        { if: { properties: { fallbackPolicy: { const: "same_provider" } }, required: ["fallbackPolicy"] }, then: { properties: { provider: { const: "openrouter" }, retry: { type: "object", properties: { maxAttempts: { type: "integer", minimum: 2 } } } } } }
+      ]
+    },
     executionAgreement: {
       type: "object", additionalProperties: false, required: ["schemaVersion", "profile"],
       properties: {
