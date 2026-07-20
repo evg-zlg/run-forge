@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { readDurableCheckpoint, type DurableCheckpoint } from "../implementation/durable-checkpoint.js";
 import { ControlPlaneError, type ControlTaskRecord, type ExecutionAttempt } from "./contracts.js";
 import type { ControlPlaneStore } from "./state.js";
@@ -75,7 +75,7 @@ export async function startCheckpointRepair(input: {
   const spec = await store.readSpec(task.id);
   if (object(spec?.execution).maxRepairIterations < 1) throw error(task, "repair_iterations_exhausted", "The accepted TaskSpec does not authorize a repair iteration.");
   if (!(await input.acceptedSourceIsCurrent())) throw error(task, "target_sha_changed", "Checkpoint repair is stale because the accepted source SHA is no longer current.");
-  task.checkpointRepair = { schemaVersion: 1, decisionId: request.decisionId, checkpointId: request.checkpointId, checkpointDigest: request.checkpointDigest, checkpointArtifactRoot: verified.artifactRoot, baseSha: verified.expectedSha, executionAgreementId: verified.agreementId, choice: request.choice, additionalProviderTokens: request.additionalProviderTokens, repairIntent: request.repairIntent, sourceExecutionId: verified.sourceExecutionId, repairExecutionId: null };
+  task.checkpointRepair = { schemaVersion: 1, decisionId: request.decisionId, checkpointId: request.checkpointId, checkpointDigest: request.checkpointDigest, checkpointArtifactRoot: verified.artifactRoot, checkpointPatchPath: verified.checkpoint.patchPath, baseSha: verified.expectedSha, executionAgreementId: verified.agreementId, choice: request.choice, additionalProviderTokens: request.additionalProviderTokens, repairIntent: request.repairIntent, sourceExecutionId: verified.sourceExecutionId, repairExecutionId: null };
   const response: Record<string, unknown> = { schemaVersion: 1, taskId: task.id, decisionId: request.decisionId, checkpointId: request.checkpointId, checkpointDigest: request.checkpointDigest, checkpointSchemaVersion: verified.schemaVersion, choice: request.choice, status: "repair_generation_started", authorityGranted: false, authorityPreserved: task.authority, executionAgreementId: verified.agreementId, baseSha: verified.expectedSha, additionalProviderTokens: request.additionalProviderTokens, repairIntent: request.repairIntent, providerRun: true, targetMainMutation: false, patchFallback: verified.checkpoint.patchPath, sourceExecutionId: verified.sourceExecutionId, repairExecutionId: null };
   task.decisions.push({ decisionId: request.decisionId, kind: "checkpoint_repair", decision: request.choice, createdAt: new Date().toISOString(), response });
   await input.beginAttempt(verified.sourceExecutionId);
@@ -103,6 +103,7 @@ async function verifyRepairCheckpoint(task: ControlTaskRecord, checkpointId: str
     if (cause instanceof ControlPlaneError) throw cause;
     throw new ControlPlaneError(409, "checkpoint_digest_invalid", "Checkpoint payload or manifest integrity verification failed.", { reason: safeMessage(cause) }, false, task.id);
   }
+  assertPublishedRecordBinding(task, published, attempt, checkpoint);
   const canonicalSpec = object(await store.readSpec(task.id));
   const attemptSpec = object(await readJson(attempt.specPath));
   const expectedSha = stringField(object(canonicalSpec.target).expectedSha);
@@ -129,11 +130,19 @@ async function verifyRepairCheckpoint(task: ControlTaskRecord, checkpointId: str
 
 function assertPublishedMembership(task: ControlTaskRecord, result: Record<string, unknown>, published: Record<string, any>, attempt: ExecutionAttempt, checkpointId: string): void {
   const checkpointPath = `checkpoints/${checkpointId}`;
-  const patchPath = `${checkpointPath}/patch.diff`;
-  if (published.path !== checkpointPath || published.patchPath !== patchPath || !Number.isSafeInteger(published.iteration) || published.iteration < 0) throw error(task, "checkpoint_not_published", "Published checkpoint membership contains unsafe or inconsistent paths.");
-  if (resolve(attempt.artifactRoot, published.path) !== resolve(attempt.artifactRoot, checkpointPath) || resolve(attempt.artifactRoot, published.patchPath) !== resolve(attempt.artifactRoot, patchPath)) throw error(task, "checkpoint_not_published", "Published checkpoint paths escape the persisted artifact root.");
+  if (typeof published.path !== "string" || typeof published.patchPath !== "string" || !Number.isSafeInteger(published.iteration) || published.iteration < 0) throw error(task, "checkpoint_not_published", "Published checkpoint membership contains unsafe or inconsistent paths.");
+  if (!published.path.startsWith(`${checkpointPath}/`) && published.path !== checkpointPath) throw error(task, "checkpoint_not_published", "Published checkpoint path is outside the checkpoint namespace.");
+  if (!published.patchPath.startsWith(`${checkpointPath}/`) || !published.patchPath.endsWith("/patch.diff")) throw error(task, "checkpoint_not_published", "Published checkpoint patch path is outside the checkpoint namespace.");
+  if (resolve(attempt.artifactRoot, published.path) !== join(resolve(attempt.artifactRoot), published.path) || resolve(attempt.artifactRoot, published.patchPath) !== join(resolve(attempt.artifactRoot), published.patchPath)) throw error(task, "checkpoint_not_published", "Published checkpoint paths escape the persisted artifact root.");
   const artifactPaths = object(result.artifacts).checkpoints;
-  if (!Array.isArray(artifactPaths) || !artifactPaths.includes(checkpointPath)) throw error(task, "checkpoint_not_published", "Checkpoint is absent from the persisted artifact membership list.");
+  if (!Array.isArray(artifactPaths) || !artifactPaths.includes(published.path)) throw error(task, "checkpoint_not_published", "Checkpoint is absent from the persisted artifact membership list.");
+}
+
+/** Binds public membership to the verified immutable v2 record (or the flat v1 record). */
+function assertPublishedRecordBinding(task: ControlTaskRecord, published: Record<string, any>, attempt: ExecutionAttempt, checkpoint: DurableCheckpoint): void {
+  const checkpointPath = relative(attempt.artifactRoot, checkpoint.path);
+  const patchPath = relative(attempt.artifactRoot, checkpoint.patchPath);
+  if (published.path !== checkpointPath || published.patchPath !== patchPath) throw error(task, "checkpoint_not_published", "Published checkpoint paths do not bind to the verified immutable record.");
 }
 
 async function assertChangedFilesSafe(task: ControlTaskRecord, checkpointPath: string, spec: Record<string, unknown>): Promise<void> {

@@ -10,6 +10,7 @@ import { ControlPlaneError, controlPlaneApiVersion, defaultControlPlaneHost, def
 import { ControlPlaneManager, redactPublicValue } from "./manager.js";
 import { ControlPlaneStore } from "./state.js";
 import { discoverImplementationExecutors } from "../implementation/executor.js";
+import { publicImplementationExecutors, publicProviderRouting } from "./provider-routing-projection.js";
 import {
   executionAgreementCapabilities,
   executionAgreementNegotiatePath,
@@ -86,13 +87,13 @@ async function discoveryManifest(request: IncomingMessage, host: string): Promis
   const authority = request.headers.host && isLocalHostHeader(request.headers.host) ? request.headers.host : `${host}:${defaultControlPlanePort}`;
   return {
     product: "RunForge", discoveryVersion: 5, apiVersion: controlPlaneApiVersion, version, localOnly: true, baseUrl: `http://${authority}`,
-    implementationExecutors: publicImplementationExecutors(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
+    implementationExecutors: publicImplementationExecutors(implementationExecutors), providerRouting: publicProviderRouting(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
     executionAgreements: dynamicAgreementCapabilities(implementationExecutors, dockerVersion),
     validation: await validationCapabilityDiscovery(),
     checkpointRepair: { endpoint: "/v1/tasks/{id}/checkpoint-repairs", choices: ["grant_additional_budget", "retry_from_checkpoint"], requiresCheckpointDigest: true, digestDiscovery: "GET /v1/tasks/{id}/result -> artifact.checkpoints[].digest", legacySchemaV1: "verified-on-read", immutableLegacyArtifactsRewritten: false, newExecutionGeneration: true, patchFallbackPreserved: true },
     checkpointResume: { endpoint: "/v1/tasks/{id}/checkpoints/{checkpointId}/resume", schemas: { checkpoint: 2, request: "/schemas/control-plane-v1.schema.json#/$defs/checkpointResume", evidence: `${taskResultSchemaPath}#/$defs/checkpointResumeEvidence` }, reconstructionModes: ["git_worktree_base_plus_binary_patch"], lifecycle: ["candidate_validation_required", "validated", "rejected"], providerCalls: 0 },
     endpoints: { health: "/healthz", readiness: "/readyz", capabilities: "/v1/capabilities", taskSpecSchema: taskSpecSchemaPath, executionAgreementSchema: executionAgreementSchemaPath, resultSchema: taskResultSchemaPath, executionAgreementNegotiation: executionAgreementNegotiatePath, executionAgreement: "/v1/execution-agreements/{id}", projectInspection: "/v1/projects/inspect", tasks: "/v1/tasks", task: "/v1/tasks/{id}", taskAgreement: "/v1/tasks/{id}/agreement", result: "/v1/tasks/{id}/result", ownerDecisions: "/v1/tasks/{id}/owner-decisions", acceptCompletedResult: "/v1/tasks/{id}/accept-completed-result", checkpointResume: "/v1/tasks/{id}/checkpoints/{checkpointId}/resume", checkpointRepairs: "/v1/tasks/{id}/checkpoint-repairs", discardResult: "/v1/tasks/{id}/discard-result", continuation: "/v1/tasks/{id}/continue", retry: "/v1/tasks/{id}/retry", cancellation: "/v1/tasks/{id}/cancel", publicationDecisions: "/v1/tasks/{id}/publication-decisions" },
-    lifecycle: { poll: "GET /v1/tasks/{id}", heartbeatField: "progress.lastHeartbeatAt", executionIdentityField: "progress.executionId", attemptField: "progress.attempt", phaseValues: ["understand_task", "implement", "validate", "repair", "finalize"], stalledAfterMs: 15000, terminal: ["completed", "failed", "interrupted"], recoveryAvailabilityField: "recovery.retryAvailable", ownerGate: "awaiting_owner_decision" },
+    lifecycle: { poll: "GET /v1/tasks/{id}", heartbeatField: "progress.lastHeartbeatAt", executionIdentityField: "progress.executionId", attemptField: "progress.attempt", phaseValues: ["understand_task", "planner", "implement", "validate", "repair", "review", "finalize"], stalledAfterMs: 15000, terminal: ["completed", "failed", "interrupted"], recoveryAvailabilityField: "recovery.retryAvailable", ownerGate: "awaiting_owner_decision" },
     bootstrap: "Inspect discovery and capabilities, register the project, copy the published implementationRequest, poll progress, and follow only advertised recovery actions."
   };
 }
@@ -103,10 +104,10 @@ async function capabilities(_stateRoot: string): Promise<Record<string, unknown>
     schemaVersion: 5, apiVersion: controlPlaneApiVersion, transports: ["localhost-http"], projectLocators: ["absolute-path", "registration-id"], taskModes: ["inspection", "implementation", "validation", "repair"],
     checkpointRepair: { endpoint: "/v1/tasks/{id}/checkpoint-repairs", choices: ["grant_additional_budget", "retry_from_checkpoint"], requiresCheckpointDigest: true, digestDiscovery: "GET /v1/tasks/{id}/result -> artifact.checkpoints[].digest", legacySchemaV1: "verified-on-read", immutableLegacyArtifactsRewritten: false, newExecutionGeneration: true, patchFallbackPreserved: true },
     checkpointResume: { endpoint: "/v1/tasks/{id}/checkpoints/{checkpointId}/resume", checkpointSchemaVersion: 2, lifecycle: ["candidate_validation_required", "validated", "rejected"], reconstructionModes: ["git_worktree_base_plus_binary_patch"], providerCalls: 0, durableGenerationLease: true, idempotentReplay: true, compatibilityErrors: ["checkpoint_incompatible", "checkpoint_integrity_error", "wrong_identity", "conflict"], dependencyStrategies: ["verified_read_only_cache", "candidate_local_offline_install", "no_dependencies"], preparationClassifications: ["created", "reused", "repaired", "conflict_external", "unsafe", "cleanup_failed"] },
-    implementationExecutors: publicImplementationExecutors(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
+    implementationExecutors: publicImplementationExecutors(implementationExecutors), providerRouting: publicProviderRouting(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
     executionAgreements: dynamicAgreementCapabilities(implementationExecutors, dockerVersion),
     validation: await validationCapabilityDiscovery(),
-    execution: { engine: "TaskSpec v2", timeout: { globalCapMs: implementationExecutorContract.maxLimits.timeoutMs, capSource: "implementationExecutorContract.maxLimits.timeoutMs", requestedAndEffectivePublishedAtAcceptance: true, watchdogPolicy: "deadline and stale heartbeat" }, durableCheckpoints: true, acceptCompletedResult: true, runtimes: taskRuntimeIds, runtimeSupport: { "local-disposable": { available: implementationReady, implementation: implementationReady, reason: implementationReady ? "The implementation executor is ready for local disposable workspaces." : "No ready implementation executor is available." }, docker: { available: dockerVersion !== null, implementation: false, version: dockerVersion, reason: dockerVersion === null ? "Docker CLI is unavailable." : "Docker CLI is present for supported non-implementation lanes; the implementation executor does not support Docker." } }, dependencyPreparation: ["required", "if-needed", "disabled", "reuse-existing"], persistentState: true, restartRecovery: true, heartbeat: true, watchdog: true, cancellation: true, executionGenerations: true, boundedCleanup: true, interruptedResult: true, journalSchemaVersion: 1, continuationSchemaVersion: 1 },
+    execution: { engine: "TaskSpec v2", phases: ["planner", "implementer", "repair", "reviewer"], timeout: { globalCapMs: implementationExecutorContract.maxLimits.timeoutMs, capSource: "implementationExecutorContract.maxLimits.timeoutMs", requestedAndEffectivePublishedAtAcceptance: true, watchdogPolicy: "deadline and stale heartbeat" }, durableCheckpoints: true, acceptCompletedResult: true, runtimes: taskRuntimeIds, runtimeSupport: { "local-disposable": { available: implementationReady, implementation: implementationReady, reason: implementationReady ? "The implementation executor is ready for local disposable workspaces." : "No ready implementation executor is available." }, docker: { available: dockerVersion !== null, implementation: false, version: dockerVersion, reason: dockerVersion === null ? "Docker CLI is unavailable." : "Docker CLI is present for supported non-implementation lanes; the implementation executor does not support Docker." } }, dependencyPreparation: ["required", "if-needed", "disabled", "reuse-existing"], persistentState: true, restartRecovery: true, heartbeat: true, watchdog: true, cancellation: true, executionGenerations: true, boundedCleanup: true, interruptedResult: true, journalSchemaVersion: 1, continuationSchemaVersion: 1 },
     authority: { semantics: "explicit upper bounds; implementation requires implementation/providerCalls/network/localBranch/localCommit", inspect: true, implementation: true, providerCalls: "required-for-local-coding-agent", network: "required-for-provider-transport", localBranch: "required-for-disposable-worktree", localCommit: "required-for-local-result", remotePush: "separate-publication-decision", draftPublication: "separate-publication-decision", merge: false, deploy: false },
     safety: { defaultBind: defaultControlPlaneHost, maxRequestBytes: defaultMaxRequestBytes, secretsInResponses: false, providerCallsByDefault: false, networkByDefault: false, sharedCheckoutMutation: false },
     schemas: { taskSpec: taskSpecSchemaPath, executionAgreement: executionAgreementSchemaPath, result: taskResultSchemaPath, controlPlane: "/schemas/control-plane-v1.schema.json" }
@@ -164,15 +165,6 @@ function dynamicAgreementCapabilities(implementationExecutors: Awaited<ReturnTyp
       reason: item.status === "ready" ? "Executor and its existing credential mechanism are ready." : "No implementation executor with a ready existing credential mechanism is available.",
     })),
   });
-}
-
-function publicImplementationExecutors(executors: Awaited<ReturnType<typeof discoverImplementationExecutors>>): Record<string, unknown>[] {
-  return executors.map((item) => ({
-    id: item.id, status: item.status, supports: item.supports, providerCalls: item.providerCalls, runtime: item.runtime,
-    providerRequirements: item.providerRequirements, networkRequirements: item.networkRequirements, maxLimits: item.maxLimits,
-    limitations: item.status === "ready" ? [] : ["Implementation executor or its existing credential mechanism is not ready."], model: item.model,
-    credentialReady: item.status === "ready", credentialReason: item.status === "ready" ? "Existing credential mechanism is ready." : "Existing credential mechanism is not ready; no credential data is exposed.",
-  }));
 }
 
 async function readSchema(name: string): Promise<Record<string, unknown>> {

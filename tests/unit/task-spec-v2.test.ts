@@ -33,6 +33,33 @@ describe("TaskSpec v2", () => {
     expect(redactedTaskSpec(first)).toEqual(first);
   });
 
+  it("defaults omitted provider routing to the legacy local-only contract", async () => {
+    const repo = await gitRepo();
+    await expect(normalizeTaskSpecV2(minimal(repo))).resolves.toMatchObject({
+      providerRouting: { provider: "local", fallbackPolicy: "none", models: {}, maxCalls: 4, retry: { maxAttempts: 1 } }
+    });
+  });
+
+  it("normalizes bounded OpenRouter routing without requiring every phase model", async () => {
+    const repo = await gitRepo();
+    const providerRouting = {
+      provider: "openrouter", fallbackPolicy: "same_provider", models: { planner: "openai/gpt-5" },
+      maxCalls: 6, tokenBudget: { total: 50000, perPhase: { planner: 12000, implementer: 25000, repair: 8000, reviewer: 5000 } },
+      costBudgetUsd: 12.5, timeoutMs: 120000, retry: { maxAttempts: 2 }
+    };
+    const spec = await normalizeTaskSpecV2({ ...minimal(repo), providerRouting });
+    expect(spec.providerRouting).toEqual(providerRouting);
+    const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(taskSpecV2Schema);
+    expect(validate({ ...minimal(repo), providerRouting }), JSON.stringify(validate.errors)).toBe(true);
+  });
+
+  it("rejects invalid provider fallbacks and credential-shaped routing input", async () => {
+    const repo = await gitRepo();
+    const routing = { provider: "local", fallbackPolicy: "same_provider", maxCalls: 1, tokenBudget: { total: 1000, perPhase: {} }, timeoutMs: 1000, retry: { maxAttempts: 2 } };
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), providerRouting: routing })).rejects.toThrow("only supports fallbackPolicy='none'");
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), providerRouting: { ...routing, provider: "openrouter", apiKey: "not-a-secret" } })).rejects.toThrow("credential-shaped field");
+  });
+
   it.each(EXECUTION_PROFILES.filter((profile) => profile !== "custom"))("normalizes the %s execution agreement profile", async (profile) => {
     const repo = await gitRepo();
     await expect(normalizeTaskSpecV2({ ...minimal(repo), executionAgreement: { schemaVersion: 1, profile } }))

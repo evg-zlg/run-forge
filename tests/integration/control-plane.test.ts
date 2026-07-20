@@ -170,11 +170,14 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
   it("publishes degraded adapter-honest capabilities and negotiates durable registered-project context", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-project-agreement-"))) - 1]!;
     const previous = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+    const previousOpenRouter = process.env.OPENROUTER_API_KEY;
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = "/definitely/missing/super-secret-command-token";
+    delete process.env.OPENROUTER_API_KEY;
     const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
     try {
       const capabilities = await json(await fetch(`${instance.url}/v1/capabilities`));
       expect(capabilities).toMatchObject({ executionAgreements: { projectLevelNegotiation: true, technicalCapabilities: { implementation: false, providerModelCalls: false, remotePush: false, draftPublication: false }, readiness: { implementationExecutorReady: false }, unavailableAdapters: { githubPush: { available: false, credentialReady: false }, updateExistingChange: { available: false }, ci: { available: false }, deploy: { available: false }, database: { available: false }, production: { available: false }, secrets: { available: false } } } });
+      expect(capabilities).toMatchObject({ providerRouting: { providers: { openrouter: { configured: false, credentialReady: false, ready: false, noLocalFallback: true } } }, implementationExecutors: expect.arrayContaining([expect.objectContaining({ id: "openrouter-coding-agent", provider: "openrouter", credentialReady: false })]) });
       expect(JSON.stringify(capabilities)).not.toContain("super-secret-command-token");
 
       const unknown = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "assist-only", projectId: "missing-project", publicationTarget: { kind: "none" } }) });
@@ -196,6 +199,7 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
       expect(await json(await fetch(`${instance.url}/v1/execution-agreements/${agreement.agreementId}`))).toEqual(agreement);
     } finally {
       if (previous === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previous;
+      if (previousOpenRouter === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = previousOpenRouter;
     }
   });
 

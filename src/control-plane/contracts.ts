@@ -143,12 +143,19 @@ export type ControlTaskRecord = {
     lastRetry: { sourceExecutionId: string; executionId: string; requestedAt: string } | null;
   };
   continuation: { schemaVersion: 1; state: "none" | "available" | "consumed" | "unrecoverable"; decisionId: string | null; executionId: string | null; sourceExecutionId: string | null };
-  checkpointRepair?: { schemaVersion: 1; decisionId: string; checkpointId: string; checkpointDigest: string; checkpointArtifactRoot: string; baseSha: string; executionAgreementId: string; choice: "grant_additional_budget" | "retry_from_checkpoint"; additionalProviderTokens: number; repairIntent: string | null; sourceExecutionId: string; repairExecutionId: string | null };
+  checkpointRepair?: { schemaVersion: 1; decisionId: string; checkpointId: string; checkpointDigest: string; checkpointArtifactRoot: string; checkpointPatchPath: string; baseSha: string; executionAgreementId: string; choice: "grant_additional_budget" | "retry_from_checkpoint"; additionalProviderTokens: number; repairIntent: string | null; sourceExecutionId: string; repairExecutionId: string | null };
   selection?: {
     requestedMode: string; normalizedMode: string; selectedExecutor: string | null; selectedRuntime: string | null;
     selectionReason: string; rejectedAlternatives: Array<{ id: string; reason: string }>;
     authorityChecks: Record<string, boolean>; providerDecision: string; networkDecision: string;
     provider: string | null; model: string | null;
+    /** Routing is declarative and intentionally excludes credential references and headers. */
+    requestedProvider?: "local" | "openrouter" | null;
+    effectiveProvider?: "local" | "openrouter" | null;
+    phaseModels?: Partial<Record<"planner" | "implementer" | "repair" | "reviewer", string>>;
+    fallbackPolicy?: "none" | "same_provider";
+    noLocalFallback?: boolean;
+    budgets?: { maxCalls: number; tokenBudget: { total: number; perPhase: Record<"planner" | "implementer" | "repair" | "reviewer", number> }; costBudgetUsd?: number; timeoutMs: number; maxAttempts: number };
   };
 };
 
