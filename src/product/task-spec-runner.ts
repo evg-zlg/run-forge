@@ -12,6 +12,9 @@ import {
 } from "./task-result-contract.js";
 import { inspectProject, type ProjectInspection } from "./project-inspection.js";
 import { runImplementationExecutor, type ImplementationExecutorResult } from "../implementation/executor.js";
+import { runValidationOnlyExecutor, type ValidationOnlyExecutorResult } from "../validation/validation-only-executor.js";
+import { completeExecutionPhase, EXECUTION_PHASE_IDS, negotiateExecutionAgreement, type ExecutionAgreement } from "./execution-agreement.js";
+import { buildAgreementAwareTaskResult, completionStatusForAgreement, type NormalizedHandoffInput, type ResultNextAction } from "./task-result-contract.js";
 import {
   clearRepairedFindings,
   delegatedImplementationParty,
@@ -20,11 +23,11 @@ import {
 } from "./task-spec-implementation-result.js";
 
 export type TaskSpecExecution =
-  | { kind: "validation"; spec: TaskSpecV2; result: TaskRunResult; summary: string; success: boolean }
+  | { kind: "validation"; spec: TaskSpecV2; result: TaskRunResult | ValidationOnlyExecutorResult; summary: string; success: boolean }
   | { kind: "repair"; spec: TaskSpecV2; result: ExternalExecutionResult; summary: string; success: boolean }
   | { kind: "implementation"; spec: TaskSpecV2; result: ImplementationExecutorResult | AgreementHandoffResult; summary: string; success: boolean };
 type AgreementHandoffResult = { status: "delegated"; responsibleParty: "external_session" | "external_system"; selectedExecutor: { id: "agreement-handoff"; model: null }; providerCalls: []; publicationMutations: 0 };
-export async function runTaskSpecFile(path: string, context: { signal?: AbortSignal; attempt?: number; executionId?: string; executionAgreementId?: string; checkpointRepair?: { patchPath: string; checkpointId: string; checkpointDigest: string; repairIntent: string | null }; onProgress?: (phase: string, detail: string) => void | Promise<void> } = {}): Promise<TaskSpecExecution> {
+export async function runTaskSpecFile(path: string, context: { signal?: AbortSignal; attempt?: number; executionId?: string; executionAgreementId?: string; executionAgreement?: ExecutionAgreement; checkpointRepair?: { patchPath: string; checkpointId: string; checkpointDigest: string; repairIntent: string | null }; onProgress?: (phase: string, detail: string) => void | Promise<void> } = {}): Promise<TaskSpecExecution> {
   const spec = await loadTaskSpecV2(path);
   const initialTarget = await inspectProject(spec.target.repository, spec.target.workingDirectory);
   await writeNormalizedSpec(spec);
@@ -47,6 +50,15 @@ export async function runTaskSpecFile(path: string, context: { signal?: AbortSig
     return { kind: "implementation", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: ["implemented_and_validated", "no_change_required"].includes(result.status) };
   }
   if (spec.repair.mode === "none") {
+    if (spec.execution.mode === "validation") {
+      const agreement = context.executionAgreement ?? validationExecutionAgreement(spec);
+      const result = await preserveSpecOnFailure(spec, initialTarget, () => runValidationOnlyExecutor({
+        spec, executionAgreement: agreement, ...(context.signal ? { signal: context.signal } : {}), ...(context.onProgress ? { onProgress: context.onProgress } : {}),
+      }));
+      await writeNormalizedSpec(spec);
+      await finalizeCapabilityAwareValidationArtifacts(spec, result, context.executionId !== undefined);
+      return { kind: "validation", spec, result, summary: `TaskSpec ${spec.taskId}: ${result.status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: result.status === "completed" };
+    }
     const result = await preserveSpecOnFailure(spec, initialTarget, () => runTaskRunHarness({
       taskId: spec.taskId,
       executionRoot: runForgeRoot(),
@@ -94,6 +106,65 @@ export async function runTaskSpecFile(path: string, context: { signal?: AbortSig
   await writeNormalizedSpec(spec);
   const status = await finalizeRepairArtifacts(spec, result);
   return { kind: "repair", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: ["completed", "awaiting_owner_decision"].includes(status) };
+}
+
+async function finalizeCapabilityAwareValidationArtifacts(spec: TaskSpecV2, result: ValidationOnlyExecutorResult, legacySettlement: boolean): Promise<void> {
+  let agreement = result.executionAgreement;
+  for (const [phaseId, evidence] of [
+    ["projectDiscovery", ["task-spec.normalized.json"]],
+    ["taskAnalysis", ["validation-plan.json"]],
+    ["localValidation", result.review.structural.evidence],
+  ] as const) {
+    const phase = agreement.phases.find((item) => item.phaseId === phaseId);
+    if (phase?.requested && phase.responsibleParty === "runforge" && phase.status !== "completed" && phase.status !== "conflict") agreement = completeExecutionPhase(agreement, phaseId, evidence.length ? evidence : ["validation-plan.json"]);
+  }
+  const workflowStatus = result.validationAggregate === "blocked_by_capability" ? "blocked_by_capability"
+    : result.validationAggregate === "blocked_by_policy" ? "blocked_by_policy"
+      : result.status === "completed" ? completionStatusForAgreement(agreement) : "failed";
+  const delegation = result.review.semantic.delegation!;
+  const next: ResultNextAction = {
+    party: delegation.party,
+    exactAction: delegation.exactAction,
+    gates: [], evidence: result.review.structural.evidence.map((reference) => ({ kind: "artifact", reference, summary: "Structural validation evidence." })),
+  };
+  const handoff: NormalizedHandoffInput = {
+    profile: "assist-only",
+    summary: `Validation-only execution completed with aggregate ${result.validationAggregate}; no implementation or publication was performed.`,
+    changedFiles: [], patch: null, branch: null, commit: null,
+    validation: result.validationResults.map((item) => ({ command: item.command, status: item.outcome, exitCode: item.exitCode, evidence: item.artifactPaths, lane: item.lane, cwd: item.cwd, ...(item.argv ? { argv: item.argv } : {}), repositoryIdentity: item.repositoryIdentity, boundSha: item.boundSha, capabilities: item.requiredCapabilities, safetyAssertions: item.safetyAssertions })),
+    findings: [], structuralEvidence: result.review.structural.evidence.map((reference) => ({ kind: "artifact", reference, summary: "Structural validation evidence." })), semanticReview: result.review.semantic,
+    risks: result.validationResults.filter((item) => item.outcome !== "passed").map((item) => `${item.command}: ${item.outcome}${item.failureReason ? ` (${item.failureReason})` : ""}`),
+    nextActions: [next], publicationInstructions: ["Publication was not requested or performed."], ciCommands: spec.validation.commands,
+    safety: { providerCalls: false, notes: ["Source SHA and worktree state were unchanged; unsupported and policy-skipped commands were not spawned."] },
+    targetSha: result.source.after.head, baseSha: result.source.before.head,
+  };
+  const workflow = buildAgreementAwareTaskResult({ taskId: spec.taskId, status: workflowStatus, agreement, handoff, next, validationPlan: result.validationPlan, validationAggregate: result.validationAggregate, review: result.review });
+  const status = result.status === "completed" ? "completed" : result.validationAggregate === "blocked_by_capability" ? "blocked_by_capability" : result.validationAggregate === "blocked_by_policy" ? "blocked_by_policy" : "failed";
+  const settlement: Record<string, unknown> = legacySettlement
+    ? { schemaVersion: 1, contract: "runforge-task-result", taskId: spec.taskId, status, workflow }
+    : workflow;
+  const document = {
+    ...settlement,
+    requestedIntent: spec.execution.mode, actualExecutorMode: "validation", validationPlan: result.validationPlan, validationAggregate: result.validationAggregate,
+    validation: result.validationResults, review: result.review,
+    targetRepository: { path: spec.target.repository, repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory), initialSha: result.source.before.head, finalSha: result.source.after.head, changed: !result.source.unchanged, initialStatus: result.source.before.status, finalStatus: result.source.after.status },
+    completedWork: result.validationResults.filter((item) => item.outcome === "passed").map((item) => ({ command: item.command, status: item.outcome, lane: item.lane })),
+    artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", validationPlan: "validation-plan.json" },
+    git: { branch: null, commit: null, pullRequest: null, merge: null }, ownerGate: { required: false, status: "not_required" },
+    nextAction: { recommendation: next.exactAction },
+    safetyAssertions: { targetUnchanged: result.source.unchanged, targetMainMutation: false, targetMainPush: false, targetPrMerge: false, deploy: false, databaseAccess: false, productionAccess: false, secretAccess: false, providerCalls: false },
+    errors: result.status === "failed" ? result.validationResults.filter((item) => item.acceptance === "required" && item.outcome !== "passed").map((item) => `${item.command}: ${item.outcome}`) : [],
+    limitations: result.review.semantic.limitations,
+  };
+  validateTaskResultContract(document);
+  await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
+  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} validation result\n\nStatus: **${status}**\n\nValidation aggregate: **${result.validationAggregate}**\n\nSource unchanged: **${result.source.unchanged}**\n\nStructural review: **${result.review.structural.status}**\n\nSemantic review: **${result.review.semantic.status}**; delegated to **${delegation.party}**.\n\nProvider calls, publication, database, production, secrets, merge, and deploy: **none**.\n`, "utf8");
+}
+
+function validationExecutionAgreement(spec: TaskSpecV2): ExecutionAgreement {
+  const enabled = Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, true]));
+  const requested = Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, ["projectDiscovery", "taskAnalysis", "localValidation"].includes(phase)]));
+  return negotiateExecutionAgreement({ profile: spec.executionAgreement.profile, requested, requestedOwnership: spec.executionAgreement.phaseOwnership, technicalCapability: enabled, authority: enabled, policy: enabled });
 }
 
 async function preserveSpecOnFailure<T>(spec: TaskSpecV2, initialTarget: ProjectInspection, execute: () => Promise<T>): Promise<T> {
