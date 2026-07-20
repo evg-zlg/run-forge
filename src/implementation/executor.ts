@@ -1,13 +1,13 @@
-import { spawn } from "node:child_process";
+import { execFile, spawn } from "node:child_process";
 import { access, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
 import { promisify } from "node:util";
-import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import { loadAdminConfig } from "../admin/config.js";
 import { scanSecrets } from "../security/secret-scan.js";
 import type { TaskSpecV2, TaskExecutionMode } from "../product/task-spec-v2.js";
 import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor } from "../product/task-spec-contract.js";
-import { persistDurableCheckpoint } from "./durable-checkpoint.js";
+import { durableCheckpointContext, persistDurableCheckpoint } from "./durable-checkpoint.js";
 import { executionPhaseOwner } from "../product/execution-agreement.js";
 import {
   aggregateValidationOutcomes, buildMultiLaneValidationPreflightPlan, runtimeCapabilities,
@@ -80,6 +80,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   const executor = selection.selected;
   const executorCommand = executor.command!;
   const sourceBefore = await git(request.targetRepository, ["rev-parse", "HEAD"]);
+  const sourceRunforgeSha = (await git(dirname(fileURLToPath(import.meta.url)), ["rev-parse", "HEAD"])).trim();
   if (sourceBefore.trim() !== request.spec.target.expectedSha) throw new Error(`target_sha_mismatch: expected ${request.spec.target.expectedSha}, current ${sourceBefore.trim()}`);
   const sourceStatusBefore = await git(request.targetRepository, ["status", "--porcelain=v1"]);
   const dirtyPolicy = request.spec.target.dirtyPolicy ?? "use_disposable_from_base_sha";
@@ -201,14 +202,13 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       const actualTokens = providerCalls.reduce((sum, item) => sum + (typeof item.tokenUsage === "number" ? item.tokenUsage : 0), 0);
       const phaseLimit = request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"];
       const checkpoint = await persistDurableCheckpoint(request.artifactRoot, {
-        taskId: request.spec.taskId, executionAgreementId: request.executionAgreementId,
-        checkpointId: `${iteration === 0 ? "implementation" : "repair"}-${iteration}`,
-        iteration, kind: iteration === 0 ? "implementation" : "repair", baseSha: request.spec.target.expectedSha,
-        workspaceSha: null, workspaceState: "dirty", patch, changedFiles, validation: validations,
-        usage: { accounting: providerCalls.at(-1)?.usageAccounting ?? "provider", phase, providerCalls: providerCalls.length, totalTokens: actualTokens, costUsd: null },
+        taskId: request.spec.taskId, executionAgreementId: request.executionAgreementId, sourceRunforgeSha, checkpointId: `${iteration === 0 ? "implementation" : "repair"}-${iteration}`, iteration, attempt: request.attempt, generation: request.generation,
+        kind: iteration === 0 ? "implementation" : "repair", expectedBaseSha: request.spec.target.expectedSha, patch, changedFiles, workspace: { identity: request.generation, workingDirectory: request.workingDirectory, sha: null, state: "dirty" },
+        ...durableCheckpointContext({ projectId: request.spec.target.repository, taskSpec: request.spec, executionAgreementId: request.executionAgreementId,
+          executionAgreement: request.spec.executionAgreement, authoritySnapshot: request.authorityEnvelope, validationPlan, completedEvidence: validations, validationPassed,
+          iteration, providerAccounting: providerCalls.at(-1)?.usageAccounting ?? "provider", providerCalls: providerCalls.length, providerTokens: actualTokens }),
         executor: { id: executor.id, model: executor.model, runtime: "local-disposable", attempt: request.attempt, generation: request.generation },
-        safetyAssertions: { targetMainMutation: false, targetMainPush: false, forbiddenZonesRespected: safetyErrors.length === 0, secretScanPassed: !safetyErrors.includes("Secret scan rejected the patch.") },
-        unresolvedFindings: unresolved
+        safetyAssertions: { targetMainMutation: false, targetMainPush: false, forbiddenZonesRespected: safetyErrors.length === 0, secretScanPassed: !safetyErrors.includes("Secret scan rejected the patch.") }, secretScanResult: secretScan, unresolvedFindings: unresolved
       });
       checkpoints.push({ id: checkpoint.id, path: relative(request.artifactRoot, checkpoint.path), patchPath: relative(request.artifactRoot, checkpoint.patchPath), digest: checkpoint.digest, iteration, validationPassed });
       const phaseExceeded = (call.tokenUsage ?? 0) > phaseLimit, totalExceeded = actualTokens > request.spec.execution.maxProviderTokens;
