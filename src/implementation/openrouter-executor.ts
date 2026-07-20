@@ -43,7 +43,7 @@ export async function runOpenRouterAgent(request: ImplementationExecutorRequest,
   await mkdir(join(request.artifactRoot, "provider"), { recursive: true });
   try {
     const reasoning = phase === "planner" || phase === "reviewer" ? routing.reasoning?.[phase] : undefined;
-    response = await executeOpenRouterChatCompletion({ model: routing.models[phase]!, messages: [{ role: "system", content: phase === "planner" || phase === "reviewer" ? "Return concise structured implementation analysis only." : "Return only a unified git diff; no prose, secrets, commits, or publication actions." }, { role: "user", content: prompt }], timeoutMs: routing.timeoutMs, maxCalls: Math.min(routing.retry.maxAttempts, remainingAttempts), maxTokens: Math.min(phaseTokensRemaining, totalTokensRemaining), reasoning, signal: request.signal });
+    response = await executeOpenRouterChatCompletion({ model: routing.models[phase]!, messages: [{ role: "system", content: phase === "planner" || phase === "reviewer" ? "Return concise structured implementation analysis only." : "Return only a raw unified git diff whose first non-whitespace line starts with diff --git a/. Never use Markdown fences, prose, or *** Begin Patch format. Do not include secrets, commits, or publication actions." }, { role: "user", content: prompt }], timeoutMs: routing.timeoutMs, maxCalls: Math.min(routing.retry.maxAttempts, remainingAttempts), maxTokens: Math.min(phaseTokensRemaining, totalTokensRemaining), reasoning, signal: request.signal });
     attempts = response.attempts; attemptAccounting.set(previous, usedAttempts + attempts);
     const rawOutput = response.content;
     if (Buffer.byteLength(rawOutput) > request.spec.execution.maxPatchBytes) throw new Error(`openrouter_response_too_large: exceeds ${request.spec.execution.maxPatchBytes} bytes`);
@@ -74,8 +74,14 @@ export async function runOpenRouterAgent(request: ImplementationExecutorRequest,
 
 export function normalizeOpenRouterDiff(value: string): string {
   const trimmed = value.trim();
-  const fenced = trimmed.match(/^```(?:diff|patch)?\s*\n([\s\S]*?)\n```$/i);
-  return (fenced?.[1] ?? trimmed).trimEnd() + "\n";
+  const fenced = trimmed.match(/```(?:diff|patch)?\s*\n([\s\S]*?)\n```/i);
+  const candidate = (fenced?.[1] ?? trimmed).trim();
+  const diffStart = candidate.search(/^diff --git /m);
+  const diff = (diffStart > 0 ? candidate.slice(diffStart) : candidate).trimEnd();
+  return diff
+    .replace(/^diff --git (?!a\/)(\S+) (?!b\/)(\S+)$/gm, "diff --git a/$1 b/$2")
+    .replace(/^--- (?!a\/|\/dev\/null)(\S+)$/gm, "--- a/$1")
+    .replace(/^\+\+\+ (?!b\/|\/dev\/null)(\S+)$/gm, "+++ b/$1") + "\n";
 }
 
 export function validateOpenRouterDiff(diff: string, limits: { maxBytes: number; maxChangedFiles: number; forbiddenZones: string[] }): string[] {
