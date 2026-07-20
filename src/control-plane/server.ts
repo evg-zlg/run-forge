@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { redactJson } from "../admin/redaction.js";
 import { getRunForgeVersionInfo } from "../core/version.js";
-import { implementationExecutorContract, publicTaskSpecContract, taskRuntimeIds, taskSpecSchemaPath, taskSpecV2Schema } from "../product/task-spec-contract.js";
+import { implementationExecutorContract, multiLaneTaskSpecExample, publicTaskSpecContract, taskRuntimeIds, taskSpecSchemaPath, taskSpecV2Schema } from "../product/task-spec-contract.js";
 import { commandVersion } from "../product/project-inspection.js";
 import { ControlPlaneError, controlPlaneApiVersion, defaultControlPlaneHost, defaultControlPlanePort, defaultMaxRequestBytes, parseAcceptCompletedRequest, parseCheckpointRepairRequest, parseDecisionRequest, parseDiscardResultRequest, parseProjectRequest, parseTaskRequest } from "./contracts.js";
 import { ControlPlaneManager, redactPublicValue } from "./manager.js";
@@ -17,6 +17,8 @@ import {
   parseExecutionAgreementNegotiationRequest,
   technicalCapabilitiesForExecutor,
 } from "./execution-agreements.js";
+import { GIT_EVIDENCE_SAFETY_ASSERTIONS } from "../validation/git-evidence-lane.js";
+import { VALIDATION_ACCEPTANCE, VALIDATION_CAPABILITIES, VALIDATION_OUTCOMES } from "../validation/capability-contract.js";
 
 export type ControlPlaneServerOptions = { host?: string; port?: number; stateRoot?: string; maxRequestBytes?: number; manager?: ControlPlaneManager };
 export type ControlPlaneServerInstance = { server: Server; url: string; manager: ControlPlaneManager; stateRoot: string; close: () => Promise<void> };
@@ -44,6 +46,7 @@ export async function handleControlPlaneRequest(request: IncomingMessage, respon
   if (method === "GET" && path === "/readyz") return sendJson(response, 200, await context.manager.health());
   if (method === "GET" && path === "/.well-known/runforge") return sendJson(response, 200, await discoveryManifest(request, context.host));
   if (method === "GET" && path === "/v1/capabilities") return sendJson(response, 200, await capabilities(context.manager.store.root));
+  if (method === "GET" && path === "/v1/capabilities/discovery") return sendJson(response, 200, await validationCapabilityDiscovery());
   if (method === "GET" && path === taskSpecSchemaPath) return sendJson(response, 200, taskSpecV2Schema);
   if (method === "GET" && path === executionAgreementSchemaPath) return sendJson(response, 200, await readSchema("execution-agreement-v1.schema.json"));
   if (method === "GET" && path === taskResultSchemaPath) return sendJson(response, 200, await readSchema("task-result-v1.schema.json"));
@@ -83,6 +86,7 @@ async function discoveryManifest(request: IncomingMessage, host: string): Promis
     product: "RunForge", discoveryVersion: 5, apiVersion: controlPlaneApiVersion, version, localOnly: true, baseUrl: `http://${authority}`,
     implementationExecutors: publicImplementationExecutors(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
     executionAgreements: dynamicAgreementCapabilities(implementationExecutors, dockerVersion),
+    validation: await validationCapabilityDiscovery(),
     checkpointRepair: { endpoint: "/v1/tasks/{id}/checkpoint-repairs", choices: ["grant_additional_budget", "retry_from_checkpoint"], requiresCheckpointDigest: true, digestDiscovery: "GET /v1/tasks/{id}/result -> artifact.checkpoints[].digest", legacySchemaV1: "verified-on-read", immutableLegacyArtifactsRewritten: false, newExecutionGeneration: true, patchFallbackPreserved: true },
     endpoints: { health: "/healthz", readiness: "/readyz", capabilities: "/v1/capabilities", taskSpecSchema: taskSpecSchemaPath, executionAgreementSchema: executionAgreementSchemaPath, resultSchema: taskResultSchemaPath, executionAgreementNegotiation: executionAgreementNegotiatePath, executionAgreement: "/v1/execution-agreements/{id}", projectInspection: "/v1/projects/inspect", tasks: "/v1/tasks", task: "/v1/tasks/{id}", taskAgreement: "/v1/tasks/{id}/agreement", result: "/v1/tasks/{id}/result", ownerDecisions: "/v1/tasks/{id}/owner-decisions", acceptCompletedResult: "/v1/tasks/{id}/accept-completed-result", checkpointRepairs: "/v1/tasks/{id}/checkpoint-repairs", discardResult: "/v1/tasks/{id}/discard-result", continuation: "/v1/tasks/{id}/continue", retry: "/v1/tasks/{id}/retry", cancellation: "/v1/tasks/{id}/cancel", publicationDecisions: "/v1/tasks/{id}/publication-decisions" },
     lifecycle: { poll: "GET /v1/tasks/{id}", heartbeatField: "progress.lastHeartbeatAt", executionIdentityField: "progress.executionId", attemptField: "progress.attempt", phaseValues: ["understand_task", "implement", "validate", "repair", "finalize"], stalledAfterMs: 15000, terminal: ["completed", "failed", "interrupted"], recoveryAvailabilityField: "recovery.retryAvailable", ownerGate: "awaiting_owner_decision" },
@@ -97,10 +101,49 @@ async function capabilities(_stateRoot: string): Promise<Record<string, unknown>
     checkpointRepair: { endpoint: "/v1/tasks/{id}/checkpoint-repairs", choices: ["grant_additional_budget", "retry_from_checkpoint"], requiresCheckpointDigest: true, digestDiscovery: "GET /v1/tasks/{id}/result -> artifact.checkpoints[].digest", legacySchemaV1: "verified-on-read", immutableLegacyArtifactsRewritten: false, newExecutionGeneration: true, patchFallbackPreserved: true },
     implementationExecutors: publicImplementationExecutors(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
     executionAgreements: dynamicAgreementCapabilities(implementationExecutors, dockerVersion),
+    validation: await validationCapabilityDiscovery(),
     execution: { engine: "TaskSpec v2", timeout: { globalCapMs: implementationExecutorContract.maxLimits.timeoutMs, capSource: "implementationExecutorContract.maxLimits.timeoutMs", requestedAndEffectivePublishedAtAcceptance: true, watchdogPolicy: "deadline and stale heartbeat" }, durableCheckpoints: true, acceptCompletedResult: true, runtimes: taskRuntimeIds, runtimeSupport: { "local-disposable": { available: implementationReady, implementation: implementationReady, reason: implementationReady ? "The implementation executor is ready for local disposable workspaces." : "No ready implementation executor is available." }, docker: { available: dockerVersion !== null, implementation: false, version: dockerVersion, reason: dockerVersion === null ? "Docker CLI is unavailable." : "Docker CLI is present for supported non-implementation lanes; the implementation executor does not support Docker." } }, dependencyPreparation: ["required", "if-needed", "disabled", "reuse-existing"], persistentState: true, restartRecovery: true, heartbeat: true, watchdog: true, cancellation: true, executionGenerations: true, boundedCleanup: true, interruptedResult: true, journalSchemaVersion: 1, continuationSchemaVersion: 1 },
     authority: { semantics: "explicit upper bounds; implementation requires implementation/providerCalls/network/localBranch/localCommit", inspect: true, implementation: true, providerCalls: "required-for-local-coding-agent", network: "required-for-provider-transport", localBranch: "required-for-disposable-worktree", localCommit: "required-for-local-result", remotePush: "separate-publication-decision", draftPublication: "separate-publication-decision", merge: false, deploy: false },
     safety: { defaultBind: defaultControlPlaneHost, maxRequestBytes: defaultMaxRequestBytes, secretsInResponses: false, providerCallsByDefault: false, networkByDefault: false, sharedCheckoutMutation: false },
     schemas: { taskSpec: taskSpecSchemaPath, executionAgreement: executionAgreementSchemaPath, result: taskResultSchemaPath, controlPlane: "/schemas/control-plane-v1.schema.json" }
+  };
+}
+
+async function validationCapabilityDiscovery(): Promise<Record<string, unknown>> {
+  const [executors, dockerVersion] = await Promise.all([discoverImplementationExecutors(), commandVersion("docker", ["--version"])]);
+  const semanticBackends = executors.map((executor) => ({
+    id: executor.id, kind: "semantic_review", status: executor.status === "ready" ? "ready" : "unavailable",
+    quality: "independent provider/model review of behavior, regressions, correctness, and acceptance coverage",
+    model: executor.model, supportedRuntimes: executor.runtime,
+    limitations: executor.status === "ready" ? ["A distinct provider invocation consumes review budget and can still return low confidence or findings."] : ["No ready provider/credential mechanism; responsibility must be delegated by the Execution Agreement."],
+  }));
+  return {
+    schemaVersion: 1, endpoint: "/v1/capabilities/discovery",
+    vocabulary: { capabilities: VALIDATION_CAPABILITIES, acceptance: VALIDATION_ACCEPTANCE, outcomes: VALIDATION_OUTCOMES, aggregateStatuses: ["passed", "completed_with_validation_gaps", "blocked_by_capability", "blocked_by_policy", "product_failed", "setup_failed", "runtime_failed", "timed_out", "cancelled"] },
+    negotiation: {
+      stage: "task_acceptance", beforeProviderInvocation: true,
+      requiredUnsupported: { httpStatus: 422, errorCode: "validation_capability_unavailable", taskCreated: false, providerInvocations: 0 },
+      nonRequiredUnsupported: { accepted: true, acceptance: ["optional", "advisory", "evidence-only"], aggregate: "completed_with_validation_gaps", productFailed: false },
+      deferredFacts: ["package-manager executable", "dependency state", "Git binding identity"],
+    },
+    runtimes: {
+      "local-disposable": { status: executors.some((item) => item.status === "ready") ? "ready" : "degraded", lanes: ["local-disposable-validation", "git-evidence"], implementation: true },
+      docker: { status: dockerVersion === null ? "unavailable" : "ready", version: dockerVersion, lanes: ["docker-validation"], implementation: false },
+    },
+    lanes: {
+      "local-disposable-validation": { purpose: "product commands", shell: true, gitMetadata: false },
+      "docker-validation": { purpose: "isolated product commands", shell: true, implementation: false },
+      "git-evidence": { purpose: "read-only structural Git evidence", runtime: "local-disposable", network: false, credentials: false, mutations: false, binding: ["canonical repository identity", "accepted target SHA"], argvAllowlist: ["status --porcelain", "diff --check", "diff --name-only", "bounded rev-parse", "two-revision merge-base"], safetyAssertions: GIT_EVIDENCE_SAFETY_ASSERTIONS },
+    },
+    review: {
+      distinction: "structural_review validates commands/artifacts and never substitutes for semantic_review; semantic_review is a distinct provider/model invocation or an explicit delegation.",
+      backends: [{ id: "validation-evidence", kind: "structural_review", status: "available", quality: "deterministic command, exit-code, lane, SHA, and artifact evidence", limitations: ["Does not judge behavior, regressions, or acceptance-criteria semantics."] }, ...semanticBackends],
+      resultFields: { structural: "review.structural", semantic: "review.semantic" },
+    },
+    responsibility: { source: "Execution Agreement", structuralReviewPhase: "localValidation", semanticReviewPhase: "independentReview", preservedAcross: ["retry", "restart", "continuation", "normalized result", "handoff"] },
+    schemas: { taskSpec: taskSpecSchemaPath, validationRequirements: `${taskSpecSchemaPath}#/properties/validation/properties/requirements`, result: taskResultSchemaPath, validationPlan: `${taskResultSchemaPath}#/$defs/validationPlan`, review: `${taskResultSchemaPath}#/$defs/review` },
+    examples: { multiLaneTaskSpec: multiLaneTaskSpecExample },
+    hardLimits: { database: false, production: false, credentials: false, remotePublication: false },
   };
 }
 
@@ -146,7 +189,7 @@ async function readJson(request: IncomingMessage, limit: number): Promise<unknow
   try { return JSON.parse(Buffer.concat(chunks).toString("utf8")); } catch { throw new ControlPlaneError(400, "malformed_json", "Request body is not valid JSON."); }
 }
 async function assertEmptyOrObject(request: IncomingMessage, limit: number): Promise<void> { if (Number(request.headers["content-length"] ?? 0) === 0) return; const body = await readJson(request, limit); if (!body || typeof body !== "object" || Array.isArray(body)) throw new ControlPlaneError(400, "invalid_request", "Body must be an object."); }
-function publicTask(task: Awaited<ReturnType<ControlPlaneManager["getTask"]>>): Record<string, unknown> { const repair = task.checkpointRepair; return { id: task.id, projectId: task.projectId, status: task.status, timeout: task.timeout, executionAgreement: task.executionAgreement, authority: task.authority, selection: task.selection, ownerGate: task.ownerGate, publicationGate: task.publicationGate, createdAt: task.createdAt, updatedAt: task.updatedAt, startedAt: task.startedAt, finishedAt: task.finishedAt, error: task.error, progress: task.progress, recovery: task.recovery, execution: task.execution, continuation: task.continuation, ...(repair ? { checkpointRepair: { schemaVersion: repair.schemaVersion, decisionId: repair.decisionId, checkpointId: repair.checkpointId, checkpointDigest: repair.checkpointDigest, baseSha: repair.baseSha, executionAgreementId: repair.executionAgreementId, choice: repair.choice, additionalProviderTokens: repair.additionalProviderTokens, repairIntent: repair.repairIntent, sourceExecutionId: repair.sourceExecutionId, repairExecutionId: repair.repairExecutionId } } : {}), events: task.events }; }
+function publicTask(task: Awaited<ReturnType<ControlPlaneManager["getTask"]>>): Record<string, unknown> { const repair = task.checkpointRepair; return { id: task.id, projectId: task.projectId, status: task.status, timeout: task.timeout, executionAgreement: task.executionAgreement, validationNegotiation: task.validationNegotiation, authority: task.authority, selection: task.selection, ownerGate: task.ownerGate, publicationGate: task.publicationGate, createdAt: task.createdAt, updatedAt: task.updatedAt, startedAt: task.startedAt, finishedAt: task.finishedAt, error: task.error, progress: task.progress, recovery: task.recovery, execution: task.execution, continuation: task.continuation, ...(repair ? { checkpointRepair: { schemaVersion: repair.schemaVersion, decisionId: repair.decisionId, checkpointId: repair.checkpointId, checkpointDigest: repair.checkpointDigest, baseSha: repair.baseSha, executionAgreementId: repair.executionAgreementId, choice: repair.choice, additionalProviderTokens: repair.additionalProviderTokens, repairIntent: repair.repairIntent, sourceExecutionId: repair.sourceExecutionId, repairExecutionId: repair.repairExecutionId } } : {}), events: task.events }; }
 function enforceLocalRequest(request: IncomingMessage, host: string): void { const hostHeader = String(request.headers.host ?? ""); if (hostHeader && !isLocalHostHeader(hostHeader) && !hostHeader.startsWith(`${host}:`)) throw new ControlPlaneError(403, "non_local_host", "Host header must resolve to localhost."); const origin = request.headers.origin; if (origin) { let originHost = ""; try { originHost = new URL(origin).hostname; } catch { throw new ControlPlaneError(403, "invalid_origin", "Origin is invalid."); } if (!isLoopbackHost(originHost)) throw new ControlPlaneError(403, "non_local_origin", "Cross-origin requests are limited to localhost."); } }
 function isLocalHostHeader(value: string): boolean { try { return isLoopbackHost(new URL(`http://${value}`).hostname); } catch { return false; } }
 function corsHeaders(host: string): Record<string, string> { return { "access-control-allow-origin": `http://${host}`, "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type", "access-control-max-age": "600" }; }

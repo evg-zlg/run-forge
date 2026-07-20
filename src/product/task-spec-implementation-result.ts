@@ -96,43 +96,45 @@ export async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: 
   const completed = ["implemented_and_validated", "no_change_required"].includes(result.status);
   const ownerRequired = result.ownerGate.required;
   const agreement = implementationAgreement(spec, result, completed);
-  const status: RunForgeCompletionStatus = ownerRequired ? "awaiting_owner" : completed ? completionStatusForAgreement(agreement) : "failed";
+  const status: RunForgeCompletionStatus = result.validationAggregate === "blocked_by_capability" ? "blocked_by_capability" : result.validationAggregate === "blocked_by_policy" ? "blocked_by_policy" : ownerRequired ? "awaiting_owner" : completed ? completionStatusForAgreement(agreement) : "failed";
+  const validationCompleted = ["passed", "completed_with_validation_gaps"].includes(result.validationAggregate);
   const next = implementationNextAction(status, agreement); const handoff = implementationHandoff(spec, result, status, next);
-  const agreementAware = buildAgreementAwareTaskResult({ taskId: spec.taskId, status, agreement, handoff, next });
+  const agreementAware = buildAgreementAwareTaskResult({ taskId: spec.taskId, status, agreement, handoff, next, validationPlan: result.validationPlan, validationAggregate: result.validationAggregate, review: result.review });
+  const legacyStatus = status === "blocked_by_capability" || status === "blocked_by_policy" ? status : completed ? "completed" : ownerRequired ? "awaiting_owner_decision" : "failed";
   const settlement = legacySettlement
-    ? { schemaVersion: 1 as const, contract: "runforge-task-result" as const, taskId: spec.taskId, status: completed ? "completed" : ownerRequired ? "awaiting_owner_decision" : "failed", workflow: agreementAware }
+    ? { schemaVersion: 1 as const, contract: "runforge-task-result" as const, taskId: spec.taskId, status: legacyStatus, workflow: agreementAware }
     : agreementAware;
   const document = {
     ...settlement,
     requestedIntent: spec.execution.mode, actualExecutorMode: "implementation", selectedExecutor: result.selectedExecutor,
     implementation: { status: result.status, performed: result.changedFiles.length > 0, plan: result.plan, changedFiles: result.changedFiles, localBranch: result.localBranch, localCommit: result.localCommit, patchPackage: result.patchPackage, unresolvedAcceptanceCriteria: result.unresolvedFindings },
     artifact: { status: result.checkpoints.length ? "available" : "unavailable", latestCheckpointId: result.checkpoints.at(-1)?.id ?? null, bestValidatedCheckpointId: [...result.checkpoints].reverse().find((item) => item.validationPassed)?.id ?? null, checkpoints: result.checkpoints },
-    workflow: { ...objectRecord(documentWorkflow(settlement)), status: ownerRequired ? "awaiting_owner" : objectRecord(documentWorkflow(settlement)).status ?? (completed ? "completed" : "failed"), implementationCompleted: completed, validationCompleted: completed && result.validationResults.every((item) => item.exitCode === 0), budgetExceeded: result.budget.exceeded, publicationBlocked: true, ownerDecisionRequired: ownerRequired },
+    workflow: { ...objectRecord(documentWorkflow(settlement)), status: ownerRequired ? "awaiting_owner" : objectRecord(documentWorkflow(settlement)).status ?? (completed ? "completed" : "failed"), implementationCompleted: completed, validationCompleted, validationAggregate: result.validationAggregate, budgetExceeded: result.budget.exceeded, publicationBlocked: true, ownerDecisionRequired: ownerRequired },
     targetRepository: { path: spec.target.repository, repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory), initialSha: spec.target.expectedSha, finalSha: spec.target.expectedSha, changed: false },
     completedWork: result.changedFiles.map((file) => ({ file, status: "changed_in_disposable_workspace" })),
-    validation: result.validationResults,
-    artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", plan: "implementation-plan.json", contextPlan: "context-plan.json", patch: result.patchPackage ? "implementation.patch" : null, checkpoints: result.checkpoints.map((item) => item.path) },
+    validationPlan: result.validationPlan, validationAggregate: result.validationAggregate, validation: result.validationResults, review: result.review,
+    artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", plan: "implementation-plan.json", contextPlan: "context-plan.json", validationPlan: "validation-plan.json", patch: result.patchPackage ? "implementation.patch" : null, checkpoints: result.checkpoints.map((item) => item.path) },
     git: { branch: result.localBranch, commit: result.localCommit, patchPackage: result.patchPackage, pullRequest: null, merge: null },
     publication: { status: "on_hold", ownerGate: { required: false, status: "not_requested" }, performed: false },
     providerCalls: result.providerCalls,
     usage: phaseUsage(spec, result),
-    ownerGate: { required: ownerRequired, status: ownerRequired ? "awaiting_owner_decision" : "not_required", subject: completed ? "Completed implementation checkpoint is available; only continuation/publication is blocked." : "Implementation needs an owner decision.", completed: { implementation: completed, validation: completed && result.validationResults.every((item) => item.exitCode === 0), artifacts: result.checkpoints.map((item) => item.id) }, blocked: result.budget.exceeded ? ["future_provider_calls", "repair_iterations", "publication", "workflow_completion"] : ["workflow_continuation"], options: [
+    ownerGate: { required: ownerRequired, status: ownerRequired ? "awaiting_owner_decision" : "not_required", subject: completed ? "Completed implementation checkpoint is available; only continuation/publication is blocked." : "Implementation needs an owner decision.", completed: { implementation: completed, validation: validationCompleted, artifacts: result.checkpoints.map((item) => item.id) }, blocked: result.budget.exceeded ? ["future_provider_calls", "repair_iterations", "publication", "workflow_completion"] : ["workflow_continuation"], options: [
       { id: "accept_completed_patch", endpoint: `/v1/tasks/${spec.taskId}/accept-completed-result`, providerRun: false, grantsAuthority: false }, { id: "grant_additional_budget", endpoint: `/v1/tasks/${spec.taskId}/checkpoint-repairs`, providerRun: true, grantsAuthority: false, requires: ["taskId", "decisionId", "checkpointId", "checkpointDigest", "additionalProviderTokens"] }, { id: "stop_with_handoff", providerRun: false, grantsAuthority: false }, { id: "discard_result", endpoint: `/v1/tasks/${spec.taskId}/discard-result`, providerRun: false, grantsAuthority: false, explicitConfirmationRequired: true }, { id: "retry_from_checkpoint", endpoint: `/v1/tasks/${spec.taskId}/checkpoint-repairs`, providerRun: true, grantsAuthority: false, requires: ["taskId", "decisionId", "checkpointId", "checkpointDigest", "repairIntent"] }
     ], ...(result.ownerGate.reason ? { reason: result.ownerGate.reason } : {}) },
-    handoffPackage: { status: result.checkpoints.length ? "available" : "unavailable", latestSafePatch: result.checkpoints.at(-1)?.patchPath ?? result.patchPackage, bestValidatedCheckpoint: [...result.checkpoints].reverse().find((item) => item.validationPassed)?.id ?? null, baseSha: spec.target.expectedSha, applyInstructions: result.checkpoints.length ? `git apply '${result.checkpoints.at(-1)!.patchPath}'` : null, changedFiles: result.changedFiles, validationEvidence: result.validationResults.flatMap((item) => item.artifactPaths), knownLimitations: result.unresolvedFindings, nextResponsibleParty: ownerRequired ? "owner" : "external_session", exactNextAction: ownerRequired ? ([...result.checkpoints].reverse().find((item) => item.validationPassed) ? `POST /v1/tasks/${spec.taskId}/accept-completed-result with the best validated checkpoint ID.` : `POST /v1/tasks/${spec.taskId}/checkpoint-repairs with the task, decision, checkpoint ID and published checkpoint digest; patch-only handoff remains available.`) : "Preserve or publish the patch under separate authority." },
+    handoffPackage: { status: result.checkpoints.length ? "available" : "unavailable", latestSafePatch: result.checkpoints.at(-1)?.patchPath ?? result.patchPackage, bestValidatedCheckpoint: [...result.checkpoints].reverse().find((item) => item.validationPassed)?.id ?? null, baseSha: spec.target.expectedSha, applyInstructions: result.checkpoints.length ? `git apply '${result.checkpoints.at(-1)!.patchPath}'` : null, changedFiles: result.changedFiles, validationEvidence: result.validationResults.flatMap((item) => item.artifactPaths), structuralEvidence: result.review.structural, semanticReview: result.review.semantic, findings: result.review.semantic.findings, knownLimitations: [...new Set([...result.unresolvedFindings, ...result.review.semantic.limitations])], nextResponsibleParty: result.review.semantic.delegation?.party ?? (ownerRequired ? "owner" : "external_session"), exactNextAction: result.review.semantic.delegation?.exactAction ?? (ownerRequired ? ([...result.checkpoints].reverse().find((item) => item.validationPassed) ? `POST /v1/tasks/${spec.taskId}/accept-completed-result with the best validated checkpoint ID.` : `POST /v1/tasks/${spec.taskId}/checkpoint-repairs with the task, decision, checkpoint ID and published checkpoint digest; patch-only handoff remains available.`) : "Preserve or publish the patch under separate authority.") },
     nextAction: { recommendation: ownerRequired && completed ? "Accept the completed checkpoint without a new provider run, stop with handoff, or explicitly grant additional budget." : completed ? "Review the local commit/patch package, then use the separate publication decision API if publication is desired and authorized." : ownerRequired ? "Resolve the bounded owner gate." : "Inspect structured executor and validation diagnostics, correct the infrastructure/backend failure, and retry." },
     safetyAssertions: { targetUnchanged: true, targetMainMutation: false, targetMainPush: false, targetPrMerge: false, deploy: false, databaseAccess: false, productionAccess: false, secretAccess: false, providerCalls: result.providerCalls.length > 0, ...result.safetyAssertions },
-    diagnostics: result.diagnostics, errors: result.status === "failed_with_diagnostics" ? result.unresolvedFindings : [], limitations: ownerRequired ? result.unresolvedFindings : []
+    diagnostics: result.diagnostics, errors: result.status === "failed_with_diagnostics" ? result.unresolvedFindings : [], limitations: [...new Set([...(ownerRequired ? result.unresolvedFindings : []), ...result.review.semantic.limitations])]
   };
   validateTaskResultContract(document);
   await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
-  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} implementation result\n\nOutcome: **${result.status}**\n\nWorkflow status: **${status}**\n\nExecutor: **${result.selectedExecutor.id}**${result.selectedExecutor.model ? ` / ${result.selectedExecutor.model}` : ""}\n\nChanged files: ${result.changedFiles.length ? result.changedFiles.map((file) => `\`${file}\``).join(", ") : "none"}\n\nValidation: ${result.validationResults.every((item) => item.exitCode === 0) ? "passed" : "not green"}\n\nLocal branch: ${result.localBranch ?? "none"}\nLocal commit: ${result.localCommit ?? "none"}\nPatch package: ${result.patchPackage ?? "none"}\n\nPublication: **on hold; not performed**.\n`, "utf8");
+  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} implementation result\n\nOutcome: **${result.status}**\n\nWorkflow status: **${status}**\n\nExecutor: **${result.selectedExecutor.id}**${result.selectedExecutor.model ? ` / ${result.selectedExecutor.model}` : ""}\n\nChanged files: ${result.changedFiles.length ? result.changedFiles.map((file) => `\`${file}\``).join(", ") : "none"}\n\nStructural validation: **${result.review.structural.status}**\n\nSemantic review: **${result.review.semantic.status}**; performed: **${result.review.semantic.performed}**; selected reviewer: **${result.review.semantic.selectedReviewer.provider ?? "none"}${result.review.semantic.selectedReviewer.model ? ` / ${result.review.semantic.selectedReviewer.model}` : ""}**; confidence: **${result.review.semantic.confidence}** (${result.review.semantic.findings.length} finding(s))\n\nSemantic review limitations: ${result.review.semantic.limitations.length ? result.review.semantic.limitations.join("; ") : "none"}\n\nLocal branch: ${result.localBranch ?? "none"}\nLocal commit: ${result.localCommit ?? "none"}\nPatch package: ${result.patchPackage ?? "none"}\n\nPublication: **on hold; not performed**.\n`, "utf8");
   return status;
 }
 
 function phaseUsage(spec: TaskSpecV2, result: ImplementationExecutorResult): Record<string, unknown> {
   const empty = () => ({ startup: 0, analysis: 0, implementation: 0, validation: 0, repair: 0, review: 0, publication: 0 }); const provider = empty(), synthetic = empty();
-  for (const call of result.providerCalls) { const phase = Number(call.iteration) === 0 ? "implementation" : "repair"; const target = call.usageAccounting === "synthetic" ? synthetic : provider; target[phase] += typeof call.tokenUsage === "number" ? call.tokenUsage : 0; }
+  for (const call of result.providerCalls) { const phase = call.purpose === "semantic-review" ? "review" : Number(call.iteration) === 0 ? "implementation" : "repair"; const target = call.usageAccounting === "synthetic" ? synthetic : provider; target[phase] += typeof call.tokenUsage === "number" ? call.tokenUsage : 0; }
   const phases = Object.fromEntries(Object.entries(provider).map(([phase, actualTokens]) => [phase, { actualTokens, requestedLimit: spec.execution.phaseBudgets[phase as keyof typeof provider], effectiveLimit: spec.execution.phaseBudgets[phase as keyof typeof provider], limitKind: spec.execution.budgetMode, exceeded: phase === result.budget.overrunPhase && result.budget.accounting === "provider" }]));
   return { accounting: "provider", providerCalls: result.providerCalls.filter((item) => item.usageAccounting !== "synthetic").length, totalTokens: Object.values(provider).reduce((sum, value) => sum + value, 0), costUsd: null, costAvailability: "provider_did_not_report_cost", phases, syntheticAccounting: { accounting: "synthetic", mixedWithProviderUsage: false, totalTokens: Object.values(synthetic).reduce((sum, value) => sum + value, 0), phases: Object.fromEntries(Object.entries(synthetic).map(([phase, actualTokens]) => [phase, { actualTokens, exceeded: phase === result.budget.overrunPhase && result.budget.accounting === "synthetic" }])) } };
 }
@@ -141,10 +143,12 @@ function objectRecord(value: unknown): Record<string, unknown> { return value &&
 
 function implementationAgreement(spec: TaskSpecV2, result: ImplementationExecutorResult, completed: boolean): ExecutionAgreement {
   const enabled = Object.fromEntries([...IMPLEMENTATION_PHASES].map((phase) => [phase, true]));
+  const configuredReviewOwner = executionPhaseOwner(spec.executionAgreement.profile, "independentReview", spec.executionAgreement.phaseOwnership);
+  const delegateIncompleteRunForgeReview = result.review.semantic.status !== "completed" && configuredReviewOwner === "runforge";
   let agreement = negotiateExecutionAgreement({
     profile: spec.executionAgreement.profile,
     requested: spec.authority.allowProviderCalls ? undefined : { providerModelCalls: false },
-    requestedOwnership: spec.executionAgreement.phaseOwnership,
+    requestedOwnership: delegateIncompleteRunForgeReview ? { ...spec.executionAgreement.phaseOwnership, independentReview: result.review.semantic.delegation?.party ?? "external_session" } : spec.executionAgreement.phaseOwnership,
     technicalCapability: enabled,
     authority: { ...enabled, providerModelCalls: spec.authority.allowProviderCalls },
     policy: enabled,
@@ -161,8 +165,12 @@ function implementationAgreement(spec: TaskSpecV2, result: ImplementationExecuto
 function implementationPhaseEvidence(phase: ExecutionPhaseId, result: ImplementationExecutorResult): string[] {
   if (phase === "implementation") return result.changedFiles.length ? result.changedFiles : ["no_change_required"];
   if (phase === "localValidation") return result.validationResults.length
-    ? result.validationResults.flatMap((item) => item.artifactPaths)
+    ? result.validationResults.flatMap((item) => [
+      ...item.artifactPaths.map((artifact) => `${item.lane}:${artifact}`),
+      `lane=${item.lane};cwd=${item.cwd};repository=${item.repositoryIdentity ?? "not-applicable"};boundSha=${item.boundSha ?? "not-applicable"};safety=${item.safetyAssertions.join(",") || "product-lane-policy"}`,
+    ])
     : ["no_change_required"];
+  if (phase === "independentReview") return result.review.semantic.status === "completed" ? result.review.semantic.evidence : [];
   if (phase === "patchPackage") return [result.patchPackage ?? "no_change_required"];
   if (phase === "localBranch") return result.localBranch ? [result.localBranch] : [];
   if (phase === "localCommit") return result.localCommit ? [result.localCommit] : [];
@@ -209,11 +217,20 @@ function implementationHandoff(
     commit: result.localCommit,
     validation: result.validationResults.map((item) => ({
       command: item.command,
-      status: item.exitCode === 0 ? "passed" as const : "failed" as const,
+      status: item.outcome,
       exitCode: item.exitCode,
       evidence: item.artifactPaths,
+      lane: item.lane,
+      cwd: item.cwd,
+      ...(item.argv ? { argv: item.argv } : {}),
+      repositoryIdentity: item.repositoryIdentity,
+      boundSha: item.boundSha,
+      capabilities: item.requiredCapabilities,
+      safetyAssertions: item.safetyAssertions,
     })),
-    findings: result.unresolvedFindings,
+    findings: [...result.unresolvedFindings, ...result.review.semantic.findings],
+    structuralEvidence: result.review.structural.evidence.map((reference) => ({ kind: "command" as const, reference, summary: "Structural validation evidence produced by the validation lane." })),
+    semanticReview: result.review.semantic,
     risks: status === "workflow_completed" ? [] : ["The remaining workflow phase is outside this completed RunForge execution."],
     nextActions: [next],
     publicationInstructions: ["Publication remains on hold and requires a separate authorized action."],
@@ -228,7 +245,7 @@ function implementationHandoff(
 }
 
 export function clearRepairedFindings(result: ImplementationExecutorResult): void {
-  if (result.status === "implemented_and_validated" && result.validationResults.length > 0 && result.validationResults.every((item) => item.exitCode === 0)) {
+  if (result.status === "implemented_and_validated" && result.validationResults.length > 0 && ["passed", "completed_with_validation_gaps"].includes(result.validationAggregate)) {
     result.unresolvedFindings = [];
   }
 }

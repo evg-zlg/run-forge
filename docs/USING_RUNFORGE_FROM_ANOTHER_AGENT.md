@@ -11,6 +11,7 @@ BASE=http://127.0.0.1:7373
 
 curl -fsS "$BASE/.well-known/runforge"
 curl -fsS "$BASE/v1/capabilities"
+curl -fsS "$BASE/v1/capabilities/discovery"
 curl -fsS "$BASE/schemas/control-plane-v1.schema.json"
 curl -fsS "$BASE/schemas/task-spec-v2.schema.json"
 curl -fsS "$BASE/schemas/execution-agreement-v1.schema.json"
@@ -18,6 +19,62 @@ curl -fsS "$BASE/schemas/task-result-v1.schema.json"
 ```
 
 Use the routes advertised by discovery. Before implementation, require a compatible `implementationExecutors[]` entry whose `status` is `ready`; also inspect runtime support. `/healthz` describes service health and `/readyz` describes acceptance readiness, but neither grants task authority.
+
+The validation discovery document is the canonical caller inventory for capability names, acceptance levels, runtimes, lanes, Git evidence safety assertions, reviewer backends, and normalized result schema links. Its multi-lane TaskSpec example validates against the advertised TaskSpec schema.
+
+### Validation acceptance and pre-start negotiation
+
+Each `validation.requirements[]` entry names its `command`, additive `capabilities`, `acceptance`, `evidenceRole`, and human-readable `fallbacks`. Known-command requirements are also applied; declaring capabilities does not remove the command's built-in requirements.
+
+- `required`: an unsupported or policy-denied requirement blocks task acceptance. `POST /v1/tasks` returns HTTP 422 with `error.code: validation_capability_unavailable`; no task or provider invocation is created.
+- `optional`, `advisory`, and `evidence-only`: unsupported requirements are accepted, recorded in `validationNegotiation.requirements[]`, and may produce `completed_with_validation_gaps`. They never turn otherwise completed work into `product_failed`.
+- Package-manager executables, installed dependencies, and Git identity binding are runtime facts. Acceptance records them as `deferred_preflight`; execution rechecks them before the command runs.
+- `fallbacks` are instructions, not silently executed commands. A required unsupported requirement is still rejected until the TaskSpec names an actually executable supported command/capability or lowers the truthful acceptance level.
+
+For example, this requirement is statically impossible because the public local validation service has no database lane:
+
+```json
+{
+  "validation": {
+    "mode": "explicit",
+    "commands": ["node --version"],
+    "requirements": [{
+      "command": "node --version",
+      "capabilities": ["database"],
+      "acceptance": "required",
+      "evidenceRole": "database-contract",
+      "fallbacks": ["Delegate database evidence to the external session."]
+    }]
+  }
+}
+```
+
+The formal response shape is:
+
+```json
+{
+  "schemaVersion": 1,
+  "error": {
+    "code": "validation_capability_unavailable",
+    "retryable": false,
+    "taskId": "YOUR-TASK-ID",
+    "details": {
+      "negotiation": {
+        "schemaVersion": 1,
+        "status": "rejected",
+        "stage": "task_acceptance",
+        "requiredUnsupported": [{ "command": "node --version", "reason": "...", "fallbacks": ["..."] }]
+      },
+      "operation": "start_new_task",
+      "newTaskRequired": true,
+      "nextResponsibleParty": "external_session",
+      "exactNextAction": "Change the required capability, runtime, policy, or acceptance level; or declare a truthful executable fallback and submit a new task ID."
+    }
+  }
+}
+```
+
+An accepted task exposes the same `validationNegotiation` from `POST /v1/tasks`, `GET /v1/tasks/{id}`, and `GET /v1/tasks/{id}/result`. Its `responsibility` binds structural review to the Execution Agreement's `localValidation` phase and semantic review to `independentReview`. That binding is persisted across retry, service restart, and continuation. Structural review is deterministic command/artifact evidence; it never substitutes for semantic review. Semantic review is a separate provider/model invocation when ready and owned by RunForge, otherwise the result contains an explicit delegation, limitations, and exact next action.
 
 ## 2. Inspect and register the checkout
 

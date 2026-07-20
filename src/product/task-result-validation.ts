@@ -12,6 +12,7 @@ const RUNFORGE_COMPLETION_STATUSES = [
 ] as const;
 const LEGACY_TASK_RESULT_STATUSES = [
   "completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required",
+  "blocked_by_capability", "blocked_by_policy",
 ] as const;
 const SYNTHETIC_TERMINAL_STATUSES = ["failed", "interrupted"] as const;
 const EXECUTION_AGREEMENT_STATUSES = ["ready", "conflicted", "in_progress", "completed"] as const;

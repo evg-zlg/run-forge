@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ExecutionAgreement, ExecutionAgreementConflict, ExecutionParty, ExecutionPhaseId, ExecutionProfile } from "../product/execution-agreement.js";
+import type { ValidationCapabilityNegotiation } from "./validation-negotiation.js";
 
 export const controlPlaneApiVersion = "v1";
 export const defaultControlPlaneHost = "127.0.0.1";
@@ -113,6 +114,7 @@ export type ControlTaskRecord = {
   specPath: string;
   artifactRoot: string;
   executionAgreement?: ExecutionAgreement;
+  validationNegotiation?: ValidationCapabilityNegotiation;
   authority: ControlAuthority;
   publicationRequested: "none" | "draft-pr";
   publicationGate: { required: boolean; status: string; reason?: string };

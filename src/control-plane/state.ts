@@ -64,7 +64,9 @@ export class ControlPlaneStore {
     return this.readJson<Record<string, unknown> | null>(join(task.artifactRoot, "results.json"), null);
   }
   async writePublishedResult(id: string, executionId: string, result: Record<string, unknown>): Promise<void> {
-    await this.writeJson(join(this.taskDir(id), "result.json"), { executionId, result });
+    const task = await this.getTask(id);
+    const durableResult = task?.validationNegotiation ? { ...result, validationNegotiation: task.validationNegotiation } : result;
+    await this.writeJson(join(this.taskDir(id), "result.json"), { executionId, result: durableResult });
   }
   async readPublishedResult(id: string): Promise<{ executionId: string; result: Record<string, unknown> } | null> {
     return this.readJson(join(this.taskDir(id), "result.json"), null);

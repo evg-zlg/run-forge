@@ -6,6 +6,10 @@ import type { ExecutorResult } from "../run/task-run-executor.js";
 import {
   type ExecutionAgreement, type ExecutionAgreementStatus, type ExecutionParty, type ExecutionPhaseId, type ExecutionProfile,
 } from "./execution-agreement.js";
+import {
+  VALIDATION_OUTCOMES, type ValidationAggregateStatus, type ValidationCommandOutcome, type ValidationPreflightPlan,
+} from "../validation/capability-contract.js";
+import { normalizeSemanticFindings, normalizeSemanticReviewResult, type SemanticReviewFinding, type SemanticReviewResult } from "../implementation/semantic-review.js";
 
 export { validateTaskResultContract } from "./task-result-validation.js";
 
@@ -23,7 +27,6 @@ export type NextParty = Exclude<ExecutionParty, "nobody">;
 export type ResultPhaseOwnership = { phaseId: ExecutionPhaseId; responsibleParty: ExecutionParty };
 export type ResultDelegatedPhase = { phaseId: ExecutionPhaseId; responsibleParty: Exclude<ExecutionParty, "runforge" | "nobody"> };
 export type ResultAwaitingPhase = ResultDelegatedPhase & { prerequisites: string[] };
-
 export type AgreementResultSummary = {
   agreementId: string;
   profile: ExecutionProfile;
@@ -35,19 +38,20 @@ export type AgreementResultSummary = {
   delegatedPhases: ResultDelegatedPhase[];
   awaitingPhases: ResultAwaitingPhase[];
 };
-
 export type ResultGate = { name: string; status: "satisfied" | "pending" | "blocked"; evidence: string[] };
 export type ResultEvidence = { kind: "artifact" | "command" | "commit" | "patch" | "review" | "other"; reference: string; summary: string };
 
 export type ResultNextAction = { party: NextParty; exactAction: string; gates: ResultGate[]; evidence: ResultEvidence[] };
-export type HandoffValidation = { command: string; status: "passed" | "failed" | "not_run"; exitCode: number | null; evidence: string[] };
-
+export type HandoffValidation = {
+  command: string; status: ValidationCommandOutcome | "failed" | "not_run"; exitCode: number | null; evidence: string[];
+  lane?: string; cwd?: string; argv?: string[]; repositoryIdentity?: string | null; boundSha?: string | null;
+  capabilities?: string[]; safetyAssertions?: string[];
+};
 export type HandoffSafety = {
   targetMainMutation: false; targetMainPush: false; targetPrMerge: false; deploy: false;
   databaseAccess: false; productionAccess: false; secretAccess: false;
   providerCalls: boolean; notes: string[];
 };
-
 export type NormalizedHandoffPackage = {
   profile: HandoffProfile;
   summary: string;
@@ -56,7 +60,9 @@ export type NormalizedHandoffPackage = {
   branch: string | null;
   commit: string | null;
   validation: HandoffValidation[];
-  findings: string[];
+  findings: Array<string | SemanticReviewFinding>;
+  structuralEvidence: ResultEvidence[];
+  semanticReview: SemanticReviewResult | null;
   risks: string[];
   nextActions: ResultNextAction[];
   publicationInstructions: string[];
@@ -65,7 +71,6 @@ export type NormalizedHandoffPackage = {
   targetSha: string | null;
   baseSha: string | null;
 };
-
 export type AgreementAwareTaskResult = {
   schemaVersion: 1;
   contract: "runforge-task-result";
@@ -74,13 +79,18 @@ export type AgreementAwareTaskResult = {
   agreement: AgreementResultSummary;
   handoff: NormalizedHandoffPackage;
   next: ResultNextAction;
+  validationPlan?: ValidationPreflightPlan;
+  validationAggregate?: ValidationAggregateStatus;
+  review?: { structural: { kind: "structural"; status: ValidationAggregateStatus; evidence: string[] }; semantic: SemanticReviewResult };
 };
 
-export type NormalizedHandoffInput = Omit<NormalizedHandoffPackage, "summary" | "changedFiles" | "validation" | "findings" | "risks" | "nextActions" | "publicationInstructions" | "ciCommands" | "safety"> & {
+export type NormalizedHandoffInput = Omit<NormalizedHandoffPackage, "summary" | "changedFiles" | "validation" | "findings" | "structuralEvidence" | "semanticReview" | "risks" | "nextActions" | "publicationInstructions" | "ciCommands" | "safety"> & {
   summary: string;
   changedFiles?: readonly string[];
   validation?: readonly (Omit<HandoffValidation, "evidence"> & { evidence?: readonly string[] })[];
-  findings?: readonly string[];
+  findings?: readonly (string | SemanticReviewFinding)[];
+  structuralEvidence?: readonly ResultEvidence[];
+  semanticReview?: SemanticReviewResult | null;
   risks?: readonly string[];
   nextActions: readonly (Omit<ResultNextAction, "gates" | "evidence"> & { gates?: readonly ResultGate[]; evidence?: readonly ResultEvidence[] })[];
   publicationInstructions?: readonly string[];
@@ -134,13 +144,20 @@ export function buildNormalizedHandoffPackage(input: NormalizedHandoffInput): No
   const nextActions = input.nextActions.map((action, index) => normalizeNextAction(action, `handoff.nextActions[${index}]`));
   if (nextActions.length === 0) throw new Error("handoff.nextActions must contain at least one exact action.");
   const validation = (input.validation ?? []).map((item, index) => {
-    if (!["passed", "failed", "not_run"].includes(item.status)) throw new Error(`handoff.validation[${index}].status is invalid.`);
+    if (![...VALIDATION_OUTCOMES, "failed", "not_run"].includes(item.status)) throw new Error(`handoff.validation[${index}].status is invalid.`);
     if (item.exitCode !== null && !Number.isInteger(item.exitCode)) throw new Error(`handoff.validation[${index}].exitCode must be an integer or null.`);
     return {
       command: requiredText(item.command, `handoff.validation[${index}].command`),
       status: item.status,
       exitCode: item.exitCode,
       evidence: normalizedStrings(item.evidence),
+      ...(item.lane ? { lane: requiredText(item.lane, `handoff.validation[${index}].lane`) } : {}),
+      ...(item.cwd ? { cwd: requiredText(item.cwd, `handoff.validation[${index}].cwd`) } : {}),
+      ...(item.argv ? { argv: item.argv.map((arg, argIndex) => requiredText(arg, `handoff.validation[${index}].argv[${argIndex}]`)) } : {}),
+      ...(item.repositoryIdentity !== undefined ? { repositoryIdentity: nullableText(item.repositoryIdentity, `handoff.validation[${index}].repositoryIdentity`) } : {}),
+      ...(item.boundSha !== undefined ? { boundSha: nullableText(item.boundSha, `handoff.validation[${index}].boundSha`) } : {}),
+      ...(item.capabilities ? { capabilities: normalizedStrings(item.capabilities) } : {}),
+      ...(item.safetyAssertions ? { safetyAssertions: normalizedStrings(item.safetyAssertions) } : {}),
     };
   });
   return {
@@ -151,7 +168,9 @@ export function buildNormalizedHandoffPackage(input: NormalizedHandoffInput): No
     branch: nullableText(input.branch, "handoff.branch"),
     commit: nullableText(input.commit, "handoff.commit"),
     validation,
-    findings: normalizedStrings(input.findings),
+    findings: normalizeHandoffFindings(input.findings),
+    structuralEvidence: (input.structuralEvidence ?? []).map((item, index) => normalizeEvidence(item, `handoff.structuralEvidence[${index}]`)),
+    semanticReview: input.semanticReview ? normalizeSemanticReviewResult(input.semanticReview) : null,
     risks: normalizedStrings(input.risks),
     nextActions,
     publicationInstructions: normalizedStrings(input.publicationInstructions),
@@ -180,6 +199,9 @@ export function buildAgreementAwareTaskResult(input: {
   agreement: ExecutionAgreement;
   handoff: NormalizedHandoffInput;
   next: Omit<ResultNextAction, "gates" | "evidence"> & { gates?: readonly ResultGate[]; evidence?: readonly ResultEvidence[] };
+  validationPlan?: ValidationPreflightPlan;
+  validationAggregate?: ValidationAggregateStatus;
+  review?: { structural: { kind: "structural"; status: ValidationAggregateStatus; evidence: string[] }; semantic: SemanticReviewResult };
 }): AgreementAwareTaskResult {
   if (!(RUNFORGE_COMPLETION_STATUSES as readonly string[]).includes(input.status)) throw new Error(`Unknown task result status '${String(input.status)}'.`);
   return {
@@ -190,6 +212,9 @@ export function buildAgreementAwareTaskResult(input: {
     agreement: buildAgreementResultSummary(input.agreement),
     handoff: buildNormalizedHandoffPackage(input.handoff),
     next: normalizeNextAction(input.next, "next"),
+    ...(input.validationPlan ? { validationPlan: input.validationPlan } : {}),
+    ...(input.validationAggregate ? { validationAggregate: input.validationAggregate } : {}),
+    ...(input.review ? { review: { structural: { kind: "structural", status: input.review.structural.status, evidence: normalizedStrings(input.review.structural.evidence) }, semantic: normalizeSemanticReviewResult(input.review.semantic) } } : {}),
   };
 }
 
@@ -288,6 +313,17 @@ function normalizeNextAction(input: Omit<ResultNextAction, "gates" | "evidence">
       };
     }),
   };
+}
+
+function normalizeEvidence(item: ResultEvidence, name: string): ResultEvidence {
+  if (!["artifact", "command", "commit", "patch", "review", "other"].includes(item.kind)) throw new Error(`${name}.kind is invalid.`);
+  return { kind: item.kind, reference: requiredText(item.reference, `${name}.reference`), summary: requiredText(item.summary, `${name}.summary`) };
+}
+
+function normalizeHandoffFindings(values: readonly (string | SemanticReviewFinding)[] | undefined): Array<string | SemanticReviewFinding> {
+  const strings = normalizedStrings((values ?? []).filter((value): value is string => typeof value === "string"));
+  const structured = normalizeSemanticFindings((values ?? []).filter((value): value is SemanticReviewFinding => typeof value === "object" && value !== null));
+  return [...strings, ...structured];
 }
 
 function requiredText(value: string, name: string): string {
