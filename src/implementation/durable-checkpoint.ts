@@ -3,6 +3,8 @@ import { mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promis
 import { basename, dirname, join } from "node:path";
 
 export type DurableCheckpointInput = {
+  taskId: string;
+  executionAgreementId: string;
   checkpointId: string;
   iteration: number;
   kind: "implementation" | "repair";
@@ -20,7 +22,9 @@ export type DurableCheckpointInput = {
 };
 
 export type DurableCheckpointManifest = {
-  schemaVersion: 1;
+  schemaVersion: 2;
+  taskId: string;
+  executionAgreementId: string;
   checkpointId: string;
   iteration: number;
   kind: DurableCheckpointInput["kind"];
@@ -37,6 +41,7 @@ export type DurableCheckpoint = {
   path: string;
   manifest: DurableCheckpointManifest;
   patchPath: string;
+  digest: string;
 };
 
 const payloadNames = [
@@ -65,15 +70,17 @@ export async function persistDurableCheckpoint(root: string, input: DurableCheck
       return { path, bytes: content.byteLength, sha256: createHash("sha256").update(content).digest("hex") };
     }));
     const manifest: DurableCheckpointManifest = {
-      schemaVersion: 1, checkpointId: input.checkpointId, iteration: input.iteration, kind: input.kind,
+      schemaVersion: 2, taskId: input.taskId, executionAgreementId: input.executionAgreementId,
+      checkpointId: input.checkpointId, iteration: input.iteration, kind: input.kind,
       createdAt: input.createdAt ?? new Date().toISOString(), baseSha: input.baseSha,
       workspaceSha: input.workspaceSha, workspaceState: input.workspaceState, status: "available", files
     };
-    await writeDurable(staging, "manifest.json", json(manifest));
+    const manifestText = json(manifest);
+    await writeDurable(staging, "manifest.json", manifestText);
     await syncDirectory(staging);
     await rename(staging, target);
     await syncDirectory(checkpointRoot);
-    return { id: input.checkpointId, path: target, manifest, patchPath: join(target, "patch.diff") };
+    return { id: input.checkpointId, path: target, manifest, patchPath: join(target, "patch.diff"), digest: digest(manifestText) };
   } catch (error) {
     await rm(staging, { recursive: true, force: true });
     throw error;
@@ -84,10 +91,11 @@ export async function readDurableCheckpoint(root: string, checkpointId: string):
   assertCheckpointId(checkpointId);
   const path = join(root, "checkpoints", checkpointId);
   try {
-    const manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8")) as DurableCheckpointManifest;
+    const manifestText = await readFile(join(path, "manifest.json"), "utf8");
+    const manifest = JSON.parse(manifestText) as DurableCheckpointManifest;
     if (manifest.checkpointId !== checkpointId || manifest.status !== "available") return null;
     await verifyCheckpointIntegrity(path, manifest);
-    return { id: checkpointId, path, manifest, patchPath: join(path, "patch.diff") };
+    return { id: checkpointId, path, manifest, patchPath: join(path, "patch.diff"), digest: digest(manifestText) };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
@@ -119,4 +127,5 @@ async function writeDurable(root: string, name: string, value: string): Promise<
 async function syncDirectory(path: string): Promise<void> { const handle = await open(path, "r"); try { await handle.sync(); } finally { await handle.close(); } }
 async function exists(path: string): Promise<boolean> { return stat(path).then(() => true, (error: NodeJS.ErrnoException) => error.code === "ENOENT" ? false : Promise.reject(error)); }
 function json(value: unknown): string { return JSON.stringify(value, null, 2) + "\n"; }
+function digest(value: string | Buffer): string { return createHash("sha256").update(value).digest("hex"); }
 function assertCheckpointId(value: string): void { if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$/.test(value)) throw new Error(`invalid_checkpoint_id: ${value}`); }

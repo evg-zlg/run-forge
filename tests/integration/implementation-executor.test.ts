@@ -333,6 +333,33 @@ describe("implementation executor", () => {
     } finally { await server.close(); }
   }, 20_000);
 
+  it("starts an idempotent bounded repair generation from a digest-bound failed checkpoint", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository(); const mainBefore = await git(repo, ["rev-parse", "refs/heads/main"]); const state = await mkdtemp(join(tmpdir(), "runforge-checkpoint-repair-"));
+    const server = await startControlPlaneServer({ port: 0, stateRoot: state });
+    try {
+      const capabilities = await fetch(`${server.url}/v1/capabilities`).then((response) => response.json()) as Record<string, any>;
+      expect(capabilities.checkpointRepair).toMatchObject({ choices: ["grant_additional_budget", "retry_from_checkpoint"], requiresCheckpointDigest: true });
+      const discovery = await fetch(`${server.url}/.well-known/runforge`).then((response) => response.json()) as Record<string, any>; expect(discovery.endpoints.checkpointRepairs).toBe("/v1/tasks/{id}/checkpoint-repairs");
+      const project = await fetch(`${server.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repo, register: true }) }).then((response) => response.json()) as Record<string, any>;
+      const request = structuredClone(capabilities.taskSpecContract.implementationRequest); request.projectId = project.project.id; request.taskSpec.taskId = "EXECUTOR-CHECKPOINT-REPAIR-1"; request.taskSpec.task.text = "BUDGET_OVERRUN REPAIR_LOOP fix add"; request.taskSpec.validation = { mode: "explicit", commands: ["node test.js"] }; request.taskSpec.execution.phaseBudgets.implementation = 1_000;
+      expect((await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) })).status).toBe(202);
+      await poll(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1`);
+      const failed = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/result`).then((response) => response.json()) as Record<string, any>;
+      const checkpoint = failed.artifact.checkpoints[0]; expect(checkpoint).toMatchObject({ id: "implementation-0", validationPassed: false, digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+      const directAccept = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/accept-completed-result`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decisionId: "invalid-direct-accept", checkpointId: checkpoint.id, delivery: "patch" }) }); expect(directAccept.status).toBe(409); expect(await directAccept.json()).toMatchObject({ error: { code: "checkpoint_not_validated" } });
+      const wrongTask = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: "OTHER-TASK", decisionId: "wrong-task", checkpointId: checkpoint.id, checkpointDigest: checkpoint.digest, choice: "retry_from_checkpoint", repairIntent: "Repair only the recorded validation failure." }) }); expect(wrongTask.status).toBe(409); expect(await wrongTask.json()).toMatchObject({ error: { code: "wrong_task_checkpoint" } });
+      const invalidDigest = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: "EXECUTOR-CHECKPOINT-REPAIR-1", decisionId: "wrong-digest", checkpointId: checkpoint.id, checkpointDigest: "0".repeat(64), choice: "retry_from_checkpoint", repairIntent: "Repair only the recorded validation failure." }) }); expect(invalidDigest.status).toBe(409); expect(await invalidDigest.json()).toMatchObject({ error: { code: "checkpoint_digest_invalid" } });
+      const repairBody = JSON.stringify({ taskId: "EXECUTOR-CHECKPOINT-REPAIR-1", decisionId: "repair-decision-1", checkpointId: checkpoint.id, checkpointDigest: checkpoint.digest, choice: "retry_from_checkpoint", repairIntent: "Repair only the recorded validation failure." });
+      const started = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: repairBody }); expect(started.status).toBe(202); const startResult = await started.json() as Record<string, any>; expect(startResult).toMatchObject({ status: "repair_generation_started", authorityGranted: false, baseSha: mainBefore.trim(), checkpointDigest: checkpoint.digest, providerRun: true, targetMainMutation: false, patchFallback: expect.stringContaining("attempts/1/artifacts/checkpoints/implementation-0/patch.diff"), repairExecutionId: expect.any(String) });
+      const replay = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: repairBody }); expect(replay.status).toBe(202); expect(await replay.json()).toMatchObject({ idempotentReplay: true, repairExecutionId: startResult.repairExecutionId });
+      const repairedTask = await poll(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1`); expect(repairedTask.status).toBe("completed"); expect(repairedTask.execution.attempt).toBe(2);
+      const repaired = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/result`).then((response) => response.json()) as Record<string, any>;
+      expect(repaired).toMatchObject({ implementation: { status: "implemented_and_validated" }, artifact: { checkpoints: [expect.objectContaining({ id: "repair-1", validationPassed: true, digest: expect.stringMatching(/^[a-f0-9]{64}$/) })] }, safetyAssertions: { targetMainMutation: false } });
+      expect(await git(repo, ["rev-parse", "refs/heads/main"])).toBe(mainBefore);
+    } finally { await server.close(); }
+  }, 20_000);
+
   it("blocks provider denial and unavailable executors before accepting implementation work", async () => {
     const repo = await repository(); const state = await mkdtemp(join(tmpdir(), "runforge-implementation-preflight-"));
     const server = await startControlPlaneServer({ port: 0, stateRoot: state });

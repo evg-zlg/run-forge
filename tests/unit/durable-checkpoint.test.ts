@@ -8,7 +8,8 @@ describe("durable implementation checkpoints", () => {
   it("atomically publishes a portable immutable artifact set", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-checkpoint-"));
     const checkpoint = await persistDurableCheckpoint(root, fixture());
-    expect(checkpoint.manifest).toMatchObject({ checkpointId: "checkpoint-0", status: "available", baseSha: "a".repeat(40) });
+    expect(checkpoint.manifest).toMatchObject({ schemaVersion: 2, taskId: "CHECKPOINT-TASK-1", executionAgreementId: "ea_v1_000000000000000000000000", checkpointId: "checkpoint-0", status: "available", baseSha: "a".repeat(40) });
+    expect(checkpoint.digest).toMatch(/^[a-f0-9]{64}$/);
     expect(checkpoint.manifest.files.map((item) => item.path)).toEqual([
       "patch.diff", "changed-files.json", "validation.json", "usage.json", "executor.json", "safety.json", "unresolved-findings.json"
     ]);
@@ -34,6 +35,7 @@ describe("durable implementation checkpoints", () => {
 
 function fixture() {
   return {
+    taskId: "CHECKPOINT-TASK-1", executionAgreementId: "ea_v1_000000000000000000000000",
     checkpointId: "checkpoint-0", iteration: 0, kind: "implementation" as const,
     baseSha: "a".repeat(40), workspaceSha: null, workspaceState: "dirty" as const,
     patch: "diff --git a/a.ts b/a.ts\n", changedFiles: ["a.ts"], validation: [{ command: "test", exitCode: 0 }],
