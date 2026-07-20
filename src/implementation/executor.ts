@@ -121,7 +121,9 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   await writeFile(join(request.artifactRoot, "implementation-plan.json"), JSON.stringify(plan, null, 2) + "\n");
   await writeFile(join(request.artifactRoot, "context-plan.json"), JSON.stringify(contextPlan, null, 2) + "\n");
   await writeFile(join(request.artifactRoot, "provider-execution-plan.json"), JSON.stringify({
-    schemaVersion: 1, requestedProvider: request.spec.providerRouting.provider, effectiveProvider: openRouter ? "openrouter" : "local",
+    schemaVersion: 1,
+    requestedProvider: request.spec.providerRouting.provider,
+    effectiveProvider: openRouter ? "openrouter" : "local",
     executor: executor.id, phaseModels: request.spec.providerRouting.models, fallback: request.spec.providerRouting.fallbackPolicy,
     budgets: { maxCalls: request.spec.providerRouting.maxCalls, tokens: request.spec.providerRouting.tokenBudget, costBudgetUsd: request.spec.providerRouting.costBudgetUsd ?? null },
     credentialReadiness: openRouter ? Boolean(process.env.OPENROUTER_API_KEY) : true, networkReadiness: request.authorityEnvelope.allowNetwork && request.runtimePolicy.externalNetwork === "allowed",
@@ -180,7 +182,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   let semanticReview: SemanticReviewResult = { kind: "semantic", status: "forbidden", performed: false, selectedReviewer: { provider: null, model: null }, reviewer: { provider: null, model: null, invocationId: null }, confidence: "unknown", limitations: ["Semantic review has not been reached."], findings: [], evidence: [], delegation: { party: "external_session", reason: "Semantic review has not been reached.", exactAction: "Perform an independent semantic review and attach structured findings." } };
   try {
     if (openRouter) {
-      const planner = await runOpenRouterAgent(request, executionRoot, buildPrompt(request, 0, validations, "", boundedContext.prompt), "planner", providerCalls, "planner"); providerCalls.push(providerCall("planner", planner, request, executor, executionRoot, "planner"));
+      const planner = await runOpenRouterAgent(request, executionRoot, buildPrompt(request, 0, validations, "", boundedContext.plannerPrompt), "planner", providerCalls, "planner"); providerCalls.push(providerCall("planner", planner, request, executor, executionRoot, "planner"));
       if (planner.exitCode !== 0) throw new Error(planner.failureReason ?? "openrouter_planner_failed");
       plannerSummary = boundedProviderText(planner.summary); await writeFile(join(request.artifactRoot, "provider", "planner-summary.txt"), plannerSummary, "utf8");
       const plannerOverrun = routingBudgetOverrun(providerCalls, request.spec.providerRouting, "planner"); if (plannerOverrun) { budgetExceeded = true; status = "blocked_with_owner_gate"; overrunPhase = "implementation"; overrunActual = plannerOverrun.actual; overrunLimit = plannerOverrun.limit; budgetReason = plannerOverrun.reason; }
@@ -188,7 +190,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
     for (let iteration = request.checkpointRepair ? 1 : 0; !budgetExceeded && iteration <= request.spec.execution.maxRepairIterations; iteration += 1) {
       const phase = iteration === 0 ? "implement" : "repair";
       await progress(request, phase, iteration === 0 ? "Coding executor is implementing the bounded task." : `Repair iteration ${iteration} is addressing validation failures.`);
-      const prompt = buildPrompt(request, iteration, validations, plannerSummary, boundedContext.prompt);
+      const prompt = buildPrompt(request, iteration, validations, plannerSummary, boundedContext.implementationPrompt);
       const phaseKey: OpenRouterPhase = iteration === 0 ? "implementer" : "repair";
       const call = openRouter
         ? await runOpenRouterAgent(request, executionRoot, prompt, phaseKey, providerCalls, iteration)

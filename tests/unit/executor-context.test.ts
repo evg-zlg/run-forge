@@ -45,4 +45,59 @@ describe("bounded implementation context", () => {
     expect(result.prompt).toBe("");
     expect(result.plan).toMatchObject({ withinBounds: false, totalBytes: 2_000, reads: [expect.objectContaining({ status: "rejected", reason: "context byte limit exceeded" })] });
   });
+
+  it("deduplicates noisy evidence, retains critical lines, preserves source, telemetry has no content", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-noisy-context-"));
+    const log = [
+      "start",
+      "info",
+      "info",
+      "error: fail to parse",
+      "retry",
+      "panic at line 10",
+      ...Array.from({ length: 60 }, (_, index) => `progress ${index}`),
+      "info",
+      "info",
+      "info",
+    ].join("\n");
+    const err = [
+      "err: file not found",
+      "err: file not found",
+      "info",
+    ].join("\n");
+    await writeFile(join(root, "app.ts"), 'export const x = 1;\n');
+    await writeFile(join(root, "build.log"), log);
+    await writeFile(join(root, "run.err"), err);
+    await writeFile(join(root, "validation-result.json"), `${JSON.stringify({ status: "ok" })}\n`.repeat(80));
+    const request = {
+      spec: {
+        task: { text: "bounded context" },
+        discovery: {
+          explicitFiles: ["app.ts", "build.log", "run.err", "validation-result.json"],
+          maxFiles: 5,
+          maxBytes: 100_000,
+          maxTokens: 10_000,
+          profile: "small-scope",
+          stopCondition: "bounded",
+        },
+      },
+    } as any;
+    const result = await buildContextPlan(request, root);
+
+    expect(result.implementationPrompt).toContain("--- BEGIN FILE app.ts ---\nexport const x = 1;");
+    expect(result.implementationPrompt).not.toContain("info\ninfo\ninfo");
+    expect(result.implementationPrompt).toContain("error: fail to parse");
+    expect(result.implementationPrompt).toContain("panic at line 10");
+    expect(result.implementationPrompt).toContain("err: file not found");
+    expect(result.implementationPrompt.match(/\{\"status\":\"ok\"\}/g)?.length).toBe(1);
+    const telemetry = (result.plan.compilerTelemetry as any);
+    expect(JSON.stringify(telemetry)).not.toMatch(/start|fail to parse|panic at line/);
+    expect(telemetry.rawIncludedBytes).toBeGreaterThan(0);
+    expect(telemetry.plannerPromptBytes).toBeGreaterThan(0);
+    expect(telemetry.implementationPromptBytes).toBeGreaterThan(0);
+    expect(telemetry.plannerPromptBytes).toBeGreaterThan(telemetry.implementationPromptBytes);
+    expect(result.implementationPrompt.split("\n").filter((l) => /panic|error/.test(l)).length).toBeGreaterThanOrEqual(2);
+    const r2 = await buildContextPlan(request, root);
+    expect(result.implementationPrompt).toBe(r2.implementationPrompt);
+  });
 });

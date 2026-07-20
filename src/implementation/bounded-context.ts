@@ -3,12 +3,51 @@ import { relative, resolve } from "node:path";
 import { scanSecrets } from "../security/secret-scan.js";
 import type { ImplementationExecutorRequest } from "./executor.js";
 
-export async function buildContextPlan(request: ImplementationExecutorRequest, root: string): Promise<{ plan: Record<string, unknown>; prompt: string }> {
+// Minimal deterministic trimming for noisy evidence
+function trimEvidence(text: string, maxLines = 28, maxBytes = 3072): string {
+  const lines: string[] = [];
+  for (const raw of text.split(/\r?\n/).map((line) => line.trimEnd())) {
+    const line = raw === "" ? "" : raw;
+    if (lines.at(-1) !== line && !(line === "" && lines.at(-1) === "")) lines.push(line);
+  }
+  const critical = new Set<number>(), selected = new Set<number>();
+  for (let i = 0; i < lines.length; i++) {
+    if (/\berr(?:or)?\b|fail|exception|stack|diagnostic|traceback|panic|fatal|assert/i.test(lines[i]!)) {
+      critical.add(i);
+      if (i > 0) critical.add(i - 1);
+      if (i < lines.length - 1) critical.add(i + 1);
+    }
+  }
+  for (const index of critical) {
+    if (selected.size >= maxLines) break;
+    selected.add(index);
+  }
+  for (let i = 0; i < Math.min(4, lines.length) && selected.size < maxLines; i++) selected.add(i);
+  for (let i = Math.max(0, lines.length - 4); i < lines.length && selected.size < maxLines; i++) selected.add(i);
+  for (let i = 0; i < lines.length && selected.size < maxLines; i++) selected.add(i);
+  const output = [...selected].sort((a, b) => a - b).map((index) => lines[index]!).join("\n");
+  if (Buffer.byteLength(output) <= maxBytes) return output;
+  return Buffer.from(output).subarray(0, maxBytes).toString("utf8").replace(/[^\n]*$/, "").trimEnd();
+}
+
+// Detect noisy evidence files by extension
+function isNoisyEvidence(file: string): boolean {
+  const lower = file.toLowerCase();
+  return (
+    lower.endsWith(".log") ||
+    lower.endsWith(".out") ||
+    lower.endsWith(".err") ||
+    (lower.endsWith(".json") && ["validation", "result", "diagnostic"].some((token) => lower.includes(token)))
+  );
+}
+
+export async function buildContextPlan(request: ImplementationExecutorRequest, root: string): Promise<{ plan: Record<string, unknown>; prompt: string; plannerPrompt: string; implementationPrompt: string }> {
   const mentioned = request.spec.task.text.match(/(?:src|tests|scripts|schemas|docs|config)\/[A-Za-z0-9._/-]+/g) ?? [];
   const files = [...new Set([...request.spec.discovery.explicitFiles, ...mentioned])].slice(0, request.spec.discovery.maxFiles);
   const canonicalRoot = await realpath(root);
-  const contents: string[] = [];
+  const sections: Array<{ file: string; text: string; noisy: boolean }> = [];
   const reads: Array<Record<string, unknown>> = [];
+  const perFileTelemetry: Array<{ file: string; classification: string; deduplicated: boolean; truncated: boolean; criticalLines: number }> = [];
   let plannedBytes = 0;
   for (const file of files) {
     const path = resolve(root, file);
@@ -27,19 +66,66 @@ export async function buildContextPlan(request: ImplementationExecutorRequest, r
     if (value.includes(0)) { reads.push({ file, status: "rejected", bytes, reason: "binary content" }); continue; }
     if (scanSecrets(text).status === "failed") { reads.push({ file, status: "rejected", bytes, reason: "secret-like content" }); continue; }
     reads.push({ file, status: "planned", bytes, reason: "explicit task scope" });
-    contents.push(`--- BEGIN FILE ${file} ---\n${text}\n--- END FILE ${file} ---`);
+    const noisy = isNoisyEvidence(file);
+    sections.push({ file, text, noisy });
+    const rawLines = text.split(/\r?\n/);
+    const beforeDedup = rawLines.length;
+    const dedupedLines = rawLines.map((l) => l.trimEnd());
+    const deduped: string[] = [];
+    for (const l of dedupedLines) {
+      const normalized = l.replace(/\s+/g, " ");
+      if (deduped.length === 0 || deduped.at(-1)! !== normalized) deduped.push(normalized);
+    }
+    const truncated = noisy && (deduped.length > 28 || Buffer.byteLength(deduped.join("\n")) > 3072);
+    const hasCritical = (l: string) =>
+      /\berr(?:or)?\b|fail|exception|stack|diagnostic|traceback|panic|fatal|assert/i.test(l);
+    const criticalLines = deduped.filter((l, i) => {
+      if (!hasCritical(l)) return false;
+      if (i > 0 && hasCritical(deduped[i - 1]!)) return true;
+      if (i < deduped.length - 1 && hasCritical(deduped[i + 1]!)) return true;
+      return true;
+    }).length;
+    perFileTelemetry.push({
+      file,
+      classification: noisy ? "noisy-evidence" : "source",
+      deduplicated: beforeDedup !== deduped.length,
+      truncated,
+      criticalLines,
+    });
   }
   const totalBytes = reads.reduce((sum, item) => sum + (typeof item.bytes === "number" ? item.bytes : 0), 0);
-  const estimatedTokens = Math.ceil(Buffer.byteLength(contents.join("\n\n")) / 4);
+  const wrap = (file: string, text: string) => `--- BEGIN FILE ${file} ---\n${text}\n--- END FILE ${file} ---`;
+  const sourcePrompt = sections.filter((item) => !item.noisy).map((item) => wrap(item.file, item.text)).join("\n\n");
+  const plannerEvidence = sections.filter((item) => item.noisy).map((item) => wrap(item.file, trimEvidence(item.text, 120, 12_288))).join("\n\n");
+  const implementationEvidence = sections.filter((item) => item.noisy).map((item) => wrap(item.file, trimEvidence(item.text, 28, 3_072))).join("\n\n");
+  const plannerPrompt = [sourcePrompt, plannerEvidence].filter(Boolean).join("\n\n");
+  const implementationPrompt = [sourcePrompt, implementationEvidence].filter(Boolean).join("\n\n");
+  const estimatedTokens = Math.ceil(Buffer.byteLength(implementationPrompt) / 4);
+
   const omitted = reads
     .filter((item) => item.status !== "planned")
     .map((item) => ({ file: item.file, status: item.status, reason: item.reason, bytes: item.bytes }));
   const expansionHistory: Array<Record<string, unknown>> = [];
+  const telemetry = {
+    strategy: "bounded-two-stage",
+    version: "1",
+    rawIncludedBytes: totalBytes,
+    plannerPromptBytes: Buffer.byteLength(plannerPrompt),
+    implementationPromptBytes: Buffer.byteLength(implementationPrompt),
+    reductionRatio: {
+      planner: totalBytes ? Number((Buffer.byteLength(plannerPrompt) / totalBytes).toFixed(4)) : 1,
+      implementation: totalBytes ? Number((Buffer.byteLength(implementationPrompt) / totalBytes).toFixed(4)) : 1,
+    },
+    perFile: perFileTelemetry,
+  };
   return {
-    prompt: contents.join("\n\n"),
+    plannerPrompt,
+    implementationPrompt,
+    prompt: implementationPrompt,
     plan: {
-      schemaVersion: 1, profile: request.spec.discovery.profile, limits: { maxFiles: request.spec.discovery.maxFiles, maxBytes: request.spec.discovery.maxBytes, maxTokens: request.spec.discovery.maxTokens }, reads, omitted, expansionHistory, deduplicated: true, totalFiles: reads.length, totalBytes, estimatedTokens, withinBounds: reads.length <= request.spec.discovery.maxFiles && totalBytes <= request.spec.discovery.maxBytes && estimatedTokens <= request.spec.discovery.maxTokens, stopCondition: request.spec.discovery.stopCondition, expansionPolicy: "Every additional file requires an explicit reason in provider evidence."
-    }
+      schemaVersion: 2, profile: request.spec.discovery.profile, limits: { maxFiles: request.spec.discovery.maxFiles, maxBytes: request.spec.discovery.maxBytes, maxTokens: request.spec.discovery.maxTokens }, reads, omitted, expansionHistory, deduplicated: true, totalFiles: reads.length, totalBytes, estimatedTokens, withinBounds: reads.length <= request.spec.discovery.maxFiles && totalBytes <= request.spec.discovery.maxBytes && estimatedTokens <= request.spec.discovery.maxTokens, stopCondition: request.spec.discovery.stopCondition, expansionPolicy: "Every additional file requires an explicit reason in provider evidence.",
+      compilerTelemetry: telemetry,
+    },
   };
 }
 
