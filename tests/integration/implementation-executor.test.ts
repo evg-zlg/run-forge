@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { cp, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -9,6 +9,7 @@ import { Ajv2020 } from "ajv/dist/2020.js";
 import { afterEach, describe, expect, it } from "vitest";
 import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
 import { discoverImplementationExecutors } from "../../src/implementation/executor.js";
+import { detectPackageValidationCapabilities } from "../../src/implementation/validation-runtime-capabilities.js";
 import { executionPhaseOwner } from "../../src/product/execution-agreement.js";
 import { startControlPlaneServer } from "../../src/control-plane/server.js";
 import { ControlPlaneManager } from "../../src/control-plane/manager.js";
@@ -36,6 +37,36 @@ describe("implementation executor", () => {
     expect(await discoverImplementationExecutors()).toMatchObject([{ id: "local-coding-agent", status: "ready", supports: ["implementation", "repair"], providerCalls: true }]);
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = "/definitely/missing/runforge-agent";
     expect(await discoverImplementationExecutors()).toMatchObject([{ status: "unavailable" }]);
+  });
+
+  it("detects package-manager and prepared dependency capabilities from runtime evidence", async () => {
+    const repo = await mkdtemp(join(tmpdir(), "runforge-package-capabilities-"));
+    await writeFile(join(repo, "package.json"), JSON.stringify({ packageManager: "pnpm@10.0.0" }));
+    expect(await detectPackageValidationCapabilities({
+      commands: ["corepack pnpm test"], executionRoot: repo, workspaceRoot: repo,
+      commandAvailable: async () => false,
+    })).toEqual({ packageManager: false, dependencies: false });
+    await mkdir(join(repo, "node_modules"));
+    expect(await detectPackageValidationCapabilities({
+      commands: ["corepack pnpm test"], executionRoot: repo, workspaceRoot: repo,
+      commandAvailable: async (command) => command === "corepack",
+    })).toEqual({ packageManager: true, dependencies: true });
+  });
+
+  it("does not spawn a known package command when prepared dependencies are absent", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository();
+    const probeRoot = await mkdtemp(join(tmpdir(), "runforge-package-validation-probe-"));
+    const marker = join(probeRoot, "spawned");
+    const command = `npm exec -- node -e "require('node:fs').writeFileSync('${marker}', 'spawned')"`;
+    const result = await execute(repo, "EXECUTOR-PACKAGE-CAPABILITY-1", "fix add", [command]);
+    expect(result).toMatchObject({
+      status: "blocked_by_capability",
+      validationAggregate: "blocked_by_capability",
+      validationPlan: { commands: [{ command, disposition: "capability_unsupported", supported: false, missingCapabilities: expect.arrayContaining(["dependencies"]) }] },
+      validation: [{ command, outcome: "capability_unsupported" }],
+    });
+    await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("implements, repairs, validates, adds a test, commits locally, and preserves the source checkout", async () => {

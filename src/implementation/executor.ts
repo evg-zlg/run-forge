@@ -9,6 +9,11 @@ import type { TaskSpecV2, TaskExecutionMode } from "../product/task-spec-v2.js";
 import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor } from "../product/task-spec-contract.js";
 import { persistDurableCheckpoint } from "./durable-checkpoint.js";
 import { executionPhaseOwner } from "../product/execution-agreement.js";
+import {
+  aggregateValidationOutcomes, buildValidationPreflightPlan, classifyValidationExecution, runtimeCapabilities,
+  type ValidationAggregateStatus, type ValidationCommandOutcome, type ValidationPlanEntry, type ValidationPreflightPlan,
+} from "../validation/capability-contract.js";
+import { detectPackageValidationCapabilities } from "./validation-runtime-capabilities.js";
 
 const execFileAsync = promisify(execFile);
 const credentialCache = new Map<string, { at: number; ready: boolean }>();
@@ -27,6 +32,8 @@ export type CommandDiagnostic = {
   truncation: { stdout: boolean; stderr: boolean; limitBytes: number }; artifactPaths: string[];
   failureReason: string | null; classification: "product" | "setup" | "runtime" | "provider" | "infrastructure" | null;
   diagnosticGap: boolean; infrastructureDefect: string | null; artifactPath: string;
+  outcome: ValidationCommandOutcome; acceptance: ValidationPlanEntry["acceptance"]; evidenceRole: string;
+  requiredCapabilities: ValidationPlanEntry["requiredCapabilities"]; availableCapabilities: ValidationPlanEntry["availableCapabilities"];
 };
 export type ImplementationExecutorRequest = {
   spec: TaskSpecV2; targetRepository: string; workingDirectory: string; projectProfile: Record<string, unknown>;
@@ -38,6 +45,7 @@ export type ImplementationExecutorRequest = {
 };
 export type ImplementationExecutorResult = {
   plan: string[]; changedFiles: string[]; patch: string; validationResults: CommandDiagnostic[];
+  validationPlan: ValidationPreflightPlan; validationAggregate: ValidationAggregateStatus;
   unresolvedFindings: string[]; status: "implemented_and_validated" | "no_change_required" | "blocked_with_owner_gate" | "failed_with_diagnostics";
   ownerGate: { required: boolean; reason: string | null }; safetyAssertions: Record<string, boolean>;
   diagnostics: Record<string, unknown>; localBranch: string | null; localCommit: string | null; patchPackage: string | null;
@@ -114,6 +122,21 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   await mkdir(request.artifactRoot, { recursive: true });
   await writeFile(join(request.artifactRoot, "implementation-plan.json"), JSON.stringify(plan, null, 2) + "\n");
   await writeFile(join(request.artifactRoot, "context-plan.json"), JSON.stringify(contextPlan, null, 2) + "\n");
+  const hasGitMetadata = await pathAvailable(join(workspace, ".git"));
+  const packageCapabilities = await detectPackageValidationCapabilities({
+    commands: request.validationProfile.commands, executionRoot, workspaceRoot: workspace,
+  });
+  const detectedRuntime = runtimeCapabilities({
+    runtime: "local-disposable", hasGitMetadata, hasGitHistory: hasGitMetadata, hasWorkingTreeIndex: hasGitMetadata,
+    packageManager: packageCapabilities.packageManager, dependencies: packageCapabilities.dependencies,
+    network: request.runtimePolicy.externalNetwork === "allowed",
+    providerModel: request.authorityEnvelope.allowProviderCalls,
+  });
+  const validationPlan = buildValidationPreflightPlan({
+    requirements: request.validationProfile.requirements, profile: request.validationProfile.profile,
+    policy: request.validationProfile.projectPolicy, runtime: detectedRuntime, cwd: executionRoot,
+  });
+  await writeFile(join(request.artifactRoot, "validation-plan.json"), JSON.stringify(validationPlan, null, 2) + "\n");
   const providerCalls: Array<Record<string, unknown>> = [];
   const checkpoints: ImplementationExecutorResult["checkpoints"] = [];
   const validations: CommandDiagnostic[] = request.checkpointRepair
@@ -155,9 +178,10 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       if (safetyErrors.length) { unresolved = safetyErrors; status = "blocked_with_owner_gate"; }
       await progress(request, "validate", `Running ${request.validationProfile.commands.length} validation command(s).`);
       validations.splice(0, validations.length);
-      if (!safetyErrors.length) for (let index = 0; index < request.validationProfile.commands.length; index += 1) validations.push(await runValidation(request.validationProfile.commands[index]!, executionRoot, request.artifactRoot, iteration, index, request.spec.execution.timeoutMs, request.signal));
-      const validationPassed = !safetyErrors.length && validations.every((item) => item.exitCode === 0);
-      if (!validationPassed && !safetyErrors.length) unresolved = validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}: exit ${item.exitCode}${item.infrastructureDefect ? ` (${item.infrastructureDefect})` : ""}`);
+      if (!safetyErrors.length) for (let index = 0; index < validationPlan.commands.length; index += 1) validations.push(await runValidation(validationPlan.commands[index]!, request.artifactRoot, iteration, index, request.spec.execution.timeoutMs, request.signal));
+      const validationAggregate = aggregateValidationOutcomes(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole })));
+      const validationPassed = !safetyErrors.length && ["passed", "completed_with_validation_gaps"].includes(validationAggregate);
+      if (!validationPassed && !safetyErrors.length) unresolved = validations.filter((item) => item.outcome !== "passed").map((item) => `${item.command}: ${item.outcome}${item.infrastructureDefect ? ` (${item.infrastructureDefect})` : ""}`);
       const actualTokens = providerCalls.reduce((sum, item) => sum + (typeof item.tokenUsage === "number" ? item.tokenUsage : 0), 0);
       const phaseLimit = request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"];
       const checkpoint = await persistDurableCheckpoint(request.artifactRoot, {
@@ -174,8 +198,10 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       const phaseExceeded = (call.tokenUsage ?? 0) > phaseLimit, totalExceeded = actualTokens > request.spec.execution.maxProviderTokens;
       budgetExceeded = totalExceeded || phaseExceeded;
       if (budgetExceeded) { overrunPhase = phase === "implement" ? "implementation" : "repair"; overrunActual = phaseExceeded ? call.tokenUsage ?? 0 : actualTokens; overrunLimit = phaseExceeded ? phaseLimit : request.spec.execution.maxProviderTokens; }
+      if (safetyErrors.length) { status = "blocked_with_owner_gate"; break; }
       if (validationPassed) { status = "implemented_and_validated"; break; }
-      if (budgetExceeded || safetyErrors.length) { status = "blocked_with_owner_gate"; break; }
+      if (validationAggregate !== "product_failed") { status = "failed_with_diagnostics"; break; }
+      if (budgetExceeded) { status = "blocked_with_owner_gate"; break; }
     }
     if (status === "implemented_and_validated" || status === "no_change_required") {
       if (commitOwnedByRunForge) {
@@ -194,7 +220,9 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
     const sourceAfter = (await git(request.targetRepository, ["rev-parse", "HEAD"])).trim();
     const sourceStatusAfter = await git(request.targetRepository, ["status", "--porcelain=v1"]);
     return {
-      plan, changedFiles, patch, validationResults: validations, unresolvedFindings: unresolved, status,
+      plan, changedFiles, patch, validationResults: validations, validationPlan,
+      validationAggregate: aggregateValidationOutcomes(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole }))),
+      unresolvedFindings: unresolved, status,
       ownerGate: { required: status === "blocked_with_owner_gate" || budgetExceeded, reason: budgetExceeded ? `Provider token budget exceeded after durable checkpoint in ${overrunPhase}: ${overrunActual} > ${overrunLimit}.` : status === "blocked_with_owner_gate" ? unresolved.join(" ") : null },
       safetyAssertions: { sourceShaUnchanged: sourceAfter === sourceBefore.trim(), sourceWorktreeStateUnchanged: sourceStatusAfter === sourceStatusBefore, targetMainMutation: false, targetMainPush: false, merge: false, deploy: false, publicationPerformed: false, forbiddenZonesRespected: !unresolved.some((item) => item.includes("forbidden")), secretScanPassed: !unresolved.includes("Secret scan rejected the patch.") },
       diagnostics: { agentSummary, sourceBefore: sourceBefore.trim(), sourceAfter, sourceWorktreeStatusBefore: sourceStatusBefore, sourceWorktreeStatusAfter: sourceStatusAfter, dirtyPolicy, contextPlan, selectionReason: selection.reason, rejectedAlternatives: selection.rejected, workspace: relative(request.targetRepository, workspace), ...(request.checkpointRepair ? { checkpointRepair: { sourceCheckpointId: request.checkpointRepair.checkpointId, sourceCheckpointDigest: request.checkpointRepair.checkpointDigest, sourcePatch: request.checkpointRepair.patchPath, restoredOnBaseSha: request.spec.target.expectedSha, disposableWorkspace: true } } : {}) },
@@ -211,6 +239,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
 function capability(command: string | null, status: ExecutorStatus, limitations: string[], model: string | null = process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null): ImplementationExecutorCapability { const result = { id: implementationExecutorContract.id, status, supports: [...implementationExecutorContract.modes], providerCalls: true, runtime: [...implementationExecutorContract.runtimes], providerRequirements: ["existing local coding-agent credential mechanism"], networkRequirements: ["provider transport; denied unless separately authorized"], maxLimits: implementationExecutorContract.maxLimits, limitations, model } as ImplementationExecutorCapability; Object.defineProperty(result, "command", { value: command, enumerable: false }); return result; }
 async function configuredCommand(): Promise<{ command: string; model: string | null } | null> { const env = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND?.trim(); if (env) return { command: env, model: process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null }; const config = await loadAdminConfig(); const provider = config.config.providers.find((item) => item.id === "codex-cli" && item.type === "cli" && item.enabled && item.command); if (provider?.command) return { command: provider.command, model: provider.defaultModel ?? null }; return executableAvailable("codex").then((ready) => ready ? { command: "codex", model: process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null } : null); }
 async function executableAvailable(command: string): Promise<boolean> { if (command.includes("/")) return access(command).then(() => true, () => false); return execFileAsync("sh", ["-c", `command -v "$1" >/dev/null 2>&1`, "sh", command]).then(() => true, () => false); }
+async function pathAvailable(path: string): Promise<boolean> { return access(path).then(() => true, () => false); }
 async function codexCredentialReady(argv: string[]): Promise<boolean> { const key = argv.join("\0"), cached = credentialCache.get(key); if (cached && Date.now() - cached.at < 30_000) return cached.ready; const ready = await execFileAsync(argv[0]!, [...argv.slice(1), "login", "status"], { env: safeRuntimeEnv(), timeout: 10_000 }).then(() => true, () => false); credentialCache.set(key, { at: Date.now(), ready }); return ready; }
 function splitCommand(value: string): string[] { return value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((part) => part.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2")) ?? []; }
 async function git(cwd: string, args: string[]): Promise<string> { return (await execFileAsync("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 })).stdout; }
@@ -272,6 +301,42 @@ async function runAgent(commandText: string, model: string | null, cwd: string, 
 }
 function extractSummary(stdout: string, stderr: string): string { const finals = stdout.split(/\r?\n/).flatMap((line) => { try { const item = JSON.parse(line) as Record<string, any>; const text = item.msg?.message ?? item.message ?? item.text ?? item.item?.text; return typeof text === "string" ? [text] : []; } catch { return []; } }); return (finals.at(-1) ?? stdout ?? stderr).slice(-20_000); }
 export function extractTokenUsage(stdout: string): number | null { const values = stdout.split(/\r?\n/).flatMap((line) => { try { const item = JSON.parse(line) as Record<string, any>; const usage = item.usage ?? item.token_usage ?? item.item?.usage; const input = usage?.input_tokens ?? usage?.inputTokens, cached = usage?.cached_input_tokens ?? usage?.cachedInputTokens ?? 0, output = usage?.output_tokens ?? usage?.outputTokens; if (Number.isFinite(input) && Number.isFinite(output) && Number.isFinite(cached)) return [Math.max(0, Number(input) - Number(cached)) + Number(output)]; const explicit = usage?.total_tokens ?? usage?.totalTokens ?? item.total_tokens; return Number.isFinite(explicit) ? [Number(explicit)] : []; } catch { return []; } }); return values.length ? Math.max(...values) : null; }
-async function runValidation(command: string, cwd: string, root: string, iteration: number, index: number, timeoutMs: number, signal?: AbortSignal): Promise<CommandDiagnostic> { const started = Date.now(), startedAt = new Date(started).toISOString(); let stdout = "", stderr = "", timedOut = false, setupFailure = false; const artifactPath = `validation/iteration-${iteration}/command-${index}.json`; await mkdir(dirname(join(root, artifactPath)), { recursive: true }); return new Promise((resolveRun) => { const child = spawn(command, { cwd, shell: true, stdio: ["ignore", "pipe", "pipe"], env: safeRuntimeEnv() }); const stop = () => child.kill("SIGTERM"); signal?.addEventListener("abort", stop, { once: true }); const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs); child.stdout?.on("data", (chunk) => { stdout += chunk; }); child.stderr?.on("data", (chunk) => { stderr += chunk; }); child.on("error", (error) => { setupFailure = true; stderr += error.message; }); child.on("close", (exitCode, childSignal) => { clearTimeout(timer); signal?.removeEventListener("abort", stop); const finishedAt = new Date().toISOString(); stdout = redactProviderOutput(stdout); stderr = redactProviderOutput(stderr); const stdoutTruncated = Buffer.byteLength(stdout) > 1_000_000, stderrTruncated = Buffer.byteLength(stderr) > 1_000_000; const diagnosticGap = exitCode !== 0 && !stdout.trim() && !stderr.trim(); const failureReason = exitCode === 0 ? null : timedOut ? `Validation timed out after ${timeoutMs}ms.` : setupFailure ? "Validation command could not be started." : diagnosticGap ? "Validation exited non-zero without stdout or stderr." : `Validation command exited with code ${exitCode ?? "signal"}.`; const classification = exitCode === 0 ? null : setupFailure ? "setup" as const : timedOut || childSignal ? "runtime" as const : diagnosticGap ? "infrastructure" as const : "product" as const; const diagnostic: CommandDiagnostic = { command, cwd, executor: "local-coding-agent", runtime: "local-disposable", startedAt, finishedAt, durationMs: Date.now() - started, exitCode, signal: childSignal, stdout: stdout.slice(0, 1_000_000), stderr: stderr.slice(0, 1_000_000), stdoutTruncated, stderrTruncated, truncation: { stdout: stdoutTruncated, stderr: stderrTruncated, limitBytes: 1_000_000 }, artifactPaths: [artifactPath], timedOut, setupFailure, failureReason, classification, diagnosticGap, infrastructureDefect: diagnosticGap ? "non-zero exit produced empty stdout and stderr" : null, artifactPath }; void writeFile(join(root, artifactPath), JSON.stringify(diagnostic, null, 2) + "\n").then(() => resolveRun(diagnostic)); }); }); }
+async function runValidation(plan: ValidationPlanEntry, root: string, iteration: number, index: number, timeoutMs: number, signal?: AbortSignal): Promise<CommandDiagnostic> {
+  const started = Date.now(), startedAt = new Date(started).toISOString();
+  let stdout = "", stderr = "", timedOut = false, setupFailure = false, cancelled = false;
+  const artifactPath = `validation/iteration-${iteration}/command-${index}.json`;
+  await mkdir(dirname(join(root, artifactPath)), { recursive: true });
+  const finish = async (execution: { exitCode: number | null; childSignal: NodeJS.Signals | null }): Promise<CommandDiagnostic> => {
+    const finishedAt = new Date().toISOString();
+    stdout = redactProviderOutput(stdout); stderr = redactProviderOutput(stderr);
+    const outcome = classifyValidationExecution({ plan, exitCode: execution.exitCode, signal: execution.childSignal, timedOut, cancelled, spawnError: setupFailure, stdout, stderr });
+    const stdoutTruncated = Buffer.byteLength(stdout) > 1_000_000, stderrTruncated = Buffer.byteLength(stderr) > 1_000_000;
+    const diagnosticGap = outcome.outcome !== "passed" && !stdout.trim() && !stderr.trim() && plan.disposition === "execute";
+    const classification = outcome.outcome === "product_failed" ? "product" : outcome.outcome === "setup_failed" ? "setup"
+      : ["runtime_failed", "timed_out", "cancelled"].includes(outcome.outcome) ? "runtime" : null;
+    const diagnostic: CommandDiagnostic = {
+      command: plan.command, cwd: plan.cwd, executor: "local-coding-agent", runtime: plan.runtime,
+      startedAt, finishedAt, durationMs: Date.now() - started, exitCode: execution.exitCode, signal: execution.childSignal,
+      stdout: stdout.slice(0, 1_000_000), stderr: stderr.slice(0, 1_000_000), stdoutTruncated, stderrTruncated,
+      truncation: { stdout: stdoutTruncated, stderr: stderrTruncated, limitBytes: 1_000_000 }, artifactPaths: [artifactPath],
+      timedOut, setupFailure, failureReason: outcome.reason, classification, diagnosticGap,
+      infrastructureDefect: diagnosticGap ? "non-zero exit produced empty stdout and stderr" : null, artifactPath,
+      outcome: outcome.outcome, acceptance: plan.acceptance, evidenceRole: plan.evidenceRole,
+      requiredCapabilities: plan.requiredCapabilities, availableCapabilities: plan.availableCapabilities,
+    };
+    await writeFile(join(root, artifactPath), JSON.stringify(diagnostic, null, 2) + "\n");
+    return diagnostic;
+  };
+  if (plan.disposition !== "execute") return finish({ exitCode: null, childSignal: null });
+  return new Promise((resolveRun) => {
+    const child = spawn(plan.command, { cwd: plan.cwd, shell: true, stdio: ["ignore", "pipe", "pipe"], env: safeRuntimeEnv() });
+    const stop = () => { cancelled = true; child.kill("SIGTERM"); };
+    signal?.addEventListener("abort", stop, { once: true });
+    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs);
+    child.stdout?.on("data", (chunk) => { stdout += chunk; }); child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => { setupFailure = true; stderr += error.message; });
+    child.on("close", (exitCode, childSignal) => { clearTimeout(timer); signal?.removeEventListener("abort", stop); void finish({ exitCode, childSignal }).then(resolveRun); });
+  });
+}
 function safeRuntimeEnv(): NodeJS.ProcessEnv { const allowed = ["HOME", "PATH", "SHELL", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "LANG", "LC_ALL", "CODEX_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"]; return Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]!]])); }
 function redactProviderOutput(value: string): string { return value.replace(/\b(?:gh[pousr]_|github_pat_|glpat-|sk-)[A-Za-z0-9_-]{12,}\b/gi, "[REDACTED]").replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]{12,}/gi, "$1[REDACTED]").replace(/\b(password|passwd|api[_-]?key|access[_-]?token|secret|credential)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]"); }

@@ -96,6 +96,10 @@ describe("TaskSpec v2", () => {
     expect(taskSpecV2Schema).toEqual(fileSchema);
     const contract = publicTaskSpecContract() as Record<string, any>;
     expect(contract.executionAgreement).toMatchObject({ schemaVersion: 1, profiles: EXECUTION_PROFILES, phases: EXECUTION_PHASE_IDS, phaseOwnershipParties: EXECUTION_PARTIES });
+    expect(contract.validationContract).toMatchObject({
+      preflightSchemaVersion: 1,
+      autoDiscoveryDefaults: { acceptance: "required", evidenceRole: "product-validation", unknownCommands: "capability_unsupported_until_explicitly_described" },
+    });
     expect(contract.implementationRequest.taskSpec.executionAgreement).toEqual({ schemaVersion: 1, profile: "local-ready" });
     const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(fileSchema);
     expect(validate(contract.implementationRequest.taskSpec), JSON.stringify(validate.errors)).toBe(true);
@@ -221,6 +225,23 @@ describe("TaskSpec v2", () => {
     const repo = await gitRepo();
     await expect(normalizeTaskSpecV2({ ...minimal(repo), runtime: { preference: "local-disposable", dependencyPreparation: strategy } }))
       .resolves.toMatchObject({ runtime: { preference: "local-disposable", dependencyPreparation: strategy } });
+  });
+
+  it("normalizes explicit validation capability metadata into TaskSpec", async () => {
+    const repo = await gitRepo();
+    const spec = await normalizeTaskSpecV2({
+      ...minimal(repo),
+      validation: {
+        mode: "explicit", commands: ["custom-check"],
+        requirements: [{ command: "custom-check", capabilities: ["shell", "database"], acceptance: "optional", evidenceRole: "integration-evidence", fallbacks: ["Use CI evidence"] }],
+        projectPolicy: { deniedCapabilities: ["production"], skippedCommands: [] },
+      },
+    });
+    expect(spec.validation).toMatchObject({
+      mode: "explicit", commands: ["custom-check"],
+      requirements: [{ command: "custom-check", requiredCapabilities: ["shell", "database"], acceptance: "optional", evidenceRole: "integration-evidence", fallbacks: ["Use CI evidence"], source: "explicit" }],
+      projectPolicy: { deniedCapabilities: ["production"], skippedCommands: [] },
+    });
   });
 
   it("includes decisive post-apply stages in normalized validation", async () => {

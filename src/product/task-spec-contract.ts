@@ -1,4 +1,5 @@
 import { EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES } from "./execution-agreement.js";
+import { VALIDATION_ACCEPTANCE, VALIDATION_CAPABILITIES, VALIDATION_OUTCOMES } from "../validation/capability-contract.js";
 
 export const taskSpecSchemaVersion = 2 as const;
 export const taskSpecSchemaPath = "/schemas/task-spec-v2.schema.json" as const;
@@ -52,7 +53,12 @@ export const taskSpecV2Schema: Record<string, unknown> = {
     },
     discovery: { type: "object", additionalProperties: false, properties: { policy: { enum: ["auto", "explicit"] }, profile: { enum: ["small-scope", "standard"] }, explicitFiles: { type: "array", items: { type: "string", minLength: 1 } }, maxFiles: { type: "integer", minimum: 1, maximum: 1000 }, maxBytes: { type: "integer", minimum: 1000, maximum: 10000000 }, maxTokens: { type: "integer", minimum: 100, maximum: 500000 }, stopCondition: { type: "string", minLength: 1 } } },
     runtime: { type: "object", additionalProperties: false, properties: { preference: { enum: taskRuntimeIds }, dockerImage: { type: "string", minLength: 1 }, prepareDependencies: { type: "boolean" }, dependencyPreparation: { enum: ["required", "if-needed", "disabled", "reuse-existing"] }, externalNetwork: { enum: ["denied", "dependency-preparation-only", "allowed"] } }, not: { required: ["prepareDependencies", "dependencyPreparation"] } },
-    validation: { type: "object", additionalProperties: false, properties: { mode: { enum: ["auto", "explicit"] }, commands: { type: "array", items: { type: "string", minLength: 1 } } } },
+    validation: { type: "object", additionalProperties: false, properties: {
+      mode: { enum: ["auto", "explicit"] }, commands: { type: "array", items: { type: "string", minLength: 1 } },
+      requirements: { type: "array", items: { type: "object", additionalProperties: false, required: ["command"], properties: { command: { type: "string", minLength: 1 }, capabilities: { type: "array", uniqueItems: true, items: { enum: VALIDATION_CAPABILITIES } }, acceptance: { enum: VALIDATION_ACCEPTANCE }, evidenceRole: { type: "string", minLength: 1 }, fallbacks: { type: "array", items: { type: "string", minLength: 1 } } } } },
+      profile: { type: "object", additionalProperties: false, properties: { id: { type: "string", minLength: 1 }, defaultAcceptance: { enum: VALIDATION_ACCEPTANCE }, defaultEvidenceRole: { type: "string", minLength: 1 }, additionalCapabilities: { type: "array", uniqueItems: true, items: { enum: VALIDATION_CAPABILITIES } } } },
+      projectPolicy: { type: "object", additionalProperties: false, properties: { deniedCapabilities: { type: "array", uniqueItems: true, items: { enum: VALIDATION_CAPABILITIES } }, skippedCommands: { type: "array", uniqueItems: true, items: { type: "string", minLength: 1 } } } },
+    } },
     authority: { type: "object", additionalProperties: false, properties: { profile: { enum: ["read-only", "bounded-implementation"] }, envelopeFile: { type: ["string", "null"] }, forbiddenAreas: { type: "array", items: { type: "string", minLength: 1 } }, allowProviderCalls: { type: "boolean" }, allowNetwork: { type: "boolean" } } },
     git: { type: "object", additionalProperties: false, properties: { publication: { enum: ["none", "draft-pr"] }, branch: { type: ["string", "null"] } } },
     merge: { type: "object", additionalProperties: false, properties: { policy: { const: "never" } } },
@@ -73,6 +79,10 @@ export function publicTaskSpecContract(): Record<string, unknown> {
     executionModes: taskExecutionModes,
     executionAgreement: { schemaVersion: 1, profiles: EXECUTION_PROFILES, phases: EXECUTION_PHASE_IDS, phaseOwnershipParties: EXECUTION_PARTIES },
     runtimeIds: taskRuntimeIds,
+    validationContract: {
+      capabilities: VALIDATION_CAPABILITIES, acceptance: VALIDATION_ACCEPTANCE, outcomes: VALIDATION_OUTCOMES, preflightSchemaVersion: 1,
+      autoDiscoveryDefaults: { acceptance: "required", evidenceRole: "product-validation", unknownCommands: "capability_unsupported_until_explicitly_described" },
+    },
     runtimeDefaults: { implementation: executor.defaultRuntime, repair: executor.defaultRuntime, inspection: "docker", validation: "docker" },
     implementationExecutorIds: [executor.id],
     compatibleRuntimes: { [executor.id]: executor.runtimes },

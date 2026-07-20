@@ -67,9 +67,18 @@
       "items": {
         "type": "object",
         "required": ["command"],
-        "properties": { "command": { "type": "string", "minLength": 1 } }
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "outcome": { "$ref": "#/$defs/validationOutcome" },
+          "acceptance": { "$ref": "#/$defs/validationAcceptance" },
+          "evidenceRole": { "type": "string", "minLength": 1 },
+          "requiredCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } },
+          "availableCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } }
+        }
       }
     },
+    "validationPlan": { "$ref": "#/$defs/validationPlan" },
+    "validationAggregate": { "$ref": "#/$defs/validationAggregate" },
     "artifacts": true,
     "git": { "type": "object" },
     "ownerGate": {
@@ -86,6 +95,22 @@
     "limitations": { "type": "array" }
   },
   "$defs": {
+    "validationCapability": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production"] },
+    "validationAcceptance": { "enum": ["required", "optional", "advisory", "evidence-only"] },
+    "validationOutcome": { "enum": ["passed", "product_failed", "setup_failed", "runtime_failed", "capability_unsupported", "skipped_by_policy", "timed_out", "cancelled"] },
+    "validationAggregate": { "enum": ["passed", "completed_with_validation_gaps", "blocked_by_capability", "blocked_by_policy", "product_failed", "setup_failed", "runtime_failed", "timed_out", "cancelled"] },
+    "validationPlan": {
+      "type": "object", "additionalProperties": false, "required": ["schemaVersion", "createdAt", "profile", "runtime", "commands"],
+      "properties": {
+        "schemaVersion": { "const": 1 }, "createdAt": { "type": "string", "minLength": 1 }, "profile": { "type": "object" }, "runtime": { "type": "object" },
+        "commands": { "type": "array", "items": { "type": "object", "required": ["command", "runtime", "lane", "cwd", "requiredCapabilities", "availableCapabilities", "supported", "reason", "fallbacks", "acceptance", "evidenceRole", "disposition"], "properties": {
+          "command": { "type": "string", "minLength": 1 }, "runtime": { "type": "string", "minLength": 1 }, "lane": { "type": "string", "minLength": 1 }, "cwd": { "type": "string", "minLength": 1 },
+          "requiredCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } }, "availableCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } },
+          "supported": { "type": "boolean" }, "reason": { "type": "string", "minLength": 1 }, "fallbacks": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "acceptance": { "$ref": "#/$defs/validationAcceptance" }, "evidenceRole": { "type": "string", "minLength": 1 }, "disposition": { "enum": ["execute", "capability_unsupported", "skipped_by_policy"] }
+        } } }
+      }
+    },
     "completionStatus": {
       "enum": [
         "runforge_scope_completed",
@@ -98,7 +123,7 @@
       ]
     },
     "legacyStatus": {
-      "enum": ["completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required"]
+      "enum": ["completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required", "blocked_by_capability", "blocked_by_policy"]
     },
     "legacyArtifacts": {
       "type": "object",
@@ -234,7 +259,7 @@
       "required": ["command", "status", "exitCode", "evidence"],
       "properties": {
         "command": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["passed", "failed", "not_run"] },
+        "status": { "enum": ["passed", "product_failed", "setup_failed", "runtime_failed", "capability_unsupported", "skipped_by_policy", "timed_out", "cancelled", "failed", "not_run"] },
         "exitCode": { "type": ["integer", "null"] },
         "evidence": { "$ref": "#/$defs/strings" }
       }

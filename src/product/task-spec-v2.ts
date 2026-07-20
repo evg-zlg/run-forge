@@ -5,6 +5,10 @@ import { loadCodeRepairPlan } from "../run/code-repair.js";
 import { EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES, type ExecutionParty, type ExecutionPhaseId, type ExecutionProfile } from "./execution-agreement.js";
 import { defaultArtifactRoot, inspectProject, isPathInside } from "./project-inspection.js";
 import { defaultRuntimeForMode, implementationExecutorContract, runtimeCompatibleWithImplementationExecutor, taskExecutionModes, taskRuntimeIds, taskSpecSchemaVersion, type TaskExecutionMode, type TaskRuntimeId } from "./task-spec-contract.js";
+import {
+  VALIDATION_ACCEPTANCE, VALIDATION_CAPABILITIES, defaultValidationProfile, normalizeValidationRequirements,
+  type ValidationCommandRequirement, type ValidationProfile, type ValidationProjectPolicy,
+} from "../validation/capability-contract.js";
 
 export { taskSpecSchemaVersion } from "./task-spec-contract.js";
 const topKeys = ["schemaVersion", "taskId", "task", "target", "execution", "executionAgreement", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
@@ -29,7 +33,10 @@ export type TaskSpecV2 = {
   executionAgreement: TaskSpecExecutionAgreement;
   discovery: { policy: "auto" | "explicit"; profile: "small-scope" | "standard"; explicitFiles: string[]; maxFiles: number; maxBytes: number; maxTokens: number; stopCondition: string };
   runtime: { preference: TaskRuntimeId; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" | "allowed" };
-  validation: { mode: "auto" | "explicit"; commands: string[] };
+  validation: {
+    mode: "auto" | "explicit"; commands: string[]; requirements: ValidationCommandRequirement[];
+    profile: ValidationProfile; projectPolicy: ValidationProjectPolicy;
+  };
   authority: { profile: "read-only" | "bounded-implementation"; envelopeFile: string | null; forbiddenAreas: string[]; allowProviderCalls: boolean; allowNetwork: boolean };
   git: { publication: "none" | "draft-pr"; branch: string | null };
   merge: { policy: "never" };
@@ -78,7 +85,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const artifactRoot = resolve(baseDir, artifactInput);
   if (await isPathInside(inspection.path, artifactRoot)) throw new Error(`artifacts.root must be outside target.repository: ${artifactRoot}`);
   const validationRaw = optionalObject(raw.validation, "validation");
-  rejectUnknown(validationRaw, ["mode", "commands"], "validation");
+  rejectUnknown(validationRaw, ["mode", "commands", "requirements", "profile", "projectPolicy"], "validation");
   const validationMode = choice(validationRaw.mode ?? "auto", ["auto", "explicit"], "validation.mode");
   const explicitCommands = strings(validationRaw.commands ?? [], "validation.commands");
   if (validationMode === "auto" && explicitCommands.length) throw new Error("validation.commands must be empty when validation.mode='auto'.");
@@ -87,6 +94,31 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   if (!commands.length) throw new Error("No validation commands were discovered; set validation.mode='explicit' and provide commands.");
   const blocked = blockedCommandReports(commands, "main");
   if (blocked[0]) throw new Error(`Unsafe validation command: ${blocked[0].reason}`);
+  const requirementInputs = array(validationRaw.requirements).map((value, index) => {
+    const item = object(value, `validation.requirements[${index}] must be an object.`);
+    rejectUnknown(item, ["command", "capabilities", "acceptance", "evidenceRole", "fallbacks"], `validation.requirements[${index}]`);
+    return {
+      command: string(item.command, `validation.requirements[${index}].command`),
+      capabilities: choices(item.capabilities ?? [], VALIDATION_CAPABILITIES, `validation.requirements[${index}].capabilities`),
+      acceptance: item.acceptance === undefined ? undefined : choice(item.acceptance, VALIDATION_ACCEPTANCE, `validation.requirements[${index}].acceptance`),
+      evidenceRole: optionalString(item.evidenceRole, `validation.requirements[${index}].evidenceRole`),
+      fallbacks: strings(item.fallbacks ?? [], `validation.requirements[${index}].fallbacks`),
+    };
+  });
+  const profileRaw = optionalObject(validationRaw.profile, "validation.profile");
+  rejectUnknown(profileRaw, ["id", "defaultAcceptance", "defaultEvidenceRole", "additionalCapabilities"], "validation.profile");
+  const defaultProfile = defaultValidationProfile(validationMode);
+  const normalizedValidation = normalizeValidationRequirements({
+    commands, mode: validationMode, requirements: requirementInputs,
+    profile: {
+      id: optionalString(profileRaw.id, "validation.profile.id") ?? defaultProfile.id,
+      defaultAcceptance: choice(profileRaw.defaultAcceptance ?? defaultProfile.defaultAcceptance, VALIDATION_ACCEPTANCE, "validation.profile.defaultAcceptance"),
+      defaultEvidenceRole: optionalString(profileRaw.defaultEvidenceRole, "validation.profile.defaultEvidenceRole") ?? defaultProfile.defaultEvidenceRole,
+      additionalCapabilities: choices(profileRaw.additionalCapabilities ?? [], VALIDATION_CAPABILITIES, "validation.profile.additionalCapabilities"),
+    },
+  });
+  const policyRaw = optionalObject(validationRaw.projectPolicy, "validation.projectPolicy");
+  rejectUnknown(policyRaw, ["deniedCapabilities", "skippedCommands"], "validation.projectPolicy");
   const discoveryRaw = optionalObject(raw.discovery, "discovery");
   rejectUnknown(discoveryRaw, ["policy", "profile", "explicitFiles", "maxFiles", "maxBytes", "maxTokens", "stopCondition"], "discovery");
   const runtimeRaw = optionalObject(raw.runtime, "runtime");
@@ -147,7 +179,13 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
       dependencyPreparation,
       externalNetwork
     },
-    validation: { mode: validationMode, commands },
+    validation: {
+      mode: validationMode, commands, requirements: normalizedValidation.requirements, profile: normalizedValidation.profile,
+      projectPolicy: {
+        deniedCapabilities: choices(policyRaw.deniedCapabilities ?? [], VALIDATION_CAPABILITIES, "validation.projectPolicy.deniedCapabilities"),
+        skippedCommands: strings(policyRaw.skippedCommands ?? [], "validation.projectPolicy.skippedCommands"),
+      },
+    },
     authority: { profile, envelopeFile: authorityFile, forbiddenAreas, allowProviderCalls, allowNetwork },
     git: { publication, branch: nullableString(gitRaw.branch, "git.branch") },
     merge: { policy: choice(mergeRaw.policy ?? "never", ["never"], "merge.policy") },
@@ -186,6 +224,8 @@ function boolean(value: unknown, name: string): boolean { if (typeof value !== "
 function integer(value: unknown, name: string, min: number, max: number, fallback: number): number { const parsed = value === undefined ? fallback : value; if (!Number.isInteger(parsed) || Number(parsed) < min || Number(parsed) > max) throw new Error(`${name} must be an integer from ${min} to ${max}.`); return Number(parsed); }
 function strings(value: unknown, name: string, nonEmpty = false): string[] { if (!Array.isArray(value) || (nonEmpty && !value.length) || value.some((item) => typeof item !== "string" || !item.trim())) throw new Error(`${name} must be ${nonEmpty ? "a non-empty " : "an "}array of non-empty strings.`); return value.map((item) => item.trim()); }
 function choice<T extends string>(value: unknown, choices: readonly T[], name: string): T { if (typeof value !== "string" || !choices.includes(value as T)) throw new Error(`${name} must be one of: ${choices.join(", ")}.`); return value as T; }
+function choices<T extends string>(value: unknown, allowed: readonly T[], name: string): T[] { return strings(value, name).map((item) => choice(item, allowed, name)); }
+function array(value: unknown): unknown[] { if (value === undefined) return []; if (!Array.isArray(value)) throw new Error("validation.requirements must be an array."); return value; }
 function rejectUnknown(value: Record<string, unknown>, allowed: string[], name: string): void { const unknown = Object.keys(value).filter((key) => !allowed.includes(key)); if (unknown.length) throw new Error(`${name} contains unknown field(s): ${unknown.join(", ")}.`); }
 function defaultForbidden(): string[] { return ["target main mutation or push", "PR merge", "deploy", "database", "production", "secrets", "migrations"]; }
 

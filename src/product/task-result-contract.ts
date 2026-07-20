@@ -6,6 +6,9 @@ import type { ExecutorResult } from "../run/task-run-executor.js";
 import {
   type ExecutionAgreement, type ExecutionAgreementStatus, type ExecutionParty, type ExecutionPhaseId, type ExecutionProfile,
 } from "./execution-agreement.js";
+import {
+  VALIDATION_OUTCOMES, type ValidationAggregateStatus, type ValidationCommandOutcome, type ValidationPreflightPlan,
+} from "../validation/capability-contract.js";
 
 export { validateTaskResultContract } from "./task-result-validation.js";
 
@@ -40,7 +43,7 @@ export type ResultGate = { name: string; status: "satisfied" | "pending" | "bloc
 export type ResultEvidence = { kind: "artifact" | "command" | "commit" | "patch" | "review" | "other"; reference: string; summary: string };
 
 export type ResultNextAction = { party: NextParty; exactAction: string; gates: ResultGate[]; evidence: ResultEvidence[] };
-export type HandoffValidation = { command: string; status: "passed" | "failed" | "not_run"; exitCode: number | null; evidence: string[] };
+export type HandoffValidation = { command: string; status: ValidationCommandOutcome | "failed" | "not_run"; exitCode: number | null; evidence: string[] };
 
 export type HandoffSafety = {
   targetMainMutation: false; targetMainPush: false; targetPrMerge: false; deploy: false;
@@ -74,6 +77,8 @@ export type AgreementAwareTaskResult = {
   agreement: AgreementResultSummary;
   handoff: NormalizedHandoffPackage;
   next: ResultNextAction;
+  validationPlan?: ValidationPreflightPlan;
+  validationAggregate?: ValidationAggregateStatus;
 };
 
 export type NormalizedHandoffInput = Omit<NormalizedHandoffPackage, "summary" | "changedFiles" | "validation" | "findings" | "risks" | "nextActions" | "publicationInstructions" | "ciCommands" | "safety"> & {
@@ -134,7 +139,7 @@ export function buildNormalizedHandoffPackage(input: NormalizedHandoffInput): No
   const nextActions = input.nextActions.map((action, index) => normalizeNextAction(action, `handoff.nextActions[${index}]`));
   if (nextActions.length === 0) throw new Error("handoff.nextActions must contain at least one exact action.");
   const validation = (input.validation ?? []).map((item, index) => {
-    if (!["passed", "failed", "not_run"].includes(item.status)) throw new Error(`handoff.validation[${index}].status is invalid.`);
+    if (![...VALIDATION_OUTCOMES, "failed", "not_run"].includes(item.status)) throw new Error(`handoff.validation[${index}].status is invalid.`);
     if (item.exitCode !== null && !Number.isInteger(item.exitCode)) throw new Error(`handoff.validation[${index}].exitCode must be an integer or null.`);
     return {
       command: requiredText(item.command, `handoff.validation[${index}].command`),
@@ -180,6 +185,8 @@ export function buildAgreementAwareTaskResult(input: {
   agreement: ExecutionAgreement;
   handoff: NormalizedHandoffInput;
   next: Omit<ResultNextAction, "gates" | "evidence"> & { gates?: readonly ResultGate[]; evidence?: readonly ResultEvidence[] };
+  validationPlan?: ValidationPreflightPlan;
+  validationAggregate?: ValidationAggregateStatus;
 }): AgreementAwareTaskResult {
   if (!(RUNFORGE_COMPLETION_STATUSES as readonly string[]).includes(input.status)) throw new Error(`Unknown task result status '${String(input.status)}'.`);
   return {
@@ -190,6 +197,8 @@ export function buildAgreementAwareTaskResult(input: {
     agreement: buildAgreementResultSummary(input.agreement),
     handoff: buildNormalizedHandoffPackage(input.handoff),
     next: normalizeNextAction(input.next, "next"),
+    ...(input.validationPlan ? { validationPlan: input.validationPlan } : {}),
+    ...(input.validationAggregate ? { validationAggregate: input.validationAggregate } : {}),
   };
 }
 

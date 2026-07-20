@@ -96,27 +96,29 @@ export async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: 
   const completed = ["implemented_and_validated", "no_change_required"].includes(result.status);
   const ownerRequired = result.ownerGate.required;
   const agreement = implementationAgreement(spec, result, completed);
-  const status: RunForgeCompletionStatus = ownerRequired ? "awaiting_owner" : completed ? completionStatusForAgreement(agreement) : "failed";
+  const status: RunForgeCompletionStatus = result.validationAggregate === "blocked_by_capability" ? "blocked_by_capability" : result.validationAggregate === "blocked_by_policy" ? "blocked_by_policy" : ownerRequired ? "awaiting_owner" : completed ? completionStatusForAgreement(agreement) : "failed";
+  const validationCompleted = ["passed", "completed_with_validation_gaps"].includes(result.validationAggregate);
   const next = implementationNextAction(status, agreement); const handoff = implementationHandoff(spec, result, status, next);
-  const agreementAware = buildAgreementAwareTaskResult({ taskId: spec.taskId, status, agreement, handoff, next });
+  const agreementAware = buildAgreementAwareTaskResult({ taskId: spec.taskId, status, agreement, handoff, next, validationPlan: result.validationPlan, validationAggregate: result.validationAggregate });
+  const legacyStatus = status === "blocked_by_capability" || status === "blocked_by_policy" ? status : completed ? "completed" : ownerRequired ? "awaiting_owner_decision" : "failed";
   const settlement = legacySettlement
-    ? { schemaVersion: 1 as const, contract: "runforge-task-result" as const, taskId: spec.taskId, status: completed ? "completed" : ownerRequired ? "awaiting_owner_decision" : "failed", workflow: agreementAware }
+    ? { schemaVersion: 1 as const, contract: "runforge-task-result" as const, taskId: spec.taskId, status: legacyStatus, workflow: agreementAware }
     : agreementAware;
   const document = {
     ...settlement,
     requestedIntent: spec.execution.mode, actualExecutorMode: "implementation", selectedExecutor: result.selectedExecutor,
     implementation: { status: result.status, performed: result.changedFiles.length > 0, plan: result.plan, changedFiles: result.changedFiles, localBranch: result.localBranch, localCommit: result.localCommit, patchPackage: result.patchPackage, unresolvedAcceptanceCriteria: result.unresolvedFindings },
     artifact: { status: result.checkpoints.length ? "available" : "unavailable", latestCheckpointId: result.checkpoints.at(-1)?.id ?? null, bestValidatedCheckpointId: [...result.checkpoints].reverse().find((item) => item.validationPassed)?.id ?? null, checkpoints: result.checkpoints },
-    workflow: { ...objectRecord(documentWorkflow(settlement)), status: ownerRequired ? "awaiting_owner" : objectRecord(documentWorkflow(settlement)).status ?? (completed ? "completed" : "failed"), implementationCompleted: completed, validationCompleted: completed && result.validationResults.every((item) => item.exitCode === 0), budgetExceeded: result.budget.exceeded, publicationBlocked: true, ownerDecisionRequired: ownerRequired },
+    workflow: { ...objectRecord(documentWorkflow(settlement)), status: ownerRequired ? "awaiting_owner" : objectRecord(documentWorkflow(settlement)).status ?? (completed ? "completed" : "failed"), implementationCompleted: completed, validationCompleted, validationAggregate: result.validationAggregate, budgetExceeded: result.budget.exceeded, publicationBlocked: true, ownerDecisionRequired: ownerRequired },
     targetRepository: { path: spec.target.repository, repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory), initialSha: spec.target.expectedSha, finalSha: spec.target.expectedSha, changed: false },
     completedWork: result.changedFiles.map((file) => ({ file, status: "changed_in_disposable_workspace" })),
-    validation: result.validationResults,
-    artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", plan: "implementation-plan.json", contextPlan: "context-plan.json", patch: result.patchPackage ? "implementation.patch" : null, checkpoints: result.checkpoints.map((item) => item.path) },
+    validationPlan: result.validationPlan, validationAggregate: result.validationAggregate, validation: result.validationResults,
+    artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", plan: "implementation-plan.json", contextPlan: "context-plan.json", validationPlan: "validation-plan.json", patch: result.patchPackage ? "implementation.patch" : null, checkpoints: result.checkpoints.map((item) => item.path) },
     git: { branch: result.localBranch, commit: result.localCommit, patchPackage: result.patchPackage, pullRequest: null, merge: null },
     publication: { status: "on_hold", ownerGate: { required: false, status: "not_requested" }, performed: false },
     providerCalls: result.providerCalls,
     usage: phaseUsage(spec, result),
-    ownerGate: { required: ownerRequired, status: ownerRequired ? "awaiting_owner_decision" : "not_required", subject: completed ? "Completed implementation checkpoint is available; only continuation/publication is blocked." : "Implementation needs an owner decision.", completed: { implementation: completed, validation: completed && result.validationResults.every((item) => item.exitCode === 0), artifacts: result.checkpoints.map((item) => item.id) }, blocked: result.budget.exceeded ? ["future_provider_calls", "repair_iterations", "publication", "workflow_completion"] : ["workflow_continuation"], options: [
+    ownerGate: { required: ownerRequired, status: ownerRequired ? "awaiting_owner_decision" : "not_required", subject: completed ? "Completed implementation checkpoint is available; only continuation/publication is blocked." : "Implementation needs an owner decision.", completed: { implementation: completed, validation: validationCompleted, artifacts: result.checkpoints.map((item) => item.id) }, blocked: result.budget.exceeded ? ["future_provider_calls", "repair_iterations", "publication", "workflow_completion"] : ["workflow_continuation"], options: [
       { id: "accept_completed_patch", endpoint: `/v1/tasks/${spec.taskId}/accept-completed-result`, providerRun: false, grantsAuthority: false }, { id: "grant_additional_budget", endpoint: `/v1/tasks/${spec.taskId}/checkpoint-repairs`, providerRun: true, grantsAuthority: false, requires: ["taskId", "decisionId", "checkpointId", "checkpointDigest", "additionalProviderTokens"] }, { id: "stop_with_handoff", providerRun: false, grantsAuthority: false }, { id: "discard_result", endpoint: `/v1/tasks/${spec.taskId}/discard-result`, providerRun: false, grantsAuthority: false, explicitConfirmationRequired: true }, { id: "retry_from_checkpoint", endpoint: `/v1/tasks/${spec.taskId}/checkpoint-repairs`, providerRun: true, grantsAuthority: false, requires: ["taskId", "decisionId", "checkpointId", "checkpointDigest", "repairIntent"] }
     ], ...(result.ownerGate.reason ? { reason: result.ownerGate.reason } : {}) },
     handoffPackage: { status: result.checkpoints.length ? "available" : "unavailable", latestSafePatch: result.checkpoints.at(-1)?.patchPath ?? result.patchPackage, bestValidatedCheckpoint: [...result.checkpoints].reverse().find((item) => item.validationPassed)?.id ?? null, baseSha: spec.target.expectedSha, applyInstructions: result.checkpoints.length ? `git apply '${result.checkpoints.at(-1)!.patchPath}'` : null, changedFiles: result.changedFiles, validationEvidence: result.validationResults.flatMap((item) => item.artifactPaths), knownLimitations: result.unresolvedFindings, nextResponsibleParty: ownerRequired ? "owner" : "external_session", exactNextAction: ownerRequired ? ([...result.checkpoints].reverse().find((item) => item.validationPassed) ? `POST /v1/tasks/${spec.taskId}/accept-completed-result with the best validated checkpoint ID.` : `POST /v1/tasks/${spec.taskId}/checkpoint-repairs with the task, decision, checkpoint ID and published checkpoint digest; patch-only handoff remains available.`) : "Preserve or publish the patch under separate authority." },
@@ -126,7 +128,7 @@ export async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: 
   };
   validateTaskResultContract(document);
   await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
-  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} implementation result\n\nOutcome: **${result.status}**\n\nWorkflow status: **${status}**\n\nExecutor: **${result.selectedExecutor.id}**${result.selectedExecutor.model ? ` / ${result.selectedExecutor.model}` : ""}\n\nChanged files: ${result.changedFiles.length ? result.changedFiles.map((file) => `\`${file}\``).join(", ") : "none"}\n\nValidation: ${result.validationResults.every((item) => item.exitCode === 0) ? "passed" : "not green"}\n\nLocal branch: ${result.localBranch ?? "none"}\nLocal commit: ${result.localCommit ?? "none"}\nPatch package: ${result.patchPackage ?? "none"}\n\nPublication: **on hold; not performed**.\n`, "utf8");
+  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} implementation result\n\nOutcome: **${result.status}**\n\nWorkflow status: **${status}**\n\nExecutor: **${result.selectedExecutor.id}**${result.selectedExecutor.model ? ` / ${result.selectedExecutor.model}` : ""}\n\nChanged files: ${result.changedFiles.length ? result.changedFiles.map((file) => `\`${file}\``).join(", ") : "none"}\n\nValidation: **${result.validationAggregate}**\n\nLocal branch: ${result.localBranch ?? "none"}\nLocal commit: ${result.localCommit ?? "none"}\nPatch package: ${result.patchPackage ?? "none"}\n\nPublication: **on hold; not performed**.\n`, "utf8");
   return status;
 }
 
@@ -209,7 +211,7 @@ function implementationHandoff(
     commit: result.localCommit,
     validation: result.validationResults.map((item) => ({
       command: item.command,
-      status: item.exitCode === 0 ? "passed" as const : "failed" as const,
+      status: item.outcome,
       exitCode: item.exitCode,
       evidence: item.artifactPaths,
     })),
@@ -228,7 +230,7 @@ function implementationHandoff(
 }
 
 export function clearRepairedFindings(result: ImplementationExecutorResult): void {
-  if (result.status === "implemented_and_validated" && result.validationResults.length > 0 && result.validationResults.every((item) => item.exitCode === 0)) {
+  if (result.status === "implemented_and_validated" && result.validationResults.length > 0 && ["passed", "completed_with_validation_gaps"].includes(result.validationAggregate)) {
     result.unresolvedFindings = [];
   }
 }
