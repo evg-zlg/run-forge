@@ -31,7 +31,7 @@ export type ControlTaskStatus = "queued" | "running" | "awaiting_owner_decision"
 
 export type DecisionRecord = {
   decisionId: string;
-  kind: "owner" | "publication" | "accept_completed" | "discard_result";
+  kind: "owner" | "publication" | "accept_completed" | "discard_result" | "checkpoint_repair";
   decision: string;
   createdAt: string;
   response: Record<string, unknown>;
@@ -134,6 +134,7 @@ export type ControlTaskRecord = {
     lastRetry: { sourceExecutionId: string; executionId: string; requestedAt: string } | null;
   };
   continuation: { schemaVersion: 1; state: "none" | "available" | "consumed" | "unrecoverable"; decisionId: string | null; executionId: string | null; sourceExecutionId: string | null };
+  checkpointRepair?: { schemaVersion: 1; decisionId: string; checkpointId: string; checkpointDigest: string; checkpointArtifactRoot: string; baseSha: string; executionAgreementId: string; choice: "grant_additional_budget" | "retry_from_checkpoint"; additionalProviderTokens: number; repairIntent: string | null; sourceExecutionId: string; repairExecutionId: string | null };
   selection?: {
     requestedMode: string; normalizedMode: string; selectedExecutor: string | null; selectedRuntime: string | null;
     selectionReason: string; rejectedAlternatives: Array<{ id: string; reason: string }>;
@@ -195,6 +196,19 @@ export function parseDiscardResultRequest(value: unknown): { decisionId: string;
   const input = asObject(value, "discard result"); rejectUnknown(input, ["decisionId", "checkpointId", "confirmation"], "discard result");
   return { decisionId: optionalString(input.decisionId, "decisionId") ?? randomUUID(), checkpointId: string(input.checkpointId, "checkpointId"), confirmation: choice(input.confirmation, ["discard_result"], "confirmation") };
 }
+export function parseCheckpointRepairRequest(value: unknown): { taskId: string; decisionId: string; checkpointId: string; checkpointDigest: string; choice: "grant_additional_budget" | "retry_from_checkpoint"; additionalProviderTokens: number; repairIntent: string | null } {
+  const input = asObject(value, "checkpoint repair");
+  rejectUnknown(input, ["taskId", "decisionId", "checkpointId", "checkpointDigest", "choice", "additionalProviderTokens", "repairIntent"], "checkpoint repair");
+  const choiceValue = choice(input.choice, ["grant_additional_budget", "retry_from_checkpoint"], "choice");
+  const additionalProviderTokens = input.additionalProviderTokens === undefined ? 0 : integer(input.additionalProviderTokens, "additionalProviderTokens", 1, 200_000);
+  const repairIntent = optionalString(input.repairIntent, "repairIntent") ?? null;
+  if (choiceValue === "grant_additional_budget" && additionalProviderTokens === 0) throw new ControlPlaneError(400, "invalid_request", "grant_additional_budget requires additionalProviderTokens.");
+  if (choiceValue === "retry_from_checkpoint" && !repairIntent) throw new ControlPlaneError(400, "invalid_request", "retry_from_checkpoint requires a bounded repairIntent.");
+  if (repairIntent && repairIntent.length > 2_000) throw new ControlPlaneError(400, "invalid_request", "repairIntent exceeds 2000 characters.");
+  const checkpointDigest = string(input.checkpointDigest, "checkpointDigest");
+  if (!/^[a-f0-9]{64}$/.test(checkpointDigest)) throw new ControlPlaneError(400, "invalid_request", "checkpointDigest must be a lowercase SHA-256 digest.");
+  return { taskId: string(input.taskId, "taskId"), decisionId: string(input.decisionId, "decisionId"), checkpointId: string(input.checkpointId, "checkpointId"), checkpointDigest, choice: choiceValue, additionalProviderTokens, repairIntent };
+}
 
 export class ControlPlaneError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string, public readonly details?: unknown, public readonly retryable = false, public readonly taskId?: string) { super(message); }
@@ -212,3 +226,4 @@ function boolean(value: unknown, name: string): boolean { if (typeof value !== "
 function optionalBoolean(value: unknown, name: string): boolean | undefined { return value === undefined ? undefined : boolean(value, name); }
 function choice<T extends string>(value: unknown, values: readonly T[], name: string): T { if (typeof value !== "string" || !values.includes(value as T)) throw new ControlPlaneError(400, "invalid_request", `${name} must be one of: ${values.join(", ")}.`); return value as T; }
 function optionalChoice<T extends string>(value: unknown, values: readonly T[], name: string): T | undefined { return value === undefined ? undefined : choice(value, values, name); }
+function integer(value: unknown, name: string, min: number, max: number): number { if (!Number.isInteger(value) || Number(value) < min || Number(value) > max) throw new ControlPlaneError(400, "invalid_request", `${name} must be an integer from ${min} to ${max}.`); return Number(value); }

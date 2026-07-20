@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { defaultAuthority, parseDecisionRequest, parseTaskRequest, type ControlTaskRecord } from "../../src/control-plane/contracts.js";
+import { defaultAuthority, parseCheckpointRepairRequest, parseDecisionRequest, parseTaskRequest, type ControlTaskRecord } from "../../src/control-plane/contracts.js";
 import { assertAgreementMatchesTask, executionAgreementCapabilities, negotiateControlPlaneAgreement, negotiateTaskAgreement, parseExecutionAgreementNegotiationRequest, technicalCapabilitiesForExecutor } from "../../src/control-plane/execution-agreements.js";
 import { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "../../src/control-plane/manager.js";
 import { boundPublicResult as extractedBoundPublicResult, projectAgreementLifecycle as extractedProjectAgreementLifecycle, redactPublicValue as extractedRedactPublicValue } from "../../src/control-plane/manager-results.js";
@@ -28,6 +28,14 @@ describe("control-plane contracts", () => {
   it("rejects unknown fields and constrains decision vocabularies", () => {
     expect(() => parseTaskRequest({ taskSpec: {}, surprise: true })).toThrow("unknown field");
     expect(() => parseDecisionRequest({ decision: "merge", note: "no" }, "publication")).toThrow("must be one of");
+  });
+
+  it("requires explicit digest-bound bounded checkpoint repair choices", () => {
+    const digest = "a".repeat(64);
+    expect(parseCheckpointRepairRequest({ taskId: "TASK-1", decisionId: "decision-1", checkpointId: "implementation-0", checkpointDigest: digest, choice: "retry_from_checkpoint", repairIntent: "Repair only failed validation." })).toMatchObject({ taskId: "TASK-1", checkpointDigest: digest, additionalProviderTokens: 0 });
+    expect(parseCheckpointRepairRequest({ taskId: "TASK-1", decisionId: "decision-2", checkpointId: "implementation-0", checkpointDigest: digest, choice: "grant_additional_budget", additionalProviderTokens: 5000 })).toMatchObject({ additionalProviderTokens: 5000, repairIntent: null });
+    expect(() => parseCheckpointRepairRequest({ taskId: "TASK-1", decisionId: "decision-3", checkpointId: "implementation-0", checkpointDigest: digest, choice: "retry_from_checkpoint" })).toThrow("repairIntent");
+    expect(() => parseCheckpointRepairRequest({ taskId: "TASK-1", decisionId: "decision-4", checkpointId: "implementation-0", checkpointDigest: "bad", choice: "grant_additional_budget", additionalProviderTokens: 1 })).toThrow("SHA-256");
   });
 
   it("parses bounded agreement requests and keeps unavailable RunForge work conflicted", () => {

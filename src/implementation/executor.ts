@@ -33,6 +33,8 @@ export type ImplementationExecutorRequest = {
   acceptanceCriteria: string[]; authorityEnvelope: TaskSpecV2["authority"]; forbiddenZones: string[];
   runtimePolicy: TaskSpecV2["runtime"]; validationProfile: TaskSpecV2["validation"]; artifactRoot: string;
   attempt: number; generation: string; signal?: AbortSignal; onProgress?: (phase: string, detail: string) => void | Promise<void>;
+  executionAgreementId: string;
+  checkpointRepair?: { patchPath: string; checkpointId: string; checkpointDigest: string; repairIntent: string | null };
 };
 export type ImplementationExecutorResult = {
   plan: string[]; changedFiles: string[]; patch: string; validationResults: CommandDiagnostic[];
@@ -40,7 +42,7 @@ export type ImplementationExecutorResult = {
   ownerGate: { required: boolean; reason: string | null }; safetyAssertions: Record<string, boolean>;
   diagnostics: Record<string, unknown>; localBranch: string | null; localCommit: string | null; patchPackage: string | null;
   providerCalls: Array<Record<string, unknown>>; selectedExecutor: { id: string; model: string | null };
-  checkpoints: Array<{ id: string; path: string; patchPath: string; iteration: number; validationPassed: boolean }>;
+  checkpoints: Array<{ id: string; path: string; patchPath: string; digest: string; iteration: number; validationPassed: boolean }>;
   budget: { exceeded: boolean; overrunPhase: "implementation" | "repair" | null; requestedTokens: number; actualTokens: number; accounting: "provider" | "synthetic"; costUsd: null };
 };
 
@@ -103,6 +105,10 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
     : ["worktree", "add", "--detach", workspace, request.spec.target.expectedSha]);
   const executionRoot = resolve(workspace, request.workingDirectory);
   if (!isInside(workspace, executionRoot)) throw new Error("working_directory_escape");
+  if (request.checkpointRepair) {
+    await progress(request, "repair", `Restoring verified checkpoint ${request.checkpointRepair.checkpointId} into a disposable workspace.`);
+    await git(workspace, ["apply", "--index", "--binary", request.checkpointRepair.patchPath]);
+  }
   const plan = ["Inspect the target and acceptance criteria", "Implement only bounded changes in the disposable worktree", "Run declared validation", "Repair in-scope failures within the iteration budget", "Finalize patch/commit evidence without publication"];
   const contextPlan = await buildContextPlan(request, executionRoot);
   await mkdir(request.artifactRoot, { recursive: true });
@@ -110,7 +116,9 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   await writeFile(join(request.artifactRoot, "context-plan.json"), JSON.stringify(contextPlan, null, 2) + "\n");
   const providerCalls: Array<Record<string, unknown>> = [];
   const checkpoints: ImplementationExecutorResult["checkpoints"] = [];
-  const validations: CommandDiagnostic[] = [];
+  const validations: CommandDiagnostic[] = request.checkpointRepair
+    ? JSON.parse(await readFile(join(dirname(request.checkpointRepair.patchPath), "validation.json"), "utf8")) as CommandDiagnostic[]
+    : [];
   let agentSummary = "";
   let status: ImplementationExecutorResult["status"] = "failed_with_diagnostics";
   let unresolved: string[] = [];
@@ -121,7 +129,8 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   let overrunPhase: ImplementationExecutorResult["budget"]["overrunPhase"] = null;
   let overrunActual = 0, overrunLimit = request.spec.execution.maxProviderTokens;
   try {
-    for (let iteration = 0; iteration <= request.spec.execution.maxRepairIterations; iteration += 1) {
+    const firstIteration = request.checkpointRepair ? 1 : 0;
+    for (let iteration = firstIteration; iteration <= request.spec.execution.maxRepairIterations; iteration += 1) {
       const phase = iteration === 0 ? "implement" : "repair";
       await progress(request, phase, iteration === 0 ? "Coding executor is implementing the bounded task." : `Repair iteration ${iteration} is addressing validation failures.`);
       const prompt = buildPrompt(request, iteration, validations);
@@ -152,6 +161,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       const actualTokens = providerCalls.reduce((sum, item) => sum + (typeof item.tokenUsage === "number" ? item.tokenUsage : 0), 0);
       const phaseLimit = request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"];
       const checkpoint = await persistDurableCheckpoint(request.artifactRoot, {
+        taskId: request.spec.taskId, executionAgreementId: request.executionAgreementId,
         checkpointId: `${iteration === 0 ? "implementation" : "repair"}-${iteration}`,
         iteration, kind: iteration === 0 ? "implementation" : "repair", baseSha: request.spec.target.expectedSha,
         workspaceSha: null, workspaceState: "dirty", patch, changedFiles, validation: validations,
@@ -160,7 +170,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
         safetyAssertions: { targetMainMutation: false, targetMainPush: false, forbiddenZonesRespected: safetyErrors.length === 0, secretScanPassed: !safetyErrors.includes("Secret scan rejected the patch.") },
         unresolvedFindings: unresolved
       });
-      checkpoints.push({ id: checkpoint.id, path: relative(request.artifactRoot, checkpoint.path), patchPath: relative(request.artifactRoot, checkpoint.patchPath), iteration, validationPassed });
+      checkpoints.push({ id: checkpoint.id, path: relative(request.artifactRoot, checkpoint.path), patchPath: relative(request.artifactRoot, checkpoint.patchPath), digest: checkpoint.digest, iteration, validationPassed });
       const phaseExceeded = (call.tokenUsage ?? 0) > phaseLimit, totalExceeded = actualTokens > request.spec.execution.maxProviderTokens;
       budgetExceeded = totalExceeded || phaseExceeded;
       if (budgetExceeded) { overrunPhase = phase === "implement" ? "implementation" : "repair"; overrunActual = phaseExceeded ? call.tokenUsage ?? 0 : actualTokens; overrunLimit = phaseExceeded ? phaseLimit : request.spec.execution.maxProviderTokens; }
@@ -187,7 +197,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       plan, changedFiles, patch, validationResults: validations, unresolvedFindings: unresolved, status,
       ownerGate: { required: status === "blocked_with_owner_gate" || budgetExceeded, reason: budgetExceeded ? `Provider token budget exceeded after durable checkpoint in ${overrunPhase}: ${overrunActual} > ${overrunLimit}.` : status === "blocked_with_owner_gate" ? unresolved.join(" ") : null },
       safetyAssertions: { sourceShaUnchanged: sourceAfter === sourceBefore.trim(), sourceWorktreeStateUnchanged: sourceStatusAfter === sourceStatusBefore, targetMainMutation: false, targetMainPush: false, merge: false, deploy: false, publicationPerformed: false, forbiddenZonesRespected: !unresolved.some((item) => item.includes("forbidden")), secretScanPassed: !unresolved.includes("Secret scan rejected the patch.") },
-      diagnostics: { agentSummary, sourceBefore: sourceBefore.trim(), sourceAfter, sourceWorktreeStatusBefore: sourceStatusBefore, sourceWorktreeStatusAfter: sourceStatusAfter, dirtyPolicy, contextPlan, selectionReason: selection.reason, rejectedAlternatives: selection.rejected, workspace: relative(request.targetRepository, workspace) },
+      diagnostics: { agentSummary, sourceBefore: sourceBefore.trim(), sourceAfter, sourceWorktreeStatusBefore: sourceStatusBefore, sourceWorktreeStatusAfter: sourceStatusAfter, dirtyPolicy, contextPlan, selectionReason: selection.reason, rejectedAlternatives: selection.rejected, workspace: relative(request.targetRepository, workspace), ...(request.checkpointRepair ? { checkpointRepair: { sourceCheckpointId: request.checkpointRepair.checkpointId, sourceCheckpointDigest: request.checkpointRepair.checkpointDigest, sourcePatch: request.checkpointRepair.patchPath, restoredOnBaseSha: request.spec.target.expectedSha, disposableWorkspace: true } } : {}) },
       localBranch, localCommit, patchPackage, providerCalls, checkpoints,
       budget: { exceeded: budgetExceeded, overrunPhase, requestedTokens: request.spec.execution.maxProviderTokens, actualTokens: providerCalls.reduce((sum, item) => sum + (typeof item.tokenUsage === "number" ? item.tokenUsage : 0), 0), accounting: providerCalls.some((item) => item.usageAccounting === "synthetic") ? "synthetic" : "provider", costUsd: null },
       selectedExecutor: { id: executor.id, model: executor.model }
@@ -233,7 +243,7 @@ function isInside(root: string, path: string): boolean { const rel = relative(ro
 async function progress(request: ImplementationExecutorRequest, phase: string, detail: string): Promise<void> { await request.onProgress?.(phase, detail); }
 function validateChangedPaths(files: string[], zones: string[], max: number): string[] { const errors: string[] = []; if (files.length > max) errors.push(`Changed files exceed limit ${max}.`); const pathZones = zones.filter((zone) => !/\s/.test(zone)).map((zone) => zone.replace(/^\.\//, "").replace(/\*\*|\*/g, "").replace(/\/$/, "")); for (const file of files) { if (file.startsWith("../") || file.startsWith("/")) errors.push(`Path escapes workspace: ${file}.`); const zone = pathZones.find((item) => item && (file === item || file.startsWith(`${item}/`))); if (zone) errors.push(`Changed path is forbidden: ${file} (${zone}).`); } return errors; }
 function unsafeDirtyLines(status: string): string[] { return lines(status).filter((line) => { const path = line.slice(3).replace(/^"|"$/g, ""); return !path.startsWith(".runforge/") && !path.startsWith(".runforge-") && !path.startsWith("artifacts/"); }); }
-function buildPrompt(request: ImplementationExecutorRequest, iteration: number, validations: CommandDiagnostic[]): string { const context = request.spec.discovery.explicitFiles; return [`You are the RunForge bounded implementation executor. Work only in the current disposable Git worktree.`, `Task: ${request.spec.task.text}`, `Goal: ${request.spec.task.goal}`, `Acceptance criteria:\n${request.acceptanceCriteria.map((item) => `- ${item}`).join("\n")}`, `Bounded context profile: ${request.spec.discovery.profile}; max ${request.spec.discovery.maxFiles} files, ${request.spec.discovery.maxBytes} bytes, approximately ${request.spec.discovery.maxTokens} tokens. Start with only these explicit files:\n${context.length ? context.map((item) => `- ${item}`).join("\n") : "- Files named by the task and validation commands"}\nStop condition: ${request.spec.discovery.stopCondition}\nDo not enumerate or read the full repository/governance corpus. If context must expand, state the exact file and reason first.`, `Forbidden zones:\n${request.forbiddenZones.map((item) => `- ${item}`).join("\n")}`, `Validation commands:\n${request.validationProfile.commands.map((item) => `- ${item}`).join("\n")}`, `Provider token budget: at most ${request.spec.execution.maxProviderTokens} total and ${request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"]} for this phase.`, `Iteration: ${iteration}. ${iteration ? `Repair these failures:\n${validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}\nstdout: ${item.stdout}\nstderr: ${item.stderr}`).join("\n")}` : "Inspect, plan, implement, and add/update tests as required."}`, `Do not create a Git commit; leave changes uncommitted so RunForge can validate and create the final local commit.`, `Do not push, open a PR, merge, deploy, access secrets/DB/production, or modify forbidden paths. Do not merely propose a patch: edit files and validate. If no change is required, say exactly 'no change required' with evidence. If semantics are ambiguous, stop and say 'ambiguous product decision'.`].join("\n\n"); }
+function buildPrompt(request: ImplementationExecutorRequest, iteration: number, validations: CommandDiagnostic[]): string { const context = request.spec.discovery.explicitFiles; return [`You are the RunForge bounded implementation executor. Work only in the current disposable Git worktree.`, `Task: ${request.spec.task.text}`, `Goal: ${request.spec.task.goal}`, `Acceptance criteria:\n${request.acceptanceCriteria.map((item) => `- ${item}`).join("\n")}`, `Bounded context profile: ${request.spec.discovery.profile}; max ${request.spec.discovery.maxFiles} files, ${request.spec.discovery.maxBytes} bytes, approximately ${request.spec.discovery.maxTokens} tokens. Start with only these explicit files:\n${context.length ? context.map((item) => `- ${item}`).join("\n") : "- Files named by the task and validation commands"}\nStop condition: ${request.spec.discovery.stopCondition}\nDo not enumerate or read the full repository/governance corpus. If context must expand, state the exact file and reason first.`, `Forbidden zones:\n${request.forbiddenZones.map((item) => `- ${item}`).join("\n")}`, `Validation commands:\n${request.validationProfile.commands.map((item) => `- ${item}`).join("\n")}`, `Provider token budget: at most ${request.spec.execution.maxProviderTokens} total and ${request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"]} for this phase.`, ...(request.checkpointRepair ? [`Verified repair source: checkpoint ${request.checkpointRepair.checkpointId} (${request.checkpointRepair.checkpointDigest}).${request.checkpointRepair.repairIntent ? ` Bounded owner repair intent: ${request.checkpointRepair.repairIntent}` : ""}`] : []), `Iteration: ${iteration}. ${iteration ? `Repair these failures:\n${validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}\nstdout: ${item.stdout}\nstderr: ${item.stderr}`).join("\n")}` : "Inspect, plan, implement, and add/update tests as required."}`, `Do not create a Git commit; leave changes uncommitted so RunForge can validate and create the final local commit.`, `Do not push, open a PR, merge, deploy, access secrets/DB/production, or modify forbidden paths. Do not merely propose a patch: edit files and validate. If no change is required, say exactly 'no change required' with evidence. If semantics are ambiguous, stop and say 'ambiguous product decision'.`].join("\n\n"); }
 
 async function buildContextPlan(request: ImplementationExecutorRequest, root: string): Promise<Record<string, unknown>> {
   const mentioned = request.spec.task.text.match(/(?:src|tests|scripts|schemas|docs|config)\/[A-Za-z0-9._/-]+/g) ?? [];
