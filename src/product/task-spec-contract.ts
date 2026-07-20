@@ -14,7 +14,7 @@ export const implementationExecutorContract = {
   modes: ["implementation", "repair"] as const,
   runtimes: ["local-disposable"] as const,
   defaultRuntime: "local-disposable" as const,
-  maxLimits: { timeoutMs: 1_800_000, repairIterations: 3, changedFiles: 100, patchBytes: 5_000_000, providerTokens: 200_000 }
+  maxLimits: { timeoutMs: 600_000, repairIterations: 3, changedFiles: 100, patchBytes: 5_000_000, providerTokens: 200_000 }
 };
 
 /** Schema-valid public example showing product and read-only Git evidence lanes. */
@@ -55,15 +55,16 @@ export const taskSpecV2Schema: Record<string, unknown> = {
     taskId: { type: "string", pattern: "^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$" },
     task: { type: "object", additionalProperties: false, required: ["text", "goal", "acceptanceCriteria"], properties: { text: { type: "string", minLength: 1 }, goal: { type: "string", minLength: 1 }, acceptanceCriteria: { type: "array", minItems: 1, items: { type: "string", minLength: 1 } } } },
     target: { type: "object", additionalProperties: false, required: ["repository"], properties: { repository: { type: "string", minLength: 1 }, workingDirectory: { type: "string", minLength: 1 }, expectedSha: { type: "string", minLength: 7 }, dirtyPolicy: { enum: ["require_clean", "allow_known_generated", "snapshot_from_sha", "use_disposable_from_base_sha"] } } },
-    execution: { type: "object", additionalProperties: false, required: ["mode"], properties: { mode: { enum: taskExecutionModes }, maxRepairIterations: { type: "integer", minimum: 0, maximum: 3 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 1800000 }, maxChangedFiles: { type: "integer", minimum: 1, maximum: 100 }, maxPatchBytes: { type: "integer", minimum: 1000, maximum: 5000000 }, maxProviderTokens: { type: "integer", minimum: 1000, maximum: 200000 }, budgetMode: { enum: ["soft", "hard"] }, phaseBudgets: { type: "object", additionalProperties: false, properties: Object.fromEntries(["startup", "analysis", "implementation", "validation", "repair", "review", "publication"].map((phase) => [phase, { type: "integer", minimum: 0, maximum: 200000 }])) } } },
+    execution: { type: "object", additionalProperties: false, required: ["mode"], properties: { mode: { enum: taskExecutionModes }, maxRepairIterations: { type: "integer", minimum: 0, maximum: 3 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 600000 }, maxChangedFiles: { type: "integer", minimum: 1, maximum: 100 }, maxPatchBytes: { type: "integer", minimum: 1000, maximum: 5000000 }, maxProviderTokens: { type: "integer", minimum: 1000, maximum: 200000 }, budgetMode: { enum: ["soft", "hard"] }, phaseBudgets: { type: "object", additionalProperties: false, properties: Object.fromEntries(["startup", "analysis", "implementation", "validation", "repair", "review", "publication"].map((phase) => [phase, { type: "integer", minimum: 0, maximum: 200000 }])) } } },
     providerRouting: {
       type: "object", additionalProperties: false, required: ["provider", "maxCalls", "tokenBudget", "timeoutMs", "retry"],
       properties: {
         provider: { enum: ["local", "openrouter"] }, fallbackPolicy: { enum: ["none", "same_provider"] },
         models: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer"].map((phase) => [phase, { type: "string", minLength: 1 }])) },
+        reasoning: { type: "object", additionalProperties: false, properties: { planner: { type: "object", additionalProperties: false, properties: { effort: { type: "string", minLength: 1 }, maxTokens: { type: "integer", minimum: 1, maximum: 200000 }, exclude: { type: "boolean" } } }, reviewer: { type: "object", additionalProperties: false, properties: { effort: { type: "string", minLength: 1 }, maxTokens: { type: "integer", minimum: 1, maximum: 200000 }, exclude: { type: "boolean" } } } } },
         maxCalls: { type: "integer", minimum: 1, maximum: 32 },
         tokenBudget: { type: "object", additionalProperties: false, required: ["total", "perPhase"], properties: { total: { type: "integer", minimum: 1000, maximum: 200000 }, perPhase: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer"].map((phase) => [phase, { type: "integer", minimum: 0, maximum: 200000 }])) } } },
-        costBudgetUsd: { type: "number", minimum: 0, maximum: 1000 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 1800000 },
+        costBudgetUsd: { type: "number", minimum: 0, maximum: 1000 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 600000 },
         retry: { type: "object", additionalProperties: false, required: ["maxAttempts"], properties: { maxAttempts: { type: "integer", minimum: 1, maximum: 3 } } }
       },
       allOf: [
@@ -80,7 +81,7 @@ export const taskSpecV2Schema: Record<string, unknown> = {
           properties: Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, { enum: EXECUTION_PARTIES }]))
         }
       },
-      allOf: [{ if: { properties: { profile: { const: "custom" } } }, then: { required: ["phaseOwnership"] }, else: { not: { required: ["phaseOwnership"] } } }]
+      allOf: [{ if: { type: "object", properties: { profile: { const: "custom" } }, required: ["profile"] }, then: { type: "object", required: ["phaseOwnership"] }, else: { type: "object", not: { required: ["phaseOwnership"] } } }]
     },
     discovery: { type: "object", additionalProperties: false, properties: { policy: { enum: ["auto", "explicit"] }, profile: { enum: ["small-scope", "standard"] }, explicitFiles: { type: "array", items: { type: "string", minLength: 1 } }, maxFiles: { type: "integer", minimum: 1, maximum: 1000 }, maxBytes: { type: "integer", minimum: 1000, maximum: 10000000 }, maxTokens: { type: "integer", minimum: 100, maximum: 500000 }, stopCondition: { type: "string", minLength: 1 } } },
     runtime: { type: "object", additionalProperties: false, properties: { preference: { enum: taskRuntimeIds }, dockerImage: { type: "string", minLength: 1 }, prepareDependencies: { type: "boolean" }, dependencyPreparation: { enum: ["required", "if-needed", "disabled", "reuse-existing"] }, externalNetwork: { enum: ["denied", "dependency-preparation-only", "allowed"] } }, not: { required: ["prepareDependencies", "dependencyPreparation"] } },

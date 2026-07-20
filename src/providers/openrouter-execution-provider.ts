@@ -4,6 +4,12 @@ export type OpenRouterChatMessage = {
   content: string | ReadonlyArray<{ type: string; text?: string }>;
   name?: string;
 };
+export type OpenRouterReasoningRequest = {
+  effort?: string;
+  maxTokens?: number;
+  exclude?: boolean;
+};
+export type OpenRouterMalformedReason = "invalid_shape" | "missing_final_content";
 
 export type OpenRouterExecutionRequest = {
   model: string;
@@ -17,6 +23,7 @@ export type OpenRouterExecutionRequest = {
   temperature?: number;
   maxTokens?: number;
   headers?: Readonly<Record<string, string>>;
+  reasoning?: OpenRouterReasoningRequest;
 };
 
 export type OpenRouterUsage = {
@@ -42,7 +49,7 @@ export class OpenRouterExecutionError extends Error {
   constructor(
     readonly code: OpenRouterFailureCode,
     message: string,
-    readonly options: { status?: number; retryable?: boolean; attempts?: number } = {}
+    readonly options: { status?: number; retryable?: boolean; attempts?: number; usage?: OpenRouterUsage; requestId?: string | null; finishReason?: string | null; content?: string | null } = {}
   ) {
     super(message);
     this.name = "OpenRouterExecutionError";
@@ -93,15 +100,25 @@ async function callOnce(url: string, apiKey: string, request: OpenRouterExecutio
       method: "POST",
       signal: controller.signal,
       headers: { "content-type": "application/json", ...request.headers, authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model: request.model, messages: request.messages, ...(request.temperature === undefined ? {} : { temperature: request.temperature }), ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }) })
+      body: JSON.stringify({
+        model: request.model,
+        messages: request.messages,
+        ...(request.temperature === undefined ? {} : { temperature: request.temperature }),
+        ...(request.maxTokens === undefined ? {} : { max_tokens: request.maxTokens }),
+        ...(request.reasoning === undefined ? {} : { reasoning: { ...(request.reasoning.effort === undefined ? {} : { effort: request.reasoning.effort }), ...(request.reasoning.maxTokens === undefined ? {} : { max_tokens: request.reasoning.maxTokens }), ...(request.reasoning.exclude === undefined ? {} : { exclude: request.reasoning.exclude }) } })
+      })
     });
     const requestId = response.headers.get("x-request-id") ?? response.headers.get("x-openrouter-request-id");
     if (!response.ok) {
       const code: OpenRouterFailureCode = response.status === 401 || response.status === 403 ? "authentication" : response.status === 429 ? "rate_limited" : "provider";
-      throw new OpenRouterExecutionError(code, `OpenRouter request failed with status ${response.status}.`, { status: response.status, retryable: response.status === 429 || response.status >= 500, attempts });
+      throw new OpenRouterExecutionError(code, `OpenRouter request failed with status ${response.status}.`, { status: response.status, retryable: response.status === 429 || response.status >= 500, attempts, requestId });
     }
     let payload: unknown;
-    try { payload = await response.json(); } catch { throw new OpenRouterExecutionError("malformed_response", "OpenRouter returned invalid JSON.", { attempts }); }
+    try {
+      payload = await response.json();
+    } catch {
+      throw new OpenRouterExecutionError("malformed_response", "openrouter_malformed_response:invalid_json", { attempts, requestId });
+    }
     return parseResponse(payload, requestId, attempts);
   } catch (error) {
     if (error instanceof OpenRouterExecutionError) throw error;
@@ -116,8 +133,10 @@ async function callOnce(url: string, apiKey: string, request: OpenRouterExecutio
 
 function parseResponse(payload: unknown, requestId: string | null, attempts: number): OpenRouterExecutionResult {
   const record = object(payload); const choice = Array.isArray(record?.choices) ? object(record.choices[0]) : null;
-  const message = object(choice?.message); const content = contentText(message?.content);
-  if (!record || !choice || content === null) throw new OpenRouterExecutionError("malformed_response", "OpenRouter response did not contain assistant content.", { attempts });
+  const message = object(choice?.message);
+  if (!record || !choice || !message) throw malformedResponse("invalid_shape", { record, choice, message, requestId, attempts });
+  const content = contentText(message.content);
+  if (content === null || !content.trim()) throw malformedResponse("missing_final_content", { record, choice, message, requestId, attempts, content });
   const usage = object(record.usage);
   const promptDetails = object(usage?.prompt_tokens_details); const completionDetails = object(usage?.completion_tokens_details);
   return { content, requestId: requestId ?? stringValue(record.id), finishReason: stringValue(choice.finish_reason), attempts, usage: {
@@ -135,11 +154,23 @@ function safeEndpoint(value = DEFAULT_OPENROUTER_ENDPOINT): string {
 
 function validateRequest(request: OpenRouterExecutionRequest): void {
   if (!request.model || !request.messages.length || !Number.isInteger(request.maxCalls) || request.maxCalls < 1 || request.maxCalls > 20 || !Number.isFinite(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > 600_000 || (request.retryDelayMs !== undefined && (!Number.isFinite(request.retryDelayMs) || request.retryDelayMs < 0 || request.retryDelayMs > 60_000))) throw new OpenRouterExecutionError("invalid_request", "OpenRouter request limits are invalid.");
+  if (request.reasoning !== undefined) {
+    const reasoning = object(request.reasoning);
+    if (!reasoning) throw new OpenRouterExecutionError("invalid_request", "OpenRouter reasoning config is invalid.");
+    if (reasoning.effort !== undefined && (typeof reasoning.effort !== "string" || !reasoning.effort.trim())) throw new OpenRouterExecutionError("invalid_request", "OpenRouter reasoning.effort is invalid.");
+    if (reasoning.maxTokens !== undefined && (!Number.isInteger(reasoning.maxTokens) || Number(reasoning.maxTokens) < 1 || Number(reasoning.maxTokens) > 200_000)) throw new OpenRouterExecutionError("invalid_request", "OpenRouter reasoning.maxTokens is invalid.");
+    if (reasoning.exclude !== undefined && typeof reasoning.exclude !== "boolean") throw new OpenRouterExecutionError("invalid_request", "OpenRouter reasoning.exclude is invalid.");
+  }
 }
 function object(value: unknown): Record<string, unknown> | null { return value !== null && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : null; }
 function numberValue(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) ? value : null; }
 function stringValue(value: unknown): string | null { return typeof value === "string" ? value : null; }
-function contentText(value: unknown): string | null { if (typeof value === "string") return value; if (Array.isArray(value)) { const text = value.map((part) => object(part)?.type === "text" ? stringValue(object(part)?.text) ?? "" : "").join(""); return text || null; } return null; }
+function contentText(value: unknown): string | null { if (typeof value === "string") return value; if (Array.isArray(value)) { const text = value.map((part) => { const item = object(part); return item && typeof item.text === "string" ? item.text : ""; }).join(""); return text || null; } return null; }
 function asFailure(error: unknown, secret: string, attempts: number): OpenRouterExecutionError { if (error instanceof OpenRouterExecutionError) return new OpenRouterExecutionError(error.code, redact(error.message, secret), { ...error.options, attempts }); return new OpenRouterExecutionError("network", "OpenRouter network request failed.", { retryable: true, attempts }); }
 function redact(value: string, secret: string): string { return value.replaceAll(secret, "[REDACTED]").replace(/Bearer\s+[^\s,]+/gi, "Bearer [REDACTED]").replace(/authorization\s*[:=]\s*[^\s,]+/gi, "authorization=[REDACTED]"); }
 async function delay(ms: number, signal?: AbortSignal): Promise<void> { if (signal?.aborted) throw new OpenRouterExecutionError("cancelled", "OpenRouter request was cancelled."); await new Promise<void>((resolve, reject) => { const timer = setTimeout(resolve, ms); signal?.addEventListener("abort", () => { clearTimeout(timer); reject(new OpenRouterExecutionError("cancelled", "OpenRouter request was cancelled.")); }, { once: true }); }); }
+
+function malformedResponse(reason: OpenRouterMalformedReason, input: { record: Record<string, unknown> | null; choice: Record<string, unknown> | null; message: Record<string, unknown> | null; requestId: string | null; attempts: number; content?: string | null }): never {
+  const usage = object(input.record?.usage); const promptDetails = object(usage?.prompt_tokens_details); const completionDetails = object(usage?.completion_tokens_details);
+  throw new OpenRouterExecutionError("malformed_response", `openrouter_malformed_response:${reason}`, { attempts: input.attempts, requestId: input.requestId ?? stringValue(input.record?.id), finishReason: stringValue(input.choice?.finish_reason), content: input.content ?? null, usage: { inputTokens: numberValue(usage?.prompt_tokens), cachedInputTokens: numberValue(promptDetails?.cached_tokens), outputTokens: numberValue(usage?.completion_tokens), reasoningTokens: numberValue(completionDetails?.reasoning_tokens), totalTokens: numberValue(usage?.total_tokens), costUsd: numberValue(usage?.cost) ?? numberValue(usage?.total_cost) } });
+}
