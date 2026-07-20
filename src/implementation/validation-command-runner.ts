@@ -13,11 +13,15 @@ export type CommandDiagnostic = {
   failureReason: string | null; classification: "product" | "setup" | "runtime" | "provider" | "infrastructure" | null;
   diagnosticGap: boolean; infrastructureDefect: string | null; artifactPath: string;
   outcome: ValidationCommandOutcome; acceptance: ValidationPlanEntry["acceptance"]; evidenceRole: string;
-  requiredCapabilities: ValidationPlanEntry["requiredCapabilities"]; availableCapabilities: ValidationPlanEntry["availableCapabilities"];
+  requiredCapabilities: ValidationPlanEntry["requiredCapabilities"]; availableCapabilities: ValidationPlanEntry["availableCapabilities"]; missingCapabilities: ValidationPlanEntry["missingCapabilities"];
   repositoryIdentity: string | null; boundSha: string | null; safetyAssertions: string[];
 };
 
-export async function runValidation(plan: ValidationPlanEntry, root: string, iteration: number, index: number, timeoutMs: number, signal?: AbortSignal, gitBinding?: GitEvidenceBinding): Promise<CommandDiagnostic> {
+export type ProductValidationExecution = {
+  stdout: string; stderr: string; exitCode: number | null; signal: string | null; timedOut: boolean;
+};
+
+export async function runValidation(plan: ValidationPlanEntry, root: string, iteration: number, index: number, timeoutMs: number, signal?: AbortSignal, gitBinding?: GitEvidenceBinding, executeProduct?: (plan: ValidationPlanEntry, artifactDirectory: string) => Promise<ProductValidationExecution>): Promise<CommandDiagnostic> {
   const started = Date.now(), startedAt = new Date(started).toISOString();
   let stdout = "", stderr = "", timedOut = false, setupFailure = false, cancelled = false, capabilityUnsupported = false;
   const artifactPath = `validation/iteration-${iteration}/command-${index}.json`;
@@ -30,13 +34,13 @@ export async function runValidation(plan: ValidationPlanEntry, root: string, ite
     const diagnosticGap = outcome.outcome !== "passed" && !stdout.trim() && !stderr.trim() && plan.disposition === "execute";
     const classification = outcome.outcome === "product_failed" ? "product" : outcome.outcome === "setup_failed" ? "setup" : ["runtime_failed", "timed_out", "cancelled"].includes(outcome.outcome) ? "runtime" : null;
     const diagnostic: CommandDiagnostic = {
-      command: plan.command, cwd: plan.cwd, executor: plan.lane === "git-evidence" ? "safe-git-evidence" : "local-coding-agent", runtime: plan.runtime, lane: plan.lane, argv: plan.argv ?? null,
+      command: plan.command, cwd: plan.cwd, executor: plan.lane === "git-evidence" ? "safe-git-evidence" : plan.lane === "docker-validation" ? "docker-shell" : "local-shell", runtime: plan.runtime, lane: plan.lane, argv: plan.argv ?? null,
       startedAt, finishedAt, durationMs: Date.now() - started, exitCode: execution.exitCode, signal: execution.childSignal,
       stdout: stdout.slice(0, 1_000_000), stderr: stderr.slice(0, 1_000_000), stdoutTruncated, stderrTruncated,
       truncation: { stdout: stdoutTruncated, stderr: stderrTruncated, limitBytes: 1_000_000 }, artifactPaths: [artifactPath], timedOut, setupFailure,
       failureReason: outcome.reason, classification, diagnosticGap, infrastructureDefect: diagnosticGap ? "non-zero exit produced empty stdout and stderr" : null, artifactPath,
       outcome: outcome.outcome, acceptance: plan.acceptance, evidenceRole: plan.evidenceRole, requiredCapabilities: plan.requiredCapabilities,
-      availableCapabilities: plan.availableCapabilities, repositoryIdentity: plan.repositoryIdentity ?? null, boundSha: plan.boundSha ?? null, safetyAssertions: plan.safetyAssertions ?? [],
+      availableCapabilities: plan.availableCapabilities, missingCapabilities: plan.missingCapabilities, repositoryIdentity: plan.repositoryIdentity ?? null, boundSha: plan.boundSha ?? null, safetyAssertions: plan.safetyAssertions ?? [],
     };
     await writeFile(join(root, artifactPath), JSON.stringify(diagnostic, null, 2) + "\n"); return diagnostic;
   };
@@ -51,6 +55,16 @@ export async function runValidation(plan: ValidationPlanEntry, root: string, ite
       capabilityUnsupported = error instanceof GitEvidenceCapabilityUnsupportedError;
       setupFailure = !capabilityUnsupported;
       stderr = error instanceof Error ? error.message : String(error);
+      return finish({ exitCode: null, childSignal: null });
+    }
+  }
+  if (executeProduct) {
+    try {
+      const result = await executeProduct(plan, dirname(join(root, artifactPath)));
+      stdout = result.stdout; stderr = result.stderr; timedOut = result.timedOut;
+      return finish({ exitCode: result.exitCode, childSignal: result.signal as NodeJS.Signals | null });
+    } catch (error) {
+      setupFailure = true; stderr = error instanceof Error ? error.message : String(error);
       return finish({ exitCode: null, childSignal: null });
     }
   }

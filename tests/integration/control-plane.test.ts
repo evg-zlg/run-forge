@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -76,6 +76,95 @@ describe("local control-plane HTTP lifecycle", () => {
       expect(executions).toBe(3);
     } finally {
       if (previous === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previous;
+    }
+  });
+
+  it("routes validation-only public API execution through negotiated Docker and SHA-bound Git lanes", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-multilane-"))) - 1]!;
+    const repository = await syntheticRepository();
+    const dockerBin = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-docker-shim-"))) - 1]!;
+    const dockerLog = join(dockerBin, "docker-invocations.log");
+    const dockerPath = join(dockerBin, "docker");
+    await writeFile(dockerPath, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "Docker version 99.0.0, build test"; exit 0; fi
+printf '%s\\n' "$*" >> "${dockerLog}"
+workspace=""
+last=""
+for argument in "$@"; do
+  case "$argument" in type=bind,src=*,dst=/workspace*) workspace="\${argument#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace*}" ;; esac
+  last="$argument"
+done
+if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
+(cd "$workspace" && /bin/sh -lc "$last")
+`, "utf8");
+    await chmod(dockerPath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${dockerBin}:${previousPath ?? ""}`;
+    const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
+    const before = {
+      head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim(),
+      status: execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim(),
+    };
+    const canonicalRepository = await realpath(repository);
+    const databaseCommand = "runforge-database-probe --read-only";
+    const taskId = "VALIDATION-MULTILANE-DOGFOOD-1";
+    const taskSpec = {
+      schemaVersion: 2, taskId,
+      task: { text: "Run validation-only multi-lane dogfood.", goal: "Prove capability-aware routing.", acceptanceCriteria: ["Docker product checks pass", "Git evidence is SHA-bound", "Database probe is not spawned"] },
+      target: { repository, workingDirectory: ".", expectedSha: before.head },
+      execution: { mode: "validation", timeoutMs: 30_000 },
+      executionAgreement: { schemaVersion: 1, profile: "assist-only" },
+      runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "disabled", externalNetwork: "denied" },
+      validation: {
+        mode: "explicit",
+        commands: ["node --version", "test ! -d .git", "git diff --check", databaseCommand],
+        requirements: [
+          { command: "node --version", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation", fallbacks: [] },
+          { command: "test ! -d .git", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation", fallbacks: [] },
+          { command: "git diff --check", capabilities: ["git-read-only-evidence"], acceptance: "evidence-only", evidenceRole: "git-evidence", fallbacks: [] },
+          { command: databaseCommand, capabilities: ["database"], acceptance: "optional", evidenceRole: "database-evidence", fallbacks: ["Delegate database evidence."] },
+        ],
+      },
+      authority: { profile: "read-only", allowProviderCalls: false, allowNetwork: false },
+      git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" },
+    };
+    try {
+      const accepted = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec, authority: { inspect: true } }) });
+      expect(accepted.status).toBe(202);
+      expect(await json(accepted)).toMatchObject({ validationNegotiation: { status: "accepted", requirements: [
+        { command: "node --version", disposition: "deferred_preflight" },
+        { command: "test ! -d .git", disposition: "deferred_preflight" },
+        { command: "git diff --check", disposition: "deferred_preflight" },
+        { command: databaseCommand, disposition: "capability_unsupported", blocking: false },
+      ] } });
+      await eventually(async () => (await instance.manager.getTask(taskId)).status === "completed");
+      const result = await json(await fetch(`${instance.url}/v1/tasks/${taskId}/result`));
+      await expectValidPublicResult(result);
+      const validation = result.validation as Array<Record<string, any>>;
+      expect(result).toMatchObject({
+        status: "completed", validationAggregate: "completed_with_validation_gaps",
+        targetRepository: { initialSha: before.head, finalSha: before.head, changed: false, initialStatus: before.status, finalStatus: before.status },
+        safetyAssertions: { targetUnchanged: true, providerCalls: false, databaseAccess: false },
+        review: { structural: { kind: "structural", status: "completed_with_validation_gaps" }, semantic: { kind: "semantic", status: "unavailable", performed: false, delegation: { party: "external_session" } } },
+        workflow: { agreement: { phaseOwnership: expect.arrayContaining([{ phaseId: "localValidation", responsibleParty: "runforge" }]) }, handoff: { semanticReview: { status: "unavailable", delegation: { party: "external_session" } } } },
+      });
+      expect(validation.slice(0, 2)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ command: "node --version", outcome: "passed", lane: "docker-validation", executor: "docker-shell", exitCode: 0 }),
+        expect.objectContaining({ command: "test ! -d .git", outcome: "passed", lane: "docker-validation", executor: "docker-shell", exitCode: 0 }),
+      ]));
+      const gitEvidence = validation.find((item) => item.command === "git diff --check")!;
+      expect(gitEvidence).toMatchObject({ outcome: "passed", lane: "git-evidence", executor: "safe-git-evidence", argv: ["git", "diff", "--no-ext-diff", "--no-textconv", "--check"], repositoryIdentity: canonicalRepository, boundSha: before.head });
+      expect(gitEvidence.safetyAssertions).toEqual(expect.arrayContaining(["argv_only_no_shell", "expected_sha_verified_before_and_after", "source_state_immutable"]));
+      const unsupported = validation.find((item) => item.command === databaseCommand)!;
+      expect(unsupported).toMatchObject({ outcome: "capability_unsupported", exitCode: null, lane: "docker-validation", missingCapabilities: ["database"] });
+      expect(await access(join(validation[0]!.cwd, ".git")).then(() => true, () => false)).toBe(false);
+      const invocations = await readFile(dockerLog, "utf8");
+      expect(invocations).toContain("node --version"); expect(invocations).toContain("test ! -d .git");
+      expect(invocations).not.toContain("git diff --check"); expect(invocations).not.toContain(databaseCommand);
+      expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim()).toBe(before.head);
+      expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim()).toBe(before.status);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
     }
   });
 
