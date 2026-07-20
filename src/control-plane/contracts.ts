@@ -159,6 +159,74 @@ export type ControlTaskRecord = {
   };
 };
 
+export type CampaignStatus = "planning" | "queued" | "running" | "completed" | "failed" | "on_hold";
+export type CampaignProviderRouting = {
+  provider: "openrouter" | "local";
+  model?: string;
+  phaseModels?: Partial<Record<"planner" | "implementer" | "repair" | "reviewer", string>>;
+  fallbackPolicy?: "none" | "same_provider";
+};
+export type CampaignSpec = {
+  goal: string;
+  target: { projectId?: string; repository?: string; workingDirectory?: string; expectedSha?: string };
+  authority: ControlAuthority;
+  providerRouting: CampaignProviderRouting;
+  limits: { maxCostUsd?: number; maxTokens: number; maxTasks: number; maxConcurrency: number };
+};
+export type CampaignPlanNode = {
+  id: string;
+  taskSpec: Record<string, unknown>;
+  dependsOn: string[];
+  estimatedTokens?: number;
+  estimatedCostUsd?: number;
+};
+export type CampaignPlan = {
+  schemaVersion: 1;
+  campaignId: string;
+  nodes: CampaignPlanNode[];
+  estimatedTokens: number;
+  estimatedCostUsd?: number;
+};
+export type CampaignRecord = {
+  schemaVersion: 1;
+  id: string;
+  status: CampaignStatus;
+  spec: CampaignSpec;
+  plan: CampaignPlan | null;
+  plannerEvidence: Record<string, unknown> | null;
+  children: Record<string, {
+    nodeId: string;
+    dependsOn: string[];
+    taskId: string | null;
+    status: "pending" | "queued" | "running" | "completed" | "failed" | "blocked";
+    startedAt: string | null;
+    finishedAt: string | null;
+    error: string | null;
+    accounted: boolean;
+    evidence?: Record<string, unknown>;
+  }>;
+  usage: { tokens: number; costUsd: number; tasks: number };
+  checkpoints: string[];
+  failures: Array<{ at: string; nodeId?: string; taskId?: string; reason: string }>;
+  result: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export function parseCampaignRequest(value: unknown): CampaignSpec {
+  const input = asObject(value, "campaign request");
+  rejectUnknown(input, ["goal", "target", "authority", "providerRouting", "limits"], "campaign request");
+  const target = asObject(input.target, "target");
+  rejectUnknown(target, ["projectId", "repository", "workingDirectory", "expectedSha"], "target");
+  const routing = asObject(input.providerRouting, "providerRouting");
+  rejectUnknown(routing, ["provider", "model", "phaseModels", "fallbackPolicy"], "providerRouting");
+  const phaseModels = asObject(routing.phaseModels, "providerRouting.phaseModels", true);
+  rejectUnknown(phaseModels, ["planner", "implementer", "repair", "reviewer"], "providerRouting.phaseModels");
+  const limits = asObject(input.limits, "limits");
+  rejectUnknown(limits, ["maxCostUsd", "maxTokens", "maxTasks", "maxConcurrency"], "limits");
+  return { goal: string(input.goal, "goal"), target: { ...(target.projectId === undefined ? {} : { projectId: string(target.projectId, "target.projectId") }), ...(target.repository === undefined ? {} : { repository: string(target.repository, "target.repository") }), ...(target.workingDirectory === undefined ? {} : { workingDirectory: string(target.workingDirectory, "target.workingDirectory") }), ...(target.expectedSha === undefined ? {} : { expectedSha: string(target.expectedSha, "target.expectedSha") }) }, authority: defaultAuthority(input.authority), providerRouting: { provider: choice(routing.provider, ["openrouter", "local"], "providerRouting.provider"), ...(routing.model === undefined ? {} : { model: string(routing.model, "providerRouting.model") }), ...(Object.keys(phaseModels).length ? { phaseModels: Object.fromEntries(Object.entries(phaseModels).map(([k, v]) => [k, string(v, `providerRouting.phaseModels.${k}`)])) as CampaignProviderRouting["phaseModels"] } : {}), ...(routing.fallbackPolicy === undefined ? {} : { fallbackPolicy: choice(routing.fallbackPolicy, ["none", "same_provider"], "providerRouting.fallbackPolicy") }) }, limits: { ...(limits.maxCostUsd === undefined ? {} : { maxCostUsd: decimal(limits.maxCostUsd, "limits.maxCostUsd", 0.000_001, 1_000_000) }), maxTokens: integer(limits.maxTokens, "limits.maxTokens", 1, 200_000), maxTasks: integer(limits.maxTasks, "limits.maxTasks", 1, 100), maxConcurrency: integer(limits.maxConcurrency, "limits.maxConcurrency", 1, 20) } };
+}
+
 export function defaultAuthority(value: unknown): ControlAuthority {
   const input = asObject(value, "authority", true);
   const allowed = ["inspect", "implementation", "providerCalls", "network", "localBranch", "localCommit", "remotePush", "draftPublication", "merge", "deploy"];
@@ -256,3 +324,4 @@ function optionalBoolean(value: unknown, name: string): boolean | undefined { re
 function choice<T extends string>(value: unknown, values: readonly T[], name: string): T { if (typeof value !== "string" || !values.includes(value as T)) throw new ControlPlaneError(400, "invalid_request", `${name} must be one of: ${values.join(", ")}.`); return value as T; }
 function optionalChoice<T extends string>(value: unknown, values: readonly T[], name: string): T | undefined { return value === undefined ? undefined : choice(value, values, name); }
 function integer(value: unknown, name: string, min: number, max: number): number { if (!Number.isInteger(value) || Number(value) < min || Number(value) > max) throw new ControlPlaneError(400, "invalid_request", `${name} must be an integer from ${min} to ${max}.`); return Number(value); }
+function decimal(value: unknown, name: string, minExclusive: number, max: number): number { if (typeof value !== "number" || !Number.isFinite(value) || value <= minExclusive || value > max) throw new ControlPlaneError(400, "invalid_request", `${name} must be a number > ${minExclusive} and <= ${max}.`); return value; }
