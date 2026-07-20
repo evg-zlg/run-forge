@@ -31,6 +31,18 @@ describe("durable implementation checkpoints", () => {
     await writeFile(checkpoint.patchPath, "tampered patch\n", "utf8");
     await expect(readDurableCheckpoint(root, checkpoint.id)).rejects.toThrow("checkpoint_integrity_error");
   });
+
+  it("reads and digests an intact schema-v1 manifest without rewriting it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-checkpoint-"));
+    const checkpoint = await persistDurableCheckpoint(root, fixture());
+    const path = join(checkpoint.path, "manifest.json");
+    const current = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    delete current.taskId; delete current.executionAgreementId; current.schemaVersion = 1;
+    const legacyBytes = JSON.stringify(current, null, 2) + "\n"; await writeFile(path, legacyBytes, "utf8");
+    const read = await readDurableCheckpoint(root, checkpoint.id);
+    expect(read).toMatchObject({ manifest: { schemaVersion: 1, checkpointId: "checkpoint-0" }, digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(await readFile(path, "utf8")).toBe(legacyBytes);
+  });
 });
 
 function fixture() {
