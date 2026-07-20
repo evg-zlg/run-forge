@@ -24,7 +24,7 @@ export type SemanticReviewResult = {
   limitations: string[];
   findings: SemanticReviewFinding[];
   evidence: string[];
-  delegation: { party: "external_session" | "owner"; reason: string; exactAction: string } | null;
+  delegation: { party: "external_session" | "external_system" | "owner"; reason: string; exactAction: string } | null;
 };
 
 export type SemanticReviewInvocation = {
@@ -147,7 +147,7 @@ export function normalizeSemanticReviewResult(value: SemanticReviewResult): Sema
   if (value.status === "completed" && value.delegation !== null) throw new Error("Completed semantic review cannot be delegated.");
   if (value.status !== "completed" && value.delegation === null) throw new Error("Incomplete semantic review requires delegation.");
   if (value.performed !== (value.status === "completed")) throw new Error("semanticReview.performed must match completed status.");
-  if (value.delegation && !["external_session", "owner"].includes(value.delegation.party)) throw new Error("semanticReview.delegation.party is invalid.");
+  if (value.delegation && !["external_session", "external_system", "owner"].includes(value.delegation.party)) throw new Error("semanticReview.delegation.party is invalid.");
   return {
     kind: "semantic", status: value.status, performed: value.performed,
     selectedReviewer: normalizeReviewerIdentity(value.selectedReviewer),

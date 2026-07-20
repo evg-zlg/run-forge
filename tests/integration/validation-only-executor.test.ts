@@ -3,6 +3,7 @@ import { access, chmod, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { negotiateExecutionAgreement, type ExecutionParty } from "../../src/product/execution-agreement.js";
 import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
 
 const roots: string[] = [];
@@ -88,7 +89,7 @@ for argument in "$@"; do case "$argument" in type=bind,src=*,dst=/workspace*) wo
       schemaVersion: 2, taskId: "VALIDATION-ONLY-REGRESSION-1",
       task: { text: "Run exact validation dogfood.", goal: "Prove multi-lane routing.", acceptanceCriteria: ["All supported evidence passes"] },
       target: { repository, workingDirectory: ".", expectedSha: head }, execution: { mode: "validation", timeoutMs: 30_000 },
-      executionAgreement: { schemaVersion: 1, profile: "assist-only" },
+      executionAgreement: { schemaVersion: 1, profile: "local-ready" },
       runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "disabled", externalNetwork: "denied" },
       validation: { mode: "explicit", commands: ["node --version", "test ! -d .git", "git diff --check", databaseCommand], requirements: [
         { command: "node --version", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation" },
@@ -102,7 +103,22 @@ for argument in "$@"; do case "$argument" in type=bind,src=*,dst=/workspace*) wo
       const execution = await runTaskSpecFile(specPath);
       expect(execution).toMatchObject({ kind: "validation", success: true, result: { status: "completed", validationAggregate: "completed_with_validation_gaps", source: { unchanged: true } } });
       const result = JSON.parse(await readFile(join(artifacts, "results.json"), "utf8"));
-      expect(result).toMatchObject({ status: "workflow_completed", validationAggregate: "completed_with_validation_gaps", review: { structural: { status: "completed_with_validation_gaps" }, semantic: { status: "unavailable", delegation: { party: "external_session" } } } });
+      expect(result).toMatchObject({
+        status: "workflow_completed",
+        validationAggregate: "completed_with_validation_gaps",
+        review: {
+          structural: { status: "completed_with_validation_gaps" },
+          semantic: {
+            status: "unavailable",
+            delegation: {
+              party: "external_session",
+              reason: expect.stringContaining("independentReview as not_requested with responsibleParty nobody: Not requested."),
+              exactAction: "In external_session, request and perform an independent semantic review, then attach structured findings to this handoff.",
+            },
+          },
+        },
+      });
+      expect(result.review.semantic.delegation.reason).not.toContain("assigns independent review to runforge");
       expect(result.validation).toEqual(expect.arrayContaining([
         expect.objectContaining({ command: "node --version", outcome: "passed", lane: "docker-validation", executor: "docker-shell" }),
         expect.objectContaining({ command: "test ! -d .git", outcome: "passed", lane: "docker-validation", executor: "docker-shell" }),
@@ -112,6 +128,20 @@ for argument in "$@"; do case "$argument" in type=bind,src=*,dst=/workspace*) wo
       const product = result.validation.find((item: { command: string }) => item.command === "node --version");
       await expect(access(join(product.cwd, ".git"))).rejects.toThrow();
       const spawned = await readFile(dockerLog, "utf8"); expect(spawned).not.toContain("git diff --check"); expect(spawned).not.toContain(databaseCommand);
+      for (const responsibleParty of ["owner", "external_session", "external_system"] satisfies ExecutionParty[]) {
+        const executionAgreement = negotiateExecutionAgreement({
+          profile: "custom",
+          requested: { independentReview: true },
+          requestedOwnership: { independentReview: responsibleParty },
+        });
+        await runTaskSpecFile(specPath, { executionAgreement });
+        const delegated = JSON.parse(await readFile(join(artifacts, "results.json"), "utf8")).review.semantic.delegation;
+        expect(delegated).toEqual({
+          party: responsibleParty,
+          reason: expect.stringContaining(`independentReview as handoff with responsibleParty ${responsibleParty}: Delegated to ${responsibleParty}; tracked as a handoff.`),
+          exactAction: `Have ${responsibleParty} perform the requested independent semantic review and attach structured findings to this handoff.`,
+        });
+      }
       expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim()).toBe(head);
       expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim()).toBe("");
     } finally { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; }

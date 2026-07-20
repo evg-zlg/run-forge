@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { detectPackageValidationCapabilities } from "../implementation/validation-runtime-capabilities.js";
 import { runValidation, type CommandDiagnostic } from "../implementation/validation-command-runner.js";
 import type { SemanticReviewResult } from "../implementation/semantic-review.js";
-import { executionPhaseOwner, type ExecutionAgreement } from "../product/execution-agreement.js";
+import type { ExecutionAgreement, ExecutionPhaseAgreement } from "../product/execution-agreement.js";
 import type { TaskSpecV2 } from "../product/task-spec-v2.js";
 import { inspectRepoState, prepareExternalRuntime, type RepoState, type RuntimePreparationResult } from "../run/runtime-preparation.js";
 import { createExecutorRequest, DockerShellExecutor } from "../run/task-run-executor.js";
@@ -121,15 +121,39 @@ export async function runValidationOnlyExecutor(input: {
   const sourceAfter = await inspectRepoState(spec.target.repository);
   const unchanged = sourceBefore.head === sourceAfter.head && sourceBefore.status === sourceAfter.status;
   if (!unchanged) throw new Error("source_mutation_detected_during_validation");
-  const semanticOwner = executionPhaseOwner(spec.executionAgreement.profile, "independentReview", spec.executionAgreement.phaseOwnership);
-  const delegate = semanticOwner === "owner" ? "owner" : "external_session";
+  const semanticPhase = input.executionAgreement.phases.find((phase) => phase.phaseId === "independentReview");
+  if (!semanticPhase) throw new Error("Execution Agreement is missing the independentReview phase.");
+  const delegation = semanticReviewDelegation(semanticPhase);
   const semantic: SemanticReviewResult = {
     kind: "semantic", status: "unavailable", performed: false,
     selectedReviewer: { provider: null, model: null }, reviewer: { provider: null, model: null, invocationId: null },
     confidence: "unknown", limitations: ["Validation-only execution provides structural evidence but does not invoke an independent semantic reviewer."],
-    findings: [], evidence: [], delegation: { party: delegate, reason: `Execution Agreement assigns independent review to ${semanticOwner ?? delegate}; validation-only mode made no provider invocation.`, exactAction: "Perform an independent semantic review in the delegated session and attach structured findings to this handoff." },
+    findings: [], evidence: [], delegation,
   };
   const review = { structural: { kind: "structural" as const, status: validationAggregate, evidence: validationResults.flatMap((item) => item.artifactPaths) }, semantic };
   const completed = ["passed", "completed_with_validation_gaps"].includes(validationAggregate);
   return { status: completed ? "completed" : "failed", validationPlan, validationAggregate, validationResults, source: { before: sourceBefore, after: sourceAfter, unchanged }, productWorkspace: workspace, preparation, review, executionAgreement: input.executionAgreement };
+}
+
+function semanticReviewDelegation(phase: ExecutionPhaseAgreement): NonNullable<SemanticReviewResult["delegation"]> {
+  const effectiveDecision = `Execution Agreement marks independentReview as ${phase.status} with responsibleParty ${phase.responsibleParty}: ${phase.reason}`;
+  if (!phase.requested || phase.responsibleParty === "nobody" || phase.status === "not_requested") {
+    return {
+      party: "external_session",
+      reason: `${effectiveDecision} Validation-only mode made no provider invocation.`,
+      exactAction: "In external_session, request and perform an independent semantic review, then attach structured findings to this handoff.",
+    };
+  }
+  if (phase.responsibleParty === "owner" || phase.responsibleParty === "external_session" || phase.responsibleParty === "external_system") {
+    return {
+      party: phase.responsibleParty,
+      reason: `${effectiveDecision} Validation-only mode made no provider invocation.`,
+      exactAction: `Have ${phase.responsibleParty} perform the requested independent semantic review and attach structured findings to this handoff.`,
+    };
+  }
+  return {
+    party: "external_session",
+    reason: `${effectiveDecision} Validation-only mode made no provider invocation, so the review remains outstanding.`,
+    exactAction: "In external_session, arrange the outstanding independent semantic review and attach structured findings to this handoff.",
+  };
 }
