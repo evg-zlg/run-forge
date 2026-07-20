@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
@@ -105,7 +105,6 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
       head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim(),
       status: execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim(),
     };
-    const canonicalRepository = await realpath(repository);
     const databaseCommand = "runforge-database-probe --read-only";
     const taskId = "VALIDATION-MULTILANE-DOGFOOD-1";
     const taskSpec = {
@@ -153,7 +152,7 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
         expect.objectContaining({ command: "test ! -d .git", outcome: "passed", lane: "docker-validation", executor: "docker-shell", exitCode: 0 }),
       ]));
       const gitEvidence = validation.find((item) => item.command === "git diff --check")!;
-      expect(gitEvidence).toMatchObject({ outcome: "passed", lane: "git-evidence", executor: "safe-git-evidence", argv: ["git", "diff", "--no-ext-diff", "--no-textconv", "--check"], repositoryIdentity: canonicalRepository, boundSha: before.head });
+      expect(gitEvidence).toMatchObject({ outcome: "passed", lane: "git-evidence", executor: "safe-git-evidence", argv: ["git", "diff", "--no-ext-diff", "--no-textconv", "--check"], repositoryIdentity: "[internal path]", boundSha: before.head });
       expect(gitEvidence.safetyAssertions).toEqual(expect.arrayContaining(["argv_only_no_shell", "expected_sha_verified_before_and_after", "source_state_immutable"]));
       const unsupported = validation.find((item) => item.command === databaseCommand)!;
       expect(unsupported).toMatchObject({ outcome: "capability_unsupported", exitCode: null, lane: "docker-validation", missingCapabilities: ["database"] });
