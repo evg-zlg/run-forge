@@ -24,7 +24,7 @@ export type TaskSpecExecution =
   | { kind: "repair"; spec: TaskSpecV2; result: ExternalExecutionResult; summary: string; success: boolean }
   | { kind: "implementation"; spec: TaskSpecV2; result: ImplementationExecutorResult | AgreementHandoffResult; summary: string; success: boolean };
 type AgreementHandoffResult = { status: "delegated"; responsibleParty: "external_session" | "external_system"; selectedExecutor: { id: "agreement-handoff"; model: null }; providerCalls: []; publicationMutations: 0 };
-export async function runTaskSpecFile(path: string, context: { signal?: AbortSignal; attempt?: number; executionId?: string; onProgress?: (phase: string, detail: string) => void | Promise<void> } = {}): Promise<TaskSpecExecution> {
+export async function runTaskSpecFile(path: string, context: { signal?: AbortSignal; attempt?: number; executionId?: string; executionAgreementId?: string; checkpointRepair?: { patchPath: string; checkpointId: string; checkpointDigest: string; repairIntent: string | null }; onProgress?: (phase: string, detail: string) => void | Promise<void> } = {}): Promise<TaskSpecExecution> {
   const spec = await loadTaskSpecV2(path);
   const initialTarget = await inspectProject(spec.target.repository, spec.target.workingDirectory);
   await writeNormalizedSpec(spec);
@@ -40,7 +40,7 @@ export async function runTaskSpecFile(path: string, context: { signal?: AbortSig
       projectProfile: { runtime: spec.runtime.preference }, acceptanceCriteria: spec.task.acceptanceCriteria,
       authorityEnvelope: spec.authority, forbiddenZones: spec.authority.forbiddenAreas,
       runtimePolicy: spec.runtime, validationProfile: spec.validation, artifactRoot: spec.artifacts.root,
-      attempt: context.attempt ?? 1, generation: context.executionId ?? "standalone", signal: context.signal, onProgress: context.onProgress
+      attempt: context.attempt ?? 1, generation: context.executionId ?? "standalone", executionAgreementId: context.executionAgreementId ?? `task-spec:${spec.executionAgreement.profile}`, signal: context.signal, checkpointRepair: context.checkpointRepair, onProgress: context.onProgress
     }));
     clearRepairedFindings(result);
     const status = await finalizeImplementationArtifacts(spec, result, context.executionId !== undefined);

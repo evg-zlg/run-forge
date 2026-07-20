@@ -1,4 +1,5 @@
-import { cp, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, mkdtemp, readFile, readdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +11,9 @@ import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
 import { discoverImplementationExecutors } from "../../src/implementation/executor.js";
 import { executionPhaseOwner } from "../../src/product/execution-agreement.js";
 import { startControlPlaneServer } from "../../src/control-plane/server.js";
+import { ControlPlaneManager } from "../../src/control-plane/manager.js";
+import { ControlPlaneStore } from "../../src/control-plane/state.js";
+import { defaultAuthority } from "../../src/control-plane/contracts.js";
 
 const exec = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
@@ -333,6 +337,118 @@ describe("implementation executor", () => {
     } finally { await server.close(); }
   }, 20_000);
 
+  it("starts an idempotent bounded repair generation from a digest-bound failed checkpoint", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository(); const mainBefore = await git(repo, ["rev-parse", "refs/heads/main"]); const state = await mkdtemp(join(tmpdir(), "runforge-checkpoint-repair-"));
+    const server = await startControlPlaneServer({ port: 0, stateRoot: state });
+    try {
+      const capabilities = await fetch(`${server.url}/v1/capabilities`).then((response) => response.json()) as Record<string, any>;
+      expect(capabilities.checkpointRepair).toMatchObject({ choices: ["grant_additional_budget", "retry_from_checkpoint"], requiresCheckpointDigest: true });
+      const discovery = await fetch(`${server.url}/.well-known/runforge`).then((response) => response.json()) as Record<string, any>; expect(discovery.endpoints.checkpointRepairs).toBe("/v1/tasks/{id}/checkpoint-repairs");
+      const project = await fetch(`${server.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repo, register: true }) }).then((response) => response.json()) as Record<string, any>;
+      const request = structuredClone(capabilities.taskSpecContract.implementationRequest); request.projectId = project.project.id; request.taskSpec.taskId = "EXECUTOR-CHECKPOINT-REPAIR-1"; request.taskSpec.task.text = "BUDGET_OVERRUN REPAIR_LOOP fix add"; request.taskSpec.validation = { mode: "explicit", commands: ["node test.js"] }; request.taskSpec.execution.phaseBudgets.implementation = 1_000;
+      expect((await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) })).status).toBe(202);
+      await poll(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1`);
+      const failed = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/result`).then((response) => response.json()) as Record<string, any>;
+      const checkpoint = failed.artifact.checkpoints[0]; expect(checkpoint).toMatchObject({ id: "implementation-0", validationPassed: false, digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+      const directAccept = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/accept-completed-result`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ decisionId: "invalid-direct-accept", checkpointId: checkpoint.id, delivery: "patch" }) }); expect(directAccept.status).toBe(409); expect(await directAccept.json()).toMatchObject({ error: { code: "checkpoint_not_validated" } });
+      const wrongTask = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: "OTHER-TASK", decisionId: "wrong-task", checkpointId: checkpoint.id, checkpointDigest: checkpoint.digest, choice: "retry_from_checkpoint", repairIntent: "Repair only the recorded validation failure." }) }); expect(wrongTask.status).toBe(409); expect(await wrongTask.json()).toMatchObject({ error: { code: "wrong_task_checkpoint" } });
+      const invalidDigest = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId: "EXECUTOR-CHECKPOINT-REPAIR-1", decisionId: "wrong-digest", checkpointId: checkpoint.id, checkpointDigest: "0".repeat(64), choice: "retry_from_checkpoint", repairIntent: "Repair only the recorded validation failure." }) }); expect(invalidDigest.status).toBe(409); expect(await invalidDigest.json()).toMatchObject({ error: { code: "checkpoint_digest_invalid" } });
+      const repairBody = JSON.stringify({ taskId: "EXECUTOR-CHECKPOINT-REPAIR-1", decisionId: "repair-decision-1", checkpointId: checkpoint.id, checkpointDigest: checkpoint.digest, choice: "retry_from_checkpoint", repairIntent: "Repair only the recorded validation failure." });
+      const started = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: repairBody }); expect(started.status).toBe(202); const startResult = await started.json() as Record<string, any>; expect(startResult).toMatchObject({ status: "repair_generation_started", authorityGranted: false, baseSha: mainBefore.trim(), checkpointDigest: checkpoint.digest, providerRun: true, targetMainMutation: false, patchFallback: expect.stringContaining("attempts/1/artifacts/checkpoints/implementation-0/patch.diff"), repairExecutionId: expect.any(String) });
+      const replay = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: repairBody }); expect(replay.status).toBe(202); expect(await replay.json()).toMatchObject({ idempotentReplay: true, repairExecutionId: startResult.repairExecutionId });
+      const repairedTask = await poll(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1`); expect(repairedTask.status).toBe("completed"); expect(repairedTask.execution.attempt).toBe(2);
+      const repaired = await fetch(`${server.url}/v1/tasks/EXECUTOR-CHECKPOINT-REPAIR-1/result`).then((response) => response.json()) as Record<string, any>;
+      expect(repaired).toMatchObject({ implementation: { status: "implemented_and_validated" }, artifact: { checkpoints: [expect.objectContaining({ id: "repair-1", validationPassed: true, digest: expect.stringMatching(/^[a-f0-9]{64}$/) })] }, safetyAssertions: { targetMainMutation: false } });
+      expect(await git(repo, ["rev-parse", "refs/heads/main"])).toBe(mainBefore);
+    } finally { await server.close(); }
+  }, 20_000);
+
+  it("repairs a persisted schema-v1 checkpoint through a restarted manager", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const taskId = "LEGACY-MANAGER-REPAIR-1"; const repo = await repository(); const head = await git(repo, ["rev-parse", "HEAD"]); const state = await mkdtemp(join(tmpdir(), "runforge-legacy-manager-"));
+    let manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize();
+    const value: Record<string, any> = spec(repo, taskId, "BUDGET_OVERRUN REPAIR_LOOP fix add", ["node test.js"]); value.execution.phaseBudgets = { implementation: 1_000, repair: 50_000 };
+    await manager.createTask({ taskSpec: value, authority: defaultAuthority({ implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true }), publicationRequested: "none" });
+    expect((await pollManager(manager, taskId)).status).toBe("awaiting_owner_decision");
+    const v2Checkpoint = objectValue((await manager.getResult(taskId)).artifact).checkpoints[0]; await expect(manager.repairFromCheckpoint(taskId, { taskId, decisionId: "v2-strict-digest", checkpointId: v2Checkpoint.id, checkpointDigest: "0".repeat(64), choice: "retry_from_checkpoint", additionalProviderTokens: 0, repairIntent: "Verify strict schema-v2 digest binding." })).rejects.toMatchObject({ code: "checkpoint_digest_invalid" }); manager.close();
+    const legacy = await downgradeCheckpointToLegacy(state, taskId, "implementation-0"); const before = await directorySnapshot(legacy.checkpointPath);
+    manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize();
+    const result = await manager.getResult(taskId); const checkpoint = objectValue(result.artifact).checkpoints[0]; expect(checkpoint).toMatchObject({ checkpointSchemaVersion: 1, digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    const repairRequest = (decisionId: string, checkpointDigest: string) => ({ taskId, decisionId, checkpointId: checkpoint.id, checkpointDigest, choice: "retry_from_checkpoint" as const, additionalProviderTokens: 0, repairIntent: "Repair only the recorded validation failure." });
+    await writeFile(join(legacy.checkpointPath, "patch.diff"), "corrupt\n"); await expect(manager.repairFromCheckpoint(taskId, repairRequest("corrupt", checkpoint.digest))).rejects.toMatchObject({ code: "checkpoint_digest_invalid" }); await restoreDirectory(legacy.checkpointPath, before);
+    const unsafeDigest = await rewriteLegacyPayload(legacy.checkpointPath, "safety.json", { ...(JSON.parse(await readFile(join(legacy.checkpointPath, "safety.json"), "utf8")) as Record<string, unknown>), secretScanPassed: false }); await expect(manager.repairFromCheckpoint(taskId, repairRequest("unsafe", unsafeDigest))).rejects.toMatchObject({ code: "unsafe_checkpoint" }); await restoreDirectory(legacy.checkpointPath, before);
+    const executor = JSON.parse(await readFile(join(legacy.checkpointPath, "executor.json"), "utf8")) as Record<string, unknown>; const copiedDigest = await rewriteLegacyPayload(legacy.checkpointPath, "executor.json", { ...executor, generation: "00000000-0000-4000-8000-000000000000" }); await expect(manager.repairFromCheckpoint(taskId, repairRequest("copied", copiedDigest))).rejects.toMatchObject({ code: "checkpoint_generation_mismatch" }); await restoreDirectory(legacy.checkpointPath, before);
+    await writeFile(legacy.manifestPath, JSON.stringify({ ...legacy.manifest, baseSha: "0".repeat(40) }, null, 2) + "\n"); await expect(manager.repairFromCheckpoint(taskId, repairRequest("stale", digestFile(await readFile(legacy.manifestPath))))).rejects.toMatchObject({ code: "stale_checkpoint" }); await restoreDirectory(legacy.checkpointPath, before);
+    const request = repairRequest("legacy-manager-repair", checkpoint.digest);
+    const started = await manager.repairFromCheckpoint(taskId, request); const replay = await manager.repairFromCheckpoint(taskId, request); expect(replay).toMatchObject({ idempotentReplay: true, repairExecutionId: started.repairExecutionId });
+    expect((await pollManager(manager, taskId)).status).toBe("completed"); expect(await directorySnapshot(legacy.checkpointPath)).toEqual(before); expect(await git(repo, ["rev-parse", "HEAD"])).toBe(head); manager.close();
+  }, 20_000);
+
+  it("upgrades, discovers, and safely repairs the preserved schema-v1 W1 checkpoint without mutating source or legacy artifacts", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const taskId = "RUNFORGE-VALIDATION-CAPABILITIES-1-W1";
+    const repo = await repository(); const sourceBefore = { head: await git(repo, ["rev-parse", "HEAD"]), status: await git(repo, ["status", "--porcelain=v1", "-uall"]) };
+    const state = await mkdtemp(join(tmpdir(), "runforge-legacy-checkpoint-upgrade-"));
+    let server = await startControlPlaneServer({ port: 0, stateRoot: state });
+    try {
+      const capabilities = await fetch(`${server.url}/v1/capabilities`).then((response) => response.json()) as Record<string, any>;
+      const project = await fetch(`${server.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repo, register: true }) }).then((response) => response.json()) as Record<string, any>;
+      const request = structuredClone(capabilities.taskSpecContract.implementationRequest); request.projectId = project.project.id; request.taskSpec.taskId = taskId; request.taskSpec.task.text = "BUDGET_OVERRUN REPAIR_LOOP fix add"; request.taskSpec.validation = { mode: "explicit", commands: ["node test.js"] }; request.taskSpec.execution.phaseBudgets.implementation = 1_000;
+      expect((await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(request) })).status).toBe(202);
+      expect((await poll(`${server.url}/v1/tasks/${taskId}`)).status).toBe("awaiting_owner_decision");
+    } finally { await server.close(); }
+
+    const legacy = await downgradeCheckpointToLegacy(state, taskId, "implementation-0");
+    const immutableLegacy = await directorySnapshot(legacy.checkpointPath);
+    server = await startControlPlaneServer({ port: 0, stateRoot: state });
+    try {
+      const capabilities = await fetch(`${server.url}/v1/capabilities`).then((response) => response.json()) as Record<string, any>;
+      expect(capabilities.checkpointRepair).toMatchObject({ requiresCheckpointDigest: true, digestDiscovery: expect.stringContaining("artifact.checkpoints[].digest"), legacySchemaV1: "verified-on-read", immutableLegacyArtifactsRewritten: false });
+      const upgraded = await fetch(`${server.url}/v1/tasks/${taskId}/result`).then((response) => response.json()) as Record<string, any>;
+      const discovered = upgraded.artifact.checkpoints[0];
+      expect(discovered).toMatchObject({ id: "implementation-0", digest: expect.stringMatching(/^[a-f0-9]{64}$/), checkpointSchemaVersion: 1, digestSource: "verified_immutable_manifest" });
+      expect(upgraded.checkpointRepairContract).toMatchObject({ legacySchemaV1DigestsVerifiedOnRead: true, immutableArtifactsRewritten: false });
+      expect(JSON.parse(await readFile(legacy.manifestPath, "utf8"))).not.toHaveProperty("taskId");
+
+      const postRepair = (decisionId: string, digest: string, repairIntent = "Repair only the recorded validation failure.") => fetch(`${server.url}/v1/tasks/${taskId}/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId, decisionId, checkpointId: "implementation-0", checkpointDigest: digest, choice: "retry_from_checkpoint", repairIntent }) });
+      await writeFile(legacy.manifestPath, JSON.stringify({ ...legacy.manifest, baseSha: "0".repeat(40) }, null, 2) + "\n");
+      const stale = await postRepair("legacy-stale", digestFile(await readFile(legacy.manifestPath))); expect(stale.status).toBe(409); expect(await stale.json()).toMatchObject({ error: { code: "stale_checkpoint" } });
+      await restoreDirectory(legacy.checkpointPath, immutableLegacy);
+
+      await writeFile(join(legacy.checkpointPath, "patch.diff"), Buffer.concat([await readFile(join(legacy.checkpointPath, "patch.diff")), Buffer.from("\ncorrupt\n")]));
+      const corrupt = await postRepair("legacy-corrupt", discovered.digest); expect(corrupt.status).toBe(409); expect(await corrupt.json()).toMatchObject({ error: { code: "checkpoint_digest_invalid" } });
+      await restoreDirectory(legacy.checkpointPath, immutableLegacy);
+
+      const unsafeDigest = await rewriteLegacyPayload(legacy.checkpointPath, "safety.json", { ...(JSON.parse((await readFile(join(legacy.checkpointPath, "safety.json"))).toString()) as Record<string, unknown>), secretScanPassed: false });
+      const unsafe = await postRepair("legacy-unsafe", unsafeDigest); expect(unsafe.status).toBe(409); expect(await unsafe.json()).toMatchObject({ error: { code: "unsafe_checkpoint" } });
+      await restoreDirectory(legacy.checkpointPath, immutableLegacy);
+
+      const executor = JSON.parse(await readFile(join(legacy.checkpointPath, "executor.json"), "utf8")) as Record<string, unknown>;
+      const copiedDigest = await rewriteLegacyPayload(legacy.checkpointPath, "executor.json", { ...executor, generation: "00000000-0000-4000-8000-000000000000" });
+      const copied = await postRepair("legacy-copied", copiedDigest); expect(copied.status).toBe(409); expect(await copied.json()).toMatchObject({ error: { code: "checkpoint_generation_mismatch" } });
+      await restoreDirectory(legacy.checkpointPath, immutableLegacy);
+
+      const repairBody = JSON.stringify({ taskId, decisionId: "legacy-repair", checkpointId: "implementation-0", checkpointDigest: discovered.digest, choice: "retry_from_checkpoint", repairIntent: "Repair only the recorded validation failure." });
+      const [first, racedReplay] = await Promise.all([fetch(`${server.url}/v1/tasks/${taskId}/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: repairBody }), fetch(`${server.url}/v1/tasks/${taskId}/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: repairBody })]);
+      expect(first.status).toBe(202); expect(racedReplay.status).toBe(202);
+      const starts = [await first.json(), await racedReplay.json()] as Record<string, any>[];
+      expect(starts[0].repairExecutionId).toBe(starts[1].repairExecutionId); expect(starts.some((item) => item.idempotentReplay === true)).toBe(true);
+      const conflict = await postRepair("legacy-repair", discovered.digest, "A different repair scope."); expect(conflict.status).toBe(409); expect(await conflict.json()).toMatchObject({ error: { code: "idempotency_conflict" } });
+      const repairedTask = await poll(`${server.url}/v1/tasks/${taskId}`); expect(repairedTask).toMatchObject({ status: "completed", execution: { attempt: 2 } });
+      const repaired = await fetch(`${server.url}/v1/tasks/${taskId}/result`).then((response) => response.json()) as Record<string, any>;
+      expect(repaired).toMatchObject({ implementation: { status: "implemented_and_validated" }, artifact: { checkpoints: [expect.objectContaining({ id: "repair-1", digest: expect.stringMatching(/^[a-f0-9]{64}$/) })] }, safetyAssertions: { targetMainMutation: false } });
+    } finally { await server.close(); }
+
+    server = await startControlPlaneServer({ port: 0, stateRoot: state });
+    try {
+      const replay = await fetch(`${server.url}/v1/tasks/${taskId}/checkpoint-repairs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskId, decisionId: "legacy-repair", checkpointId: "implementation-0", checkpointDigest: digestFile(immutableLegacy["manifest.json"]!), choice: "retry_from_checkpoint", repairIntent: "Repair only the recorded validation failure." }) });
+      expect(replay.status).toBe(202); expect(await replay.json()).toMatchObject({ idempotentReplay: true, checkpointSchemaVersion: 1, repairExecutionId: expect.any(String) });
+      expect(await directorySnapshot(legacy.checkpointPath)).toEqual(immutableLegacy);
+      expect(await git(repo, ["rev-parse", "HEAD"])).toBe(sourceBefore.head); expect(await git(repo, ["status", "--porcelain=v1", "-uall"])).toBe(sourceBefore.status);
+    } finally { await server.close(); }
+  }, 30_000);
+
   it("blocks provider denial and unavailable executors before accepting implementation work", async () => {
     const repo = await repository(); const state = await mkdtemp(join(tmpdir(), "runforge-implementation-preflight-"));
     const server = await startControlPlaneServer({ port: 0, stateRoot: state });
@@ -401,3 +517,10 @@ async function execute(repo: string, taskId: string, text: string, commands: str
 async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string, executionMode: "implementation" | "repair" = "implementation", attempt?: number, dirtyPolicy?: string): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.execution.mode = executionMode; value.executionAgreement = executionAgreement; if (dirtyPolicy) value.target.dirtyPolicy = dirtyPolicy; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId, attempt }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
 async function poll(url: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("task did not finish"); }
 async function pollPhase(url: string, phase: string): Promise<void> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (task.progress?.phase === phase) return; await new Promise((done) => setTimeout(done, 25)); } throw new Error(`task did not reach ${phase}`); }
+async function downgradeCheckpointToLegacy(state: string, taskId: string, checkpointId: string): Promise<{ checkpointPath: string; manifestPath: string; manifest: Record<string, unknown> }> { const artifacts = join(state, "tasks", taskId, "attempts", "1", "artifacts"); const checkpointPath = join(artifacts, "checkpoints", checkpointId); const manifestPath = join(checkpointPath, "manifest.json"); const current = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>; const { taskId: _taskId, executionAgreementId: _agreementId, ...legacy } = current; legacy.schemaVersion = 1; await writeFile(manifestPath, JSON.stringify(legacy, null, 2) + "\n"); for (const resultPath of [join(artifacts, "results.json"), join(state, "tasks", taskId, "result.json")]) { const document = JSON.parse(await readFile(resultPath, "utf8")) as Record<string, any>; const result = document.result ?? document; for (const checkpoint of result.artifact.checkpoints) delete checkpoint.digest; await writeFile(resultPath, JSON.stringify(document, null, 2) + "\n"); } return { checkpointPath, manifestPath, manifest: legacy }; }
+async function directorySnapshot(path: string): Promise<Record<string, Buffer>> { return Object.fromEntries(await Promise.all((await readdir(path)).sort().map(async (name) => [name, await readFile(join(path, name))] as const))); }
+async function restoreDirectory(path: string, snapshot: Record<string, Buffer>): Promise<void> { await Promise.all(Object.entries(snapshot).map(([name, content]) => writeFile(join(path, name), content))); }
+async function rewriteLegacyPayload(checkpointPath: string, name: string, value: unknown): Promise<string> { const payload = Buffer.from(JSON.stringify(value, null, 2) + "\n"); await writeFile(join(checkpointPath, name), payload); const manifestPath = join(checkpointPath, "manifest.json"); const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, any>; const entry = manifest.files.find((item: Record<string, unknown>) => item.path === name); entry.bytes = payload.byteLength; entry.sha256 = digestFile(payload); await writeFile(manifestPath, JSON.stringify(manifest, null, 2) + "\n"); return digestFile(await readFile(manifestPath)); }
+function digestFile(value: string | Buffer): string { return createHash("sha256").update(value).digest("hex"); }
+async function pollManager(manager: ControlPlaneManager, taskId: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await manager.getTask(taskId); if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("manager task did not finish"); }
+function objectValue(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }

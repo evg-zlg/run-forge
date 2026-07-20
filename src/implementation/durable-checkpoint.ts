@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 export type DurableCheckpointInput = {
+  taskId: string;
+  executionAgreementId: string;
   checkpointId: string;
   iteration: number;
   kind: "implementation" | "repair";
@@ -19,8 +21,23 @@ export type DurableCheckpointInput = {
   unresolvedFindings: string[];
 };
 
-export type DurableCheckpointManifest = {
+export type LegacyDurableCheckpointManifest = {
   schemaVersion: 1;
+  checkpointId: string;
+  iteration: number;
+  kind: DurableCheckpointInput["kind"];
+  createdAt: string;
+  baseSha: string;
+  workspaceSha: string | null;
+  workspaceState: DurableCheckpointInput["workspaceState"];
+  status: "available";
+  files: Array<{ path: string; bytes: number; sha256: string }>;
+};
+
+export type DurableCheckpointManifest = {
+  schemaVersion: 2;
+  taskId: string;
+  executionAgreementId: string;
   checkpointId: string;
   iteration: number;
   kind: DurableCheckpointInput["kind"];
@@ -35,8 +52,9 @@ export type DurableCheckpointManifest = {
 export type DurableCheckpoint = {
   id: string;
   path: string;
-  manifest: DurableCheckpointManifest;
+  manifest: LegacyDurableCheckpointManifest | DurableCheckpointManifest;
   patchPath: string;
+  digest: string;
 };
 
 const payloadNames = [
@@ -65,15 +83,17 @@ export async function persistDurableCheckpoint(root: string, input: DurableCheck
       return { path, bytes: content.byteLength, sha256: createHash("sha256").update(content).digest("hex") };
     }));
     const manifest: DurableCheckpointManifest = {
-      schemaVersion: 1, checkpointId: input.checkpointId, iteration: input.iteration, kind: input.kind,
+      schemaVersion: 2, taskId: input.taskId, executionAgreementId: input.executionAgreementId,
+      checkpointId: input.checkpointId, iteration: input.iteration, kind: input.kind,
       createdAt: input.createdAt ?? new Date().toISOString(), baseSha: input.baseSha,
       workspaceSha: input.workspaceSha, workspaceState: input.workspaceState, status: "available", files
     };
-    await writeDurable(staging, "manifest.json", json(manifest));
+    const manifestText = json(manifest);
+    await writeDurable(staging, "manifest.json", manifestText);
     await syncDirectory(staging);
     await rename(staging, target);
     await syncDirectory(checkpointRoot);
-    return { id: input.checkpointId, path: target, manifest, patchPath: join(target, "patch.diff") };
+    return { id: input.checkpointId, path: target, manifest, patchPath: join(target, "patch.diff"), digest: digest(manifestText) };
   } catch (error) {
     await rm(staging, { recursive: true, force: true });
     throw error;
@@ -84,26 +104,47 @@ export async function readDurableCheckpoint(root: string, checkpointId: string):
   assertCheckpointId(checkpointId);
   const path = join(root, "checkpoints", checkpointId);
   try {
-    const manifest = JSON.parse(await readFile(join(path, "manifest.json"), "utf8")) as DurableCheckpointManifest;
+    const manifestText = await readFile(join(path, "manifest.json"), "utf8");
+    const manifest = parseManifest(JSON.parse(manifestText), checkpointId);
     if (manifest.checkpointId !== checkpointId || manifest.status !== "available") return null;
     await verifyCheckpointIntegrity(path, manifest);
-    return { id: checkpointId, path, manifest, patchPath: join(path, "patch.diff") };
+    return { id: checkpointId, path, manifest, patchPath: join(path, "patch.diff"), digest: digest(manifestText) };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
     throw error;
   }
 }
 
-async function verifyCheckpointIntegrity(path: string, manifest: DurableCheckpointManifest): Promise<void> {
+async function verifyCheckpointIntegrity(path: string, manifest: LegacyDurableCheckpointManifest | DurableCheckpointManifest): Promise<void> {
   const declared = manifest.files.map((item) => item.path).sort();
   const expected = [...payloadNames].sort();
   if (JSON.stringify(declared) !== JSON.stringify(expected)) throw new Error(`checkpoint_integrity_error: ${manifest.checkpointId} has an invalid payload set`);
+  const directoryEntries = (await readdir(path)).sort();
+  if (JSON.stringify(directoryEntries) !== JSON.stringify(["manifest.json", ...payloadNames].sort())) throw new Error(`checkpoint_integrity_error: ${manifest.checkpointId} contains an unexpected artifact`);
   for (const item of manifest.files) {
     if (!payloadNames.includes(item.path as typeof payloadNames[number])) throw new Error(`checkpoint_integrity_error: ${manifest.checkpointId} contains an unsafe payload path`);
+    if (!(await lstat(join(path, item.path))).isFile()) throw new Error(`checkpoint_integrity_error: ${manifest.checkpointId}/${item.path} is not an immutable file`);
     const content = await readFile(join(path, item.path));
     const digest = createHash("sha256").update(content).digest("hex");
     if (content.byteLength !== item.bytes || digest !== item.sha256) throw new Error(`checkpoint_integrity_error: ${manifest.checkpointId}/${item.path}`);
   }
+}
+
+function parseManifest(value: unknown, checkpointId: string): LegacyDurableCheckpointManifest | DurableCheckpointManifest {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(`checkpoint_integrity_error: ${checkpointId} has an invalid manifest`);
+  const manifest = value as Record<string, unknown>;
+  if (manifest.schemaVersion !== 1 && manifest.schemaVersion !== 2) throw new Error(`checkpoint_integrity_error: ${checkpointId} has an unsupported schema`);
+  const commonKeys = ["schemaVersion", "checkpointId", "iteration", "kind", "createdAt", "baseSha", "workspaceSha", "workspaceState", "status", "files"];
+  const expectedKeys = (manifest.schemaVersion === 2 ? [...commonKeys, "taskId", "executionAgreementId"] : commonKeys).sort();
+  if (JSON.stringify(Object.keys(manifest).sort()) !== JSON.stringify(expectedKeys)) throw new Error(`checkpoint_integrity_error: ${checkpointId} has an invalid schema shape`);
+  if (manifest.checkpointId !== checkpointId || manifest.status !== "available") throw new Error(`checkpoint_integrity_error: ${checkpointId} has an invalid identity`);
+  if (!Number.isSafeInteger(manifest.iteration) || Number(manifest.iteration) < 0 || !["implementation", "repair"].includes(String(manifest.kind))) throw new Error(`checkpoint_integrity_error: ${checkpointId} has invalid iteration metadata`);
+  if (typeof manifest.createdAt !== "string" || !Number.isFinite(Date.parse(manifest.createdAt)) || typeof manifest.baseSha !== "string" || !/^[a-f0-9]{40,64}$/.test(manifest.baseSha)) throw new Error(`checkpoint_integrity_error: ${checkpointId} has invalid source metadata`);
+  if (manifest.workspaceSha !== null && (typeof manifest.workspaceSha !== "string" || !/^[a-f0-9]{40,64}$/.test(manifest.workspaceSha))) throw new Error(`checkpoint_integrity_error: ${checkpointId} has invalid workspace metadata`);
+  if (manifest.workspaceState !== "dirty" && manifest.workspaceState !== "committed") throw new Error(`checkpoint_integrity_error: ${checkpointId} has invalid workspace state`);
+  if (!Array.isArray(manifest.files) || manifest.files.length !== payloadNames.length || manifest.files.some((item) => !item || typeof item !== "object" || typeof item.path !== "string" || !Number.isSafeInteger(item.bytes) || item.bytes < 0 || typeof item.sha256 !== "string" || !/^[a-f0-9]{64}$/.test(item.sha256))) throw new Error(`checkpoint_integrity_error: ${checkpointId} has invalid payload metadata`);
+  if (manifest.schemaVersion === 2 && (typeof manifest.taskId !== "string" || !manifest.taskId || typeof manifest.executionAgreementId !== "string" || !manifest.executionAgreementId)) throw new Error(`checkpoint_integrity_error: ${checkpointId} has invalid schema-v2 bindings`);
+  return manifest as unknown as LegacyDurableCheckpointManifest | DurableCheckpointManifest;
 }
 
 export async function listDurableCheckpoints(root: string): Promise<DurableCheckpoint[]> {
@@ -119,4 +160,5 @@ async function writeDurable(root: string, name: string, value: string): Promise<
 async function syncDirectory(path: string): Promise<void> { const handle = await open(path, "r"); try { await handle.sync(); } finally { await handle.close(); } }
 async function exists(path: string): Promise<boolean> { return stat(path).then(() => true, (error: NodeJS.ErrnoException) => error.code === "ENOENT" ? false : Promise.reject(error)); }
 function json(value: unknown): string { return JSON.stringify(value, null, 2) + "\n"; }
+function digest(value: string | Buffer): string { return createHash("sha256").update(value).digest("hex"); }
 function assertCheckpointId(value: string): void { if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$/.test(value)) throw new Error(`invalid_checkpoint_id: ${value}`); }

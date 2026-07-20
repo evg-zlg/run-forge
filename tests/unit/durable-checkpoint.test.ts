@@ -8,7 +8,8 @@ describe("durable implementation checkpoints", () => {
   it("atomically publishes a portable immutable artifact set", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-checkpoint-"));
     const checkpoint = await persistDurableCheckpoint(root, fixture());
-    expect(checkpoint.manifest).toMatchObject({ checkpointId: "checkpoint-0", status: "available", baseSha: "a".repeat(40) });
+    expect(checkpoint.manifest).toMatchObject({ schemaVersion: 2, taskId: "CHECKPOINT-TASK-1", executionAgreementId: "ea_v1_000000000000000000000000", checkpointId: "checkpoint-0", status: "available", baseSha: "a".repeat(40) });
+    expect(checkpoint.digest).toMatch(/^[a-f0-9]{64}$/);
     expect(checkpoint.manifest.files.map((item) => item.path)).toEqual([
       "patch.diff", "changed-files.json", "validation.json", "usage.json", "executor.json", "safety.json", "unresolved-findings.json"
     ]);
@@ -30,10 +31,23 @@ describe("durable implementation checkpoints", () => {
     await writeFile(checkpoint.patchPath, "tampered patch\n", "utf8");
     await expect(readDurableCheckpoint(root, checkpoint.id)).rejects.toThrow("checkpoint_integrity_error");
   });
+
+  it("reads and digests an intact schema-v1 manifest without rewriting it", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-checkpoint-"));
+    const checkpoint = await persistDurableCheckpoint(root, fixture());
+    const path = join(checkpoint.path, "manifest.json");
+    const current = JSON.parse(await readFile(path, "utf8")) as Record<string, unknown>;
+    delete current.taskId; delete current.executionAgreementId; current.schemaVersion = 1;
+    const legacyBytes = JSON.stringify(current, null, 2) + "\n"; await writeFile(path, legacyBytes, "utf8");
+    const read = await readDurableCheckpoint(root, checkpoint.id);
+    expect(read).toMatchObject({ manifest: { schemaVersion: 1, checkpointId: "checkpoint-0" }, digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
+    expect(await readFile(path, "utf8")).toBe(legacyBytes);
+  });
 });
 
 function fixture() {
   return {
+    taskId: "CHECKPOINT-TASK-1", executionAgreementId: "ea_v1_000000000000000000000000",
     checkpointId: "checkpoint-0", iteration: 0, kind: "implementation" as const,
     baseSha: "a".repeat(40), workspaceSha: null, workspaceState: "dirty" as const,
     patch: "diff --git a/a.ts b/a.ts\n", changedFiles: ["a.ts"], validation: [{ command: "test", exitCode: 0 }],
