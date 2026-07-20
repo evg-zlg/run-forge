@@ -11,101 +11,27 @@ import { assertAgreementAccepted, assertAgreementMatchesTask, negotiateControlPl
 import { boundPublicResult, projectAgreementLifecycle, publicResultLimits, redactPublicValue, settleAcceptedAgreement } from "./manager-results.js";
 import { detectCycle, planCampaignFromGoal, validateCampaignPlan } from "../run/task-run-planner.js";
 import { assertAgreementProjectBinding, buildExecutionAgreementContext } from "./manager-project-context.js";
+import { CampaignCoordinator } from "./campaign-coordinator.js";
 import { listDurableCheckpoints } from "../implementation/durable-checkpoint.js"; import { resumeDurableCheckpoint } from "../implementation/checkpoint-resume.js";
 import { acceptCompletedResult, discardCompletedResult } from "./completed-result-acceptance.js";
 import { exposeCheckpointRepairDigests, startCheckpointRepair, type CheckpointRepairRequest } from "./checkpoint-repair.js";
 import { buildTimeoutContract } from "./timeout-contract.js"; import { acceptValidationCapabilities } from "./validation-negotiation.js";
-import { openRouterReadiness, providerForExecutor, publicImplementationExecutors } from "./provider-routing-projection.js";
-export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
+import { openRouterReadiness, providerForExecutor, publicImplementationExecutors } from "./provider-routing-projection.js"; export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
 const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs, heartbeatIntervalMs = 1_000, staleHeartbeatMs = 15_000, cleanupGraceMs = 2_000;
 type ActiveWorker = { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController }; type ContinuationBinding = { taskId: string; projectId: string | null; repository: string; workingDirectory: string; sourceBranch: string; sourceSha: string };
 export class ControlPlaneManager {
-  private readonly active = new Map<string, ActiveWorker>();
-  private readonly settledExecutions = new Set<string>();
-  private readonly locks = new Map<string, Promise<void>>();
-  private readonly journalHeartbeats = new Map<string, number>();
-  private readonly activeCampaignLoops = new Map<string, Promise<void>>();
-  private watchdog: NodeJS.Timeout | null = null;
-  constructor(
-    public readonly store: ControlPlaneStore,
-    private readonly operations: { runTaskSpec: typeof runTaskSpecFile; recordOwnerDecision: typeof recordOwnerDecision; continueExecution: typeof continueExternalExecution } = { runTaskSpec: runTaskSpecFile, recordOwnerDecision, continueExecution: continueExternalExecution },
-    private readonly timing: { heartbeatIntervalMs: number; staleHeartbeatMs: number; executionTimeoutMs: number; cleanupGraceMs?: number } = { heartbeatIntervalMs, staleHeartbeatMs, executionTimeoutMs, cleanupGraceMs }
-  ) {}
-  async initialize(): Promise<void> { await this.store.initialize(); this.watchdog ??= setInterval(() => void this.watchdogTick(), Math.min(this.timing.staleHeartbeatMs, 5_000)); this.watchdog.unref(); await this.resumeCampaignsOnInitialize(); }
-  async createCampaign(spec: CampaignSpec): Promise<CampaignRecord> {
-    if (!spec.authority.inspect) throw new ControlPlaneError(403, "authority_denied", "inspect authority is required to create a campaign.");
-    if (spec.providerRouting.provider === "openrouter" && spec.providerRouting.fallbackPolicy && spec.providerRouting.fallbackPolicy !== "none") throw new ControlPlaneError(422, "invalid_campaign", "OpenRouter campaigns must set fallbackPolicy='none'.");
-    const now = new Date().toISOString();
-    const id = `cmp_v1_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
-    const record: CampaignRecord = { schemaVersion: 1, id, status: "planning", spec, plan: null, plannerEvidence: null, children: {}, usage: { tokens: 0, costUsd: 0, tasks: 0 }, checkpoints: [], failures: [], result: null, createdAt: now, updatedAt: now };
-    await this.saveCampaign(record);
-    const plan = await this.planCampaign(record);
-    validateCampaignPlan(plan, { maxTasks: spec.limits.maxTasks, maxTokens: spec.limits.maxTokens, maxCostUsd: spec.limits.maxCostUsd }, spec.authority, { requireOpenRouter: spec.providerRouting.provider === "openrouter" });
-    const cycle = detectCycle(plan.nodes.map((item) => ({ id: item.id, dependsOn: item.dependsOn })));
-    if (cycle.length) throw new ControlPlaneError(422, "campaign_cycle_detected", `Campaign plan contains a cycle: ${cycle.join(" -> ")}`);
-    record.plan = plan;
-    record.plannerEvidence = { planner: "internal-campaign-planner-v1", createdAt: now, nodeCount: plan.nodes.length };
-    record.children = Object.fromEntries(plan.nodes.map((node) => [node.id, { nodeId: node.id, dependsOn: node.dependsOn, taskId: null, status: "pending", startedAt: null, finishedAt: null, error: null, accounted: false }]));
-    record.status = "queued";
-    record.updatedAt = new Date().toISOString();
-    await this.saveCampaign(record);
-    this.ensureCampaignLoop(record.id);
-    return record;
+  private readonly active = new Map<string, ActiveWorker>(); private readonly settledExecutions = new Set<string>();
+  private readonly locks = new Map<string, Promise<void>>(); private readonly journalHeartbeats = new Map<string, number>();
+  private readonly campaigns: CampaignCoordinator; private watchdog: NodeJS.Timeout | null = null;
+  constructor(public readonly store: ControlPlaneStore, private readonly operations: { runTaskSpec: typeof runTaskSpecFile; recordOwnerDecision: typeof recordOwnerDecision; continueExecution: typeof continueExternalExecution } = { runTaskSpec: runTaskSpecFile, recordOwnerDecision, continueExecution: continueExternalExecution }, private readonly timing: { heartbeatIntervalMs: number; staleHeartbeatMs: number; executionTimeoutMs: number; cleanupGraceMs?: number } = { heartbeatIntervalMs, staleHeartbeatMs, executionTimeoutMs, cleanupGraceMs }) {
+    this.campaigns = new CampaignCoordinator({ root: this.store.root, planCampaign: (record) => this.planCampaign(record), createTask: (input) => this.createTask(input), getTask: (id) => this.getTask(id), getResult: (id) => this.getResult(id) });
   }
-  async listCampaigns(): Promise<Array<Pick<CampaignRecord, "id" | "status" | "createdAt" | "updatedAt" | "usage">>> { return (await this.readCampaigns()).map((item) => ({ id: item.id, status: item.status, createdAt: item.createdAt, updatedAt: item.updatedAt, usage: item.usage })); }
-  async getCampaign(id: string): Promise<CampaignRecord> { const campaign = await this.readCampaign(id); if (!campaign) throw new ControlPlaneError(404, "campaign_not_found", `Campaign not found: ${id}`); return campaign; }
-  async getCampaignResult(id: string): Promise<Record<string, unknown>> {
-    const campaign = await this.getCampaign(id);
-    if (!["completed", "failed", "on_hold"].includes(campaign.status) || !campaign.result) throw new ControlPlaneError(404, "campaign_result_not_ready", `Campaign result is not ready: ${id}`);
-    return campaign.result;
-  }
-  private async resumeCampaignsOnInitialize(): Promise<void> { for (const campaign of await this.readCampaigns()) if (["planning", "queued", "running"].includes(campaign.status)) this.ensureCampaignLoop(campaign.id); }
-  private ensureCampaignLoop(id: string): void {
-    if (this.activeCampaignLoops.has(id)) return;
-    const loop = this.runCampaign(id).finally(() => this.activeCampaignLoops.delete(id));
-    this.activeCampaignLoops.set(id, loop);
-  }
-  private async runCampaign(id: string): Promise<void> {
-    while (true) {
-      const campaign = await this.readCampaign(id);
-      if (!campaign || !campaign.plan || ["completed", "failed", "on_hold"].includes(campaign.status)) return;
-      campaign.status = "running";
-      let progressed = false;
-      for (const child of Object.values(campaign.children)) {
-        if (!child.taskId || !["queued", "running"].includes(child.status)) continue;
-        const task = await this.getTask(child.taskId).catch(() => null);
-        if (!task) continue;
-        if (task.status === "completed") { child.status = "completed"; child.finishedAt = new Date().toISOString(); progressed = true; if (!child.accounted) { const result = await this.getResult(child.taskId).catch(() => ({})); const usage = aggregateUsageFromValue(result); campaign.usage.tokens += usage.tokens; campaign.usage.costUsd += usage.costUsd; child.evidence = boundPublicResult(result).result; child.accounted = true; campaign.usage.tasks += 1; } }
-        else if (["failed", "interrupted"].includes(task.status)) { child.status = "failed"; child.finishedAt = new Date().toISOString(); child.error = task.error ?? "child_failed"; campaign.status = "failed"; campaign.failures.push({ at: child.finishedAt, nodeId: child.nodeId, taskId: child.taskId, reason: child.error }); }
-        else child.status = "running";
-      }
-      if (campaign.status === "failed") { campaign.result = this.reconcileCampaignResult(campaign); campaign.updatedAt = new Date().toISOString(); await this.saveCampaign(campaign); return; }
-      if (campaign.spec.limits.maxCostUsd !== undefined && campaign.usage.costUsd > campaign.spec.limits.maxCostUsd || campaign.usage.tokens > campaign.spec.limits.maxTokens) { campaign.status = "failed"; campaign.failures.push({ at: new Date().toISOString(), reason: "campaign_budget_exceeded" }); campaign.result = this.reconcileCampaignResult(campaign); campaign.updatedAt = new Date().toISOString(); await this.saveCampaign(campaign); return; }
-      const activeChildren = Object.values(campaign.children).filter((item) => ["queued", "running"].includes(item.status)).length;
-      const slots = Math.max(0, campaign.spec.limits.maxConcurrency - activeChildren);
-      if (slots > 0) {
-        const ready = campaign.plan.nodes.filter((node) => {
-          const child = campaign.children[node.id];
-          if (!child || child.status !== "pending") return false;
-          return node.dependsOn.every((dep) => campaign.children[dep]?.status === "completed");
-        }).slice(0, slots);
-        for (const node of ready) {
-          const child = campaign.children[node.id]!;
-          const task = await this.createTask({ ...(campaign.spec.target.projectId ? { projectId: campaign.spec.target.projectId } : {}), taskSpec: node.taskSpec, authority: campaign.spec.authority, publicationRequested: "none" });
-          child.taskId = task.id; child.status = task.status === "queued" ? "queued" : "running"; child.startedAt = new Date().toISOString();
-          progressed = true;
-        }
-      }
-      const allDone = Object.values(campaign.children).every((child) => child.status === "completed");
-      if (allDone) { campaign.status = "completed"; campaign.result = this.reconcileCampaignResult(campaign); campaign.updatedAt = new Date().toISOString(); await this.saveCampaign(campaign); return; }
-      campaign.updatedAt = new Date().toISOString();
-      await this.saveCampaign(campaign);
-      if (!progressed && Object.values(campaign.children).every((child) => child.status === "pending")) { campaign.status = "on_hold"; campaign.failures.push({ at: new Date().toISOString(), reason: "campaign_no_schedulable_children" }); campaign.result = this.reconcileCampaignResult(campaign); campaign.updatedAt = new Date().toISOString(); await this.saveCampaign(campaign); return; }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-  }
+  async initialize(): Promise<void> { await this.store.initialize(); this.watchdog ??= setInterval(() => void this.watchdogTick(), Math.min(this.timing.staleHeartbeatMs, 5_000)); this.watchdog.unref(); await this.campaigns.initialize(); }
+  async createCampaign(spec: CampaignSpec): Promise<CampaignRecord> { return this.campaigns.createCampaign(spec); }
+  async listCampaigns(): Promise<Array<Pick<CampaignRecord, "id" | "status" | "createdAt" | "updatedAt" | "usage">>> { return this.campaigns.listCampaigns(); } async getCampaign(id: string): Promise<CampaignRecord> { return this.campaigns.getCampaign(id); }
+  async getCampaignResult(id: string): Promise<Record<string, unknown>> { return this.campaigns.getCampaignResult(id); }
   private async planCampaign(record: CampaignRecord): Promise<CampaignPlan> { return planCampaignFromGoal(record.id, record.spec); }
-  close(): void { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; for (const worker of this.active.values()) worker.controller.abort(); this.active.clear(); }
+  close(): void { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; this.campaigns.close(); for (const worker of this.active.values()) worker.controller.abort(); this.active.clear(); }
   async inspectProject(input: { path: string; workingDirectory: string; register: boolean; runtime?: "local" | "docker"; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing" }): Promise<Record<string, unknown>> {
     const report = await buildDoctorReport({ repo: input.path, workingDirectory: input.workingDirectory, runtime: input.runtime, dependencyPreparation: input.dependencyPreparation, publication: "none" });
     let project: ProjectRecord | null = null;
@@ -383,19 +309,7 @@ export class ControlPlaneManager {
   private async withLock<T>(id: string, action: () => Promise<T>): Promise<T> { const previous = this.locks.get(id) ?? Promise.resolve(); let release!: () => void; const next = new Promise<void>((done) => { release = done; }); const tail = previous.then(() => next); this.locks.set(id, tail); await previous; try { return await action(); } finally { release(); if (this.locks.get(id) === tail) this.locks.delete(id); } }
   private async readTask(id: string): Promise<ControlTaskRecord> { const task = await this.store.getTask(id); if (!task) throw new ControlPlaneError(404, "task_not_found", `Task not found: ${id}`, undefined, false, id); return normalizeTask(task); }
   private async requireProject(id: string): Promise<ProjectRecord> { const project = await this.store.getProject(id); if (!project) throw new ControlPlaneError(404, "project_not_found", `Project not found: ${id}`); return project; }
-  private campaignsDir(): string { return join(this.store.root, "campaigns"); }
-  private campaignPath(id: string): string { return join(this.campaignsDir(), `${id}.json`); }
-  private async saveCampaign(campaign: CampaignRecord): Promise<void> { await mkdir(this.campaignsDir(), { recursive: true }); const destination = this.campaignPath(campaign.id); const temp = `${destination}.${process.pid}.${randomUUID()}.tmp`; await writeFile(temp, JSON.stringify(campaign, null, 2) + "\n", "utf8"); await rename(temp, destination); }
-  private async readCampaign(id: string): Promise<CampaignRecord | null> { try { return JSON.parse(await readFile(this.campaignPath(id), "utf8")) as CampaignRecord; } catch { return null; } }
-  private async readCampaigns(): Promise<CampaignRecord[]> {
-    await mkdir(this.campaignsDir(), { recursive: true });
-    const names = (await readdir(this.campaignsDir())).filter((item) => item.endsWith(".json"));
-    const entries = await Promise.all(names.map(async (name) => JSON.parse(await readFile(join(this.campaignsDir(), name), "utf8")) as CampaignRecord));
-    return entries.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-  }
-  private reconcileCampaignResult(campaign: CampaignRecord): Record<string, unknown> { return { schemaVersion: 1, campaignId: campaign.id, status: campaign.status, usage: campaign.usage, failures: campaign.failures, children: Object.values(campaign.children).map((child) => ({ nodeId: child.nodeId, taskId: child.taskId, status: child.status, startedAt: child.startedAt, finishedAt: child.finishedAt, error: child.error })), evidence: Object.values(campaign.children).filter((child) => child.evidence).map((child) => ({ nodeId: child.nodeId, evidence: child.evidence })) }; }
 }
-function aggregateUsageFromValue(value: unknown): { tokens: number; costUsd: number } { const totals = { tokens: 0, costUsd: 0 }; const visit = (current: unknown): void => { if (Array.isArray(current)) current.forEach(visit); else if (current && typeof current === "object") for (const [key, entry] of Object.entries(current as Record<string, unknown>)) { if (typeof entry === "number" && Number.isFinite(entry) && /(token|tokens|tokenUsage|totalTokens)/i.test(key)) totals.tokens += entry; else if (typeof entry === "number" && Number.isFinite(entry) && /(cost|costUsd|usd)/i.test(key)) totals.costUsd += entry; else visit(entry); } }; visit(value); return totals; }
 function progress(now: string, timeoutMs = executionTimeoutMs): ControlTaskRecord["progress"] { return { phase: "queued", operation: "execution", startedAt: null, updatedAt: now, lastHeartbeatAt: null, executionId: null, attempt: 0, workerStatus: "idle", timeoutMs, deadlineAt: null, summary: "Queued for execution.", diagnostic: null }; }
 function runforgeOwns(agreement: ExecutionAgreement, phaseId: "localBranch" | "localCommit"): boolean { const phase = agreement.phases.find((item) => item.phaseId === phaseId); return phase?.requested === true && phase.responsibleParty === "runforge"; }
 function implementationParty(agreement: ExecutionAgreement): "external_session" | "external_system" | null { const phase = agreement.phases.find((item) => item.phaseId === "implementation"); return phase?.requested === true && (phase.responsibleParty === "external_session" || phase.responsibleParty === "external_system") ? phase.responsibleParty : null; }

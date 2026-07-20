@@ -1,4 +1,5 @@
 import type { CampaignPlan, CampaignPlanNode, CampaignSpec, ControlAuthority } from "../control-plane/contracts.js";
+export { detectCycle, topoSortPlan, validateCampaignPlan } from "./campaign-validation.js";
 export type TaskKind = "docs-review" | "code-inspection" | "general-review";
 
 export type PlannedSubtask = {
@@ -96,7 +97,7 @@ export function planCampaignFromGoal(campaignId: string, spec: CampaignSpec): Ca
           timeoutMs: 120_000,
           retry: { maxAttempts: 1 },
           ...(spec.limits.maxCostUsd === undefined ? {} : { costBudgetUsd: spec.limits.maxCostUsd }),
-          fallbackPolicy: spec.providerRouting.provider === "openrouter" ? "none" : spec.providerRouting.fallbackPolicy ?? "same_provider"
+          fallbackPolicy: spec.providerRouting.fallbackPolicy ?? (spec.providerRouting.provider === "openrouter" ? "none" : "same_provider")
         },
         authority: { profile: executionMode === "implementation" ? "bounded-implementation" : "read-only", envelopeFile: null, forbiddenAreas: ["merge", "deploy", "database", "production", "secrets"], allowProviderCalls: Boolean(spec.authority.providerCalls), allowNetwork: Boolean(spec.authority.network) },
         runtime: { preference: "local-disposable", dockerImage: "runforge:local", dependencyPreparation: "if-needed", externalNetwork: spec.authority.network ? "allowed" : "denied" },
@@ -112,34 +113,6 @@ export function planCampaignFromGoal(campaignId: string, spec: CampaignSpec): Ca
     };
   });
   return { schemaVersion: 1, campaignId, nodes, estimatedTokens: nodes.reduce((n, item) => n + (item.estimatedTokens ?? 0), 0), ...(spec.limits.maxCostUsd === undefined ? {} : { estimatedCostUsd: nodes.reduce((n, item) => n + (item.estimatedCostUsd ?? 0), 0) }) };
-}
-
-export function detectCycle(nodes: Array<{ id: string; dependsOn: string[] }>): string[] {
-  const visiting = new Set<string>(), visited = new Set<string>(), stack: string[] = [], graph = new Map(nodes.map((node) => [node.id, node.dependsOn]));
-  const walk = (id: string): string[] => {
-    if (visiting.has(id)) return [...stack.slice(stack.indexOf(id)), id];
-    if (visited.has(id)) return [];
-    visiting.add(id); stack.push(id);
-    for (const dep of graph.get(id) ?? []) { const found = walk(dep); if (found.length) return found; }
-    stack.pop(); visiting.delete(id); visited.add(id); return [];
-  };
-  for (const node of nodes) { const cycle = walk(node.id); if (cycle.length) return cycle; }
-  return [];
-}
-
-export function topoSortPlan(nodes: Array<{ id: string; dependsOn: string[] }>): string[] {
-  const deps = new Map(nodes.map((node) => [node.id, new Set(node.dependsOn)])), ready = [...nodes.filter((node) => node.dependsOn.length === 0).map((node) => node.id)], ordered: string[] = [];
-  while (ready.length) { const id = ready.shift()!; ordered.push(id); for (const [otherId, otherDeps] of deps) if (otherDeps.delete(id) && otherDeps.size === 0) ready.push(otherId); }
-  return ordered;
-}
-
-export function validateCampaignPlan(plan: CampaignPlan, limits: { maxTasks: number; maxTokens: number; maxCostUsd?: number }, authority: ControlAuthority, options: { requireOpenRouter: boolean }): void {
-  const ids = new Set<string>(); if (!Array.isArray(plan.nodes) || !plan.nodes.length) throw new Error("campaign plan must include at least one node.");
-  if (plan.nodes.length > limits.maxTasks) throw new Error("campaign plan exceeds maxTasks.");
-  for (const node of plan.nodes) { if (ids.has(node.id)) throw new Error(`duplicate campaign node id: ${node.id}`); ids.add(node.id); for (const dep of node.dependsOn) if (!plan.nodes.some((item) => item.id === dep)) throw new Error(`campaign dependency is missing: ${dep}`); const task = node.taskSpec as Record<string, any>; const taskAuthority = task.authority ?? {}; if (taskAuthority.allowProviderCalls && authority.providerCalls !== true) throw new Error(`campaign authority expansion rejected for node ${node.id}: providerCalls`); if (taskAuthority.allowNetwork && authority.network !== true) throw new Error(`campaign authority expansion rejected for node ${node.id}: network`); if (object(task.merge).policy && object(task.merge).policy !== "never") throw new Error(`dangerous phase requested in node ${node.id}: merge`); if (object(task.deploy).policy && object(task.deploy).policy !== "never") throw new Error(`dangerous phase requested in node ${node.id}: deploy`); if (object(task.git).publication && object(task.git).publication !== "none") throw new Error(`dangerous phase requested in node ${node.id}: publication`); const text = JSON.stringify(task).toLowerCase(); if (/\b(?:database|production|secret|merge|deploy)\b/.test(text) && /\bpolicy"\s*:\s*"always|requested"\s*:\s*true/.test(text)) throw new Error(`dangerous requested phase in node ${node.id}`); if (options.requireOpenRouter) { const route = object(task.providerRouting); if (route.provider !== "openrouter") throw new Error(`openrouter campaign node ${node.id} attempted local provider.`); if ((route.fallbackPolicy ?? "none") !== "none") throw new Error(`openrouter campaign node ${node.id} attempted fallback expansion.`); } }
-  const cycle = detectCycle(plan.nodes.map((node) => ({ id: node.id, dependsOn: node.dependsOn }))); if (cycle.length) throw new Error(`campaign plan has cycle: ${cycle.join(" -> ")}`);
-  const estimatedTokens = plan.nodes.reduce((total, node) => total + (node.estimatedTokens ?? 0), 0); if (estimatedTokens > limits.maxTokens) throw new Error("campaign token budget exceeded by planned estimate.");
-  const estimatedCost = plan.nodes.reduce((total, node) => total + (node.estimatedCostUsd ?? 0), 0); if (limits.maxCostUsd !== undefined && estimatedCost > limits.maxCostUsd) throw new Error("campaign cost budget exceeded by planned estimate.");
 }
 
 function classifyTask(task: string): TaskKind {
@@ -365,4 +338,3 @@ function score(value: string, terms: string[]): number {
     return total + (matched ? 1 : 0);
   }, 0);
 }
-function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
