@@ -31,7 +31,8 @@ describe("OpenRouter executor safety", () => {
     const artifactRoot = await mkdtemp(join(tmpdir(), "runforge-openrouter-accounting-"));
     const request = { artifactRoot, signal: undefined, forbiddenZones: [], spec: { execution: { maxPatchBytes: 10_000, maxChangedFiles: 10 }, providerRouting: { models: { implementer: "test/model" }, maxCalls: 1, retry: { maxAttempts: 1 }, timeoutMs: 100, tokenBudget: { total: 100, perPhase: { implementer: 100 } } } } } as any;
     const result = await runOpenRouterAgent(request, artifactRoot, "implement", "implementer", [], 0);
-    expect(result).toMatchObject({ exitCode: 1, attempts: 1, requestId: "request-1", tokenUsage: 18, inputTokens: 11, outputTokens: 7, reasoningTokens: 3, costUsd: 0.001 });
+    expect(result).toMatchObject({ exitCode: 1, attempts: 1, requestId: "request-1", tokenUsage: 18, inputTokens: 11, outputTokens: 7, reasoningTokens: 3, costUsd: 0.001, stdout: "not a diff" });
+    expect(await readFile(join(artifactRoot, result.stdoutArtifact), "utf8")).toBe("not a diff");
   });
 
   it("accounts maxCalls as global HTTP attempts across phase invocations", async () => {
