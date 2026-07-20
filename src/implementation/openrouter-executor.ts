@@ -8,7 +8,7 @@ import { scanSecrets } from "../security/secret-scan.js";
 import type { ImplementationExecutorCapability, ImplementationExecutorRequest } from "./executor.js";
 
 export type OpenRouterPhase = "planner" | "implementer" | "repair" | "reviewer";
-export type OpenRouterRun = { startedAt: string; finishedAt: string; durationMs: number; exitCode: number | null; signal: NodeJS.Signals | null; summary: string; cancelled: boolean; timedOut: boolean; stdout: string; stderr: string; truncation: { stdout: boolean; stderr: boolean; limitBytes: number }; failureReason: string | null; tokenUsage: number | null; stdoutArtifact: string; stderrArtifact: string; requestId: string | null; costUsd: number | null; attempts: number };
+export type OpenRouterRun = { startedAt: string; finishedAt: string; durationMs: number; exitCode: number | null; signal: NodeJS.Signals | null; summary: string; cancelled: boolean; timedOut: boolean; stdout: string; stderr: string; truncation: { stdout: boolean; stderr: boolean; limitBytes: number }; failureReason: string | null; tokenUsage: number | null; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; stdoutArtifact: string; stderrArtifact: string; requestId: string | null; costUsd: number | null; attempts: number };
 type Selection = { selected: ImplementationExecutorCapability | null; reason: string; rejected: Array<{ id: string; reason: string }> };
 const attemptAccounting = new WeakMap<Array<Record<string, unknown>>, number>();
 const safeExcerptBytes = 16_384;
@@ -39,21 +39,29 @@ export async function runOpenRouterAgent(request: ImplementationExecutorRequest,
   if (routing.costBudgetUsd !== undefined && costUsed >= routing.costBudgetUsd) throw new Error("openrouter_cost_budget_exceeded");
   const started = Date.now(), startedAt = new Date(started).toISOString(), stdoutArtifact = `provider/iteration-${iteration}.stdout.log`, stderrArtifact = `provider/iteration-${iteration}.stderr.log`;
   let attempts = 0;
+  let response: Awaited<ReturnType<typeof executeOpenRouterChatCompletion>> | null = null;
   await mkdir(join(request.artifactRoot, "provider"), { recursive: true });
   try {
-    const response = await executeOpenRouterChatCompletion({ model: routing.models[phase]!, messages: [{ role: "system", content: phase === "planner" || phase === "reviewer" ? "Return concise structured implementation analysis only." : "Return only a unified git diff; no prose, secrets, commits, or publication actions." }, { role: "user", content: prompt }], timeoutMs: routing.timeoutMs, maxCalls: Math.min(routing.retry.maxAttempts, remainingAttempts), maxTokens: Math.min(phaseTokensRemaining, totalTokensRemaining), signal: request.signal });
+    response = await executeOpenRouterChatCompletion({ model: routing.models[phase]!, messages: [{ role: "system", content: phase === "planner" || phase === "reviewer" ? "Return concise structured implementation analysis only." : "Return only a unified git diff; no prose, secrets, commits, or publication actions." }, { role: "user", content: prompt }], timeoutMs: routing.timeoutMs, maxCalls: Math.min(routing.retry.maxAttempts, remainingAttempts), maxTokens: Math.min(phaseTokensRemaining, totalTokensRemaining), signal: request.signal });
     attempts = response.attempts; attemptAccounting.set(previous, usedAttempts + attempts);
     const rawOutput = response.content;
     if (Buffer.byteLength(rawOutput) > request.spec.execution.maxPatchBytes) throw new Error(`openrouter_response_too_large: exceeds ${request.spec.execution.maxPatchBytes} bytes`);
+    const applicableOutput = phase === "implementer" || phase === "repair" ? normalizeOpenRouterDiff(rawOutput) : rawOutput;
     if ((phase === "implementer" || phase === "repair") && rawOutput.trim()) {
-      validateOpenRouterDiff(rawOutput, { maxBytes: request.spec.execution.maxPatchBytes, maxChangedFiles: request.spec.execution.maxChangedFiles, forbiddenZones: request.forbiddenZones });
-      await applyDiff(cwd, rawOutput);
+      validateOpenRouterDiff(applicableOutput, { maxBytes: request.spec.execution.maxPatchBytes, maxChangedFiles: request.spec.execution.maxChangedFiles, forbiddenZones: request.forbiddenZones });
+      await applyDiff(cwd, applicableOutput);
     }
-    const output = safeProviderExcerpt(rawOutput);
+    const output = safeProviderExcerpt(applicableOutput);
     await writeFile(join(request.artifactRoot, stdoutArtifact), output); await writeFile(join(request.artifactRoot, stderrArtifact), "");
     const tokenUsage = response.usage.totalTokens ?? ((response.usage.inputTokens ?? 0) - (response.usage.cachedInputTokens ?? 0) + (response.usage.outputTokens ?? 0));
-    return { startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - started, exitCode: 0, signal: null, summary: output, cancelled: false, timedOut: false, stdout: output, stderr: "", truncation: { stdout: Buffer.byteLength(rawOutput) > Buffer.byteLength(output), stderr: false, limitBytes: safeExcerptBytes }, failureReason: null, tokenUsage, stdoutArtifact, stderrArtifact, requestId: response.requestId, costUsd: response.usage.costUsd, attempts };
-  } catch (error) { const failure = error instanceof OpenRouterExecutionError ? error : null; attempts = Math.max(attempts, failure?.options.attempts ?? 0); if (attempts) attemptAccounting.set(previous, usedAttempts + attempts); const reason = failure?.code === "missing_credential" ? "openrouter_credentials_unavailable" : failure?.code === "cancelled" ? "cancelled" : failure?.code === "timeout" ? "OpenRouter provider timed out." : redact(error instanceof Error ? error.message : "OpenRouter provider failed."); await writeFile(join(request.artifactRoot, stdoutArtifact), ""); await writeFile(join(request.artifactRoot, stderrArtifact), reason); return { startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - started, exitCode: 1, signal: null, summary: "", cancelled: failure?.code === "cancelled", timedOut: failure?.code === "timeout", stdout: "", stderr: reason, truncation: { stdout: false, stderr: false, limitBytes: safeExcerptBytes }, failureReason: reason, tokenUsage: null, stdoutArtifact, stderrArtifact, requestId: null, costUsd: null, attempts }; }
+    return { startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - started, exitCode: 0, signal: null, summary: output, cancelled: false, timedOut: false, stdout: output, stderr: "", truncation: { stdout: Buffer.byteLength(rawOutput) > Buffer.byteLength(output), stderr: false, limitBytes: safeExcerptBytes }, failureReason: null, tokenUsage, inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens, reasoningTokens: response.usage.reasoningTokens, stdoutArtifact, stderrArtifact, requestId: response.requestId, costUsd: response.usage.costUsd, attempts };
+  } catch (error) { const failure = error instanceof OpenRouterExecutionError ? error : null; attempts = Math.max(attempts, response?.attempts ?? failure?.options.attempts ?? 0); if (attempts) attemptAccounting.set(previous, usedAttempts + attempts); const reason = failure?.code === "missing_credential" ? "openrouter_credentials_unavailable" : failure?.code === "cancelled" ? "cancelled" : failure?.code === "timeout" ? "OpenRouter provider timed out." : redact(error instanceof Error ? error.message : "OpenRouter provider failed."); await writeFile(join(request.artifactRoot, stdoutArtifact), ""); await writeFile(join(request.artifactRoot, stderrArtifact), reason); const usage = response?.usage; const tokenUsage = usage ? usage.totalTokens ?? ((usage.inputTokens ?? 0) - (usage.cachedInputTokens ?? 0) + (usage.outputTokens ?? 0)) : null; return { startedAt, finishedAt: new Date().toISOString(), durationMs: Date.now() - started, exitCode: 1, signal: null, summary: "", cancelled: failure?.code === "cancelled", timedOut: failure?.code === "timeout", stdout: "", stderr: reason, truncation: { stdout: false, stderr: false, limitBytes: safeExcerptBytes }, failureReason: reason, tokenUsage, inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null, reasoningTokens: usage?.reasoningTokens ?? null, stdoutArtifact, stderrArtifact, requestId: response?.requestId ?? null, costUsd: usage?.costUsd ?? null, attempts }; }
+}
+
+export function normalizeOpenRouterDiff(value: string): string {
+  const trimmed = value.trim();
+  const fenced = trimmed.match(/^```(?:diff|patch)?\s*\n([\s\S]*?)\n```$/i);
+  return (fenced?.[1] ?? trimmed).trimEnd() + "\n";
 }
 
 export function validateOpenRouterDiff(diff: string, limits: { maxBytes: number; maxChangedFiles: number; forbiddenZones: string[] }): string[] {

@@ -2,7 +2,7 @@ import { mkdtemp, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { openRouterCapability, runOpenRouterAgent, validateOpenRouterDiff } from "../../src/implementation/openrouter-executor.js";
+import { normalizeOpenRouterDiff, openRouterCapability, runOpenRouterAgent, validateOpenRouterDiff } from "../../src/implementation/openrouter-executor.js";
 
 const ok = (content: string) => new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }], usage: { total_tokens: 2 } }), { status: 200 });
 const diff = (path: string, added = "safe") => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+${added}\n`;
@@ -19,6 +19,19 @@ describe("OpenRouter executor safety", () => {
     expect(() => validateOpenRouterDiff(diff(".env"), { maxBytes: 1_000, maxChangedFiles: 2, forbiddenZones: [".env", "secrets"] })).toThrow("forbidden");
     expect(() => validateOpenRouterDiff(diff("src/config.ts", "API_KEY=sk-abcdefghijklmnopqrstuvwxyz123456"), { maxBytes: 2_000, maxChangedFiles: 2, forbiddenZones: [] })).toThrow("secret scan failed");
     expect(() => validateOpenRouterDiff(diff("src/large.ts", "x".repeat(500)), { maxBytes: 100, maxChangedFiles: 2, forbiddenZones: [] })).toThrow("exceeds 100 bytes");
+  });
+
+  it("normalizes a single fenced unified diff", () => {
+    expect(normalizeOpenRouterDiff(`\`\`\`diff\n${diff("src/value.ts")}\`\`\``)).toBe(diff("src/value.ts"));
+  });
+
+  it("preserves provider usage when a successful response is rejected after receipt", async () => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "not a diff" }, finish_reason: "stop" }], usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18, completion_tokens_details: { reasoning_tokens: 3 }, cost: 0.001 } }), { status: 200, headers: { "x-request-id": "request-1" } })));
+    const artifactRoot = await mkdtemp(join(tmpdir(), "runforge-openrouter-accounting-"));
+    const request = { artifactRoot, signal: undefined, forbiddenZones: [], spec: { execution: { maxPatchBytes: 10_000, maxChangedFiles: 10 }, providerRouting: { models: { implementer: "test/model" }, maxCalls: 1, retry: { maxAttempts: 1 }, timeoutMs: 100, tokenBudget: { total: 100, perPhase: { implementer: 100 } } } } } as any;
+    const result = await runOpenRouterAgent(request, artifactRoot, "implement", "implementer", [], 0);
+    expect(result).toMatchObject({ exitCode: 1, attempts: 1, requestId: "request-1", tokenUsage: 18, inputTokens: 11, outputTokens: 7, reasoningTokens: 3, costUsd: 0.001 });
   });
 
   it("accounts maxCalls as global HTTP attempts across phase invocations", async () => {
