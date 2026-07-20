@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from "node:fs/promises";
+import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -33,6 +33,18 @@ describe("OpenRouter executor safety", () => {
     const result = await runOpenRouterAgent(request, artifactRoot, "implement", "implementer", [], 0);
     expect(result).toMatchObject({ exitCode: 1, attempts: 1, requestId: "request-1", tokenUsage: 18, inputTokens: 11, outputTokens: 7, reasoningTokens: 3, costUsd: 0.001, stdout: "not a diff" });
     expect(await readFile(join(artifactRoot, result.stdoutArtifact), "utf8")).toBe("not a diff");
+  });
+
+  it("safely recounts otherwise valid model-generated hunk sizes before apply", async () => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    const artifactRoot = await mkdtemp(join(tmpdir(), "runforge-openrouter-recount-"));
+    await writeFile(join(artifactRoot, "value.txt"), "old\n");
+    const patch = "diff --git a/value.txt b/value.txt\n--- a/value.txt\n+++ b/value.txt\n@@ -1,1 +1,3 @@\n-old\n+new\n";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(patch)));
+    const request = { artifactRoot, signal: undefined, forbiddenZones: [], spec: { execution: { maxPatchBytes: 10_000, maxChangedFiles: 2 }, providerRouting: { models: { implementer: "test/model" }, maxCalls: 1, retry: { maxAttempts: 1 }, timeoutMs: 100, tokenBudget: { total: 100, perPhase: { implementer: 100 } } } } } as any;
+    const result = await runOpenRouterAgent(request, artifactRoot, "implement", "implementer", [], 0);
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(join(artifactRoot, "value.txt"), "utf8")).toBe("new\n");
   });
 
   it("accounts maxCalls as global HTTP attempts across phase invocations", async () => {
