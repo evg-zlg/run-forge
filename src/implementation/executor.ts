@@ -16,6 +16,7 @@ import {
 import { createGitEvidenceBinding, parseGitEvidenceCommand } from "../validation/git-evidence-lane.js";
 import { detectPackageValidationCapabilities } from "./validation-runtime-capabilities.js";
 import { runValidation, type CommandDiagnostic } from "./validation-command-runner.js";
+import { runSemanticReview, semanticReviewBudgetOverrun, semanticReviewPhaseTimeoutMs, semanticTaskSpecContext, semanticValidationOutcome, uniqueReviewLimitations, type SemanticReviewResult } from "./semantic-review.js";
 
 const execFileAsync = promisify(execFile);
 const credentialCache = new Map<string, { at: number; ready: boolean }>();
@@ -42,8 +43,9 @@ export type ImplementationExecutorResult = {
   ownerGate: { required: boolean; reason: string | null }; safetyAssertions: Record<string, boolean>;
   diagnostics: Record<string, unknown>; localBranch: string | null; localCommit: string | null; patchPackage: string | null;
   providerCalls: Array<Record<string, unknown>>; selectedExecutor: { id: string; model: string | null };
+  review: { structural: { kind: "structural"; status: ValidationAggregateStatus; evidence: string[] }; semantic: SemanticReviewResult };
   checkpoints: Array<{ id: string; path: string; patchPath: string; digest: string; iteration: number; validationPassed: boolean }>;
-  budget: { exceeded: boolean; overrunPhase: "implementation" | "repair" | null; requestedTokens: number; actualTokens: number; accounting: "provider" | "synthetic"; costUsd: null };
+  budget: { exceeded: boolean; overrunPhase: "implementation" | "repair" | "review" | null; requestedTokens: number; actualTokens: number; accounting: "provider" | "synthetic"; costUsd: null };
 };
 
 export async function discoverImplementationExecutors(): Promise<ImplementationExecutorCapability[]> {
@@ -164,6 +166,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   let budgetExceeded = false;
   let overrunPhase: ImplementationExecutorResult["budget"]["overrunPhase"] = null;
   let overrunActual = 0, overrunLimit = request.spec.execution.maxProviderTokens;
+  let semanticReview: SemanticReviewResult = { kind: "semantic", status: "forbidden", performed: false, selectedReviewer: { provider: null, model: null }, reviewer: { provider: null, model: null, invocationId: null }, confidence: "unknown", limitations: ["Semantic review has not been reached."], findings: [], evidence: [], delegation: { party: "external_session", reason: "Semantic review has not been reached.", exactAction: "Perform an independent semantic review and attach structured findings." } };
   try {
     const firstIteration = request.checkpointRepair ? 1 : 0;
     for (let iteration = firstIteration; iteration <= request.spec.execution.maxRepairIterations; iteration += 1) {
@@ -212,7 +215,37 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       budgetExceeded = totalExceeded || phaseExceeded;
       if (budgetExceeded) { overrunPhase = phase === "implement" ? "implementation" : "repair"; overrunActual = phaseExceeded ? call.tokenUsage ?? 0 : actualTokens; overrunLimit = phaseExceeded ? phaseLimit : request.spec.execution.maxProviderTokens; }
       if (safetyErrors.length) { status = "blocked_with_owner_gate"; break; }
-      if (validationPassed) { status = "implemented_and_validated"; break; }
+      if (validationPassed) {
+        const reviewOwner = executionPhaseOwner(request.spec.executionAgreement.profile, "independentReview", request.spec.executionAgreement.phaseOwnership);
+        const reviewTimeoutMs = semanticReviewPhaseTimeoutMs(request.spec.execution.timeoutMs, request.spec.execution.phaseBudgets.review, request.spec.execution.maxProviderTokens);
+        const reviewDeadlineAt = new Date(Date.now() + reviewTimeoutMs).toISOString(), selectedReviewer = reviewOwner === "runforge" ? { provider: executor.id, model: executor.model } : { provider: null, model: null };
+        semanticReview = await runSemanticReview({
+          task: request.spec.task.text, goal: request.spec.task.goal, acceptanceCriteria: request.acceptanceCriteria,
+          changedFiles, patch, structuralEvidence: validations.flatMap((item) => item.artifactPaths),
+          taskSpecContext: semanticTaskSpecContext(request.spec),
+          validationOutcomes: validations.map(semanticValidationOutcome),
+          knownLimitations: uniqueReviewLimitations([...unresolved, ...validations.filter((item) => item.outcome !== "passed").map((item) => `${item.command}: ${item.outcome}${item.failureReason ? ` (${item.failureReason})` : ""}`)]),
+          independentReview: { executionAgreementId: request.executionAgreementId, responsibleParty: reviewOwner },
+          validatedCheckpoint: { id: checkpoint.id, digest: checkpoint.digest, path: relative(request.artifactRoot, checkpoint.path) },
+          reviewBudget: { tokenLimit: request.spec.execution.phaseBudgets.review, timeoutMs: reviewTimeoutMs, deadlineAt: reviewDeadlineAt },
+          selectedReviewer,
+          allowed: !budgetExceeded && request.spec.execution.phaseBudgets.review > 0 && reviewOwner === "runforge" && request.authorityEnvelope.allowProviderCalls && request.authorityEnvelope.allowNetwork,
+          delegatedParty: budgetExceeded || reviewOwner === "owner" ? "owner" : "external_session",
+          invoke: async (reviewPrompt) => {
+            await progress(request, "review", "Invoking the independent semantic reviewer after structural validation.");
+            const call = await runAgent(executorCommand, executor.model, executionRoot, reviewPrompt, reviewTimeoutMs, request.signal, request.artifactRoot, "semantic-review");
+            const invocationId = `semantic-review-${iteration}`;
+            providerCalls.push({ command: "local-coding-agent", purpose: "semantic-review", invocationId, cwd: executionRoot, executor: executor.id, runtime: "local-disposable", executorId: executor.id, model: executor.model, providerCalls: true, networkAuthorized: true, usageAccounting: process.env.RUNFORGE_USAGE_ACCOUNTING === "synthetic" ? "synthetic" : "provider", iteration, startedAt: call.startedAt, finishedAt: call.finishedAt, durationMs: call.durationMs, exitCode: call.exitCode, signal: call.signal, timedOut: call.timedOut, stdout: call.stdout, stderr: call.stderr, truncation: call.truncation, artifactPaths: [call.stdoutArtifact, call.stderrArtifact], failureReason: call.failureReason, classification: call.exitCode === 0 ? null : "provider", tokenUsage: call.tokenUsage, tokenBudget: request.spec.execution.phaseBudgets.review, timeoutMs: reviewTimeoutMs, deadlineAt: reviewDeadlineAt, validatedCheckpointId: checkpoint.id, stdoutArtifact: call.stdoutArtifact, stderrArtifact: call.stderrArtifact });
+            if (call.exitCode !== 0) throw new Error(call.failureReason ?? `reviewer exited ${call.exitCode ?? "by signal"}`);
+            return { provider: executor.id, model: executor.model, invocationId, stdout: call.stdout, stderr: call.stderr, evidence: [call.stdoutArtifact, call.stderrArtifact] };
+          },
+        });
+        const reviewOverrun = semanticReviewBudgetOverrun(providerCalls, request.spec.execution.phaseBudgets.review, request.spec.execution.maxProviderTokens);
+        if (reviewOverrun) { budgetExceeded = true; overrunPhase = "review"; overrunActual = reviewOverrun.actual; overrunLimit = reviewOverrun.limit; }
+        status = "implemented_and_validated";
+        if (semanticReview.findings.some((finding) => finding.blocking)) unresolved = semanticReview.findings.filter((finding) => finding.blocking).map((finding) => `${finding.severity} ${finding.file}:${finding.location} ${finding.category}: ${finding.recommendation}`);
+        break;
+      }
       if (validationAggregate !== "product_failed") { status = "failed_with_diagnostics"; break; }
       if (budgetExceeded) { status = "blocked_with_owner_gate"; break; }
     }
@@ -236,10 +269,11 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       plan, changedFiles, patch, validationResults: validations, validationPlan,
       validationAggregate: aggregateValidationOutcomes(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole }))),
       unresolvedFindings: unresolved, status,
-      ownerGate: { required: status === "blocked_with_owner_gate" || budgetExceeded, reason: budgetExceeded ? `Provider token budget exceeded after durable checkpoint in ${overrunPhase}: ${overrunActual} > ${overrunLimit}.` : status === "blocked_with_owner_gate" ? unresolved.join(" ") : null },
+      ownerGate: { required: status === "blocked_with_owner_gate" || budgetExceeded || semanticReview.findings.some((finding) => finding.blocking), reason: budgetExceeded ? `Provider token budget exceeded after durable checkpoint in ${overrunPhase}: ${overrunActual} > ${overrunLimit}.` : unresolved.length ? unresolved.join(" ") : null },
       safetyAssertions: { sourceShaUnchanged: sourceAfter === sourceBefore.trim(), sourceWorktreeStateUnchanged: sourceStatusAfter === sourceStatusBefore, targetMainMutation: false, targetMainPush: false, merge: false, deploy: false, publicationPerformed: false, forbiddenZonesRespected: !unresolved.some((item) => item.includes("forbidden")), secretScanPassed: !unresolved.includes("Secret scan rejected the patch.") },
       diagnostics: { agentSummary, sourceBefore: sourceBefore.trim(), sourceAfter, sourceWorktreeStatusBefore: sourceStatusBefore, sourceWorktreeStatusAfter: sourceStatusAfter, dirtyPolicy, contextPlan, selectionReason: selection.reason, rejectedAlternatives: selection.rejected, workspace: relative(request.targetRepository, workspace), ...(request.checkpointRepair ? { checkpointRepair: { sourceCheckpointId: request.checkpointRepair.checkpointId, sourceCheckpointDigest: request.checkpointRepair.checkpointDigest, sourcePatch: request.checkpointRepair.patchPath, restoredOnBaseSha: request.spec.target.expectedSha, disposableWorkspace: true } } : {}) },
       localBranch, localCommit, patchPackage, providerCalls, checkpoints,
+      review: { structural: { kind: "structural", status: aggregateValidationOutcomes(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole }))), evidence: validations.flatMap((item) => item.artifactPaths) }, semantic: semanticReview },
       budget: { exceeded: budgetExceeded, overrunPhase, requestedTokens: request.spec.execution.maxProviderTokens, actualTokens: providerCalls.reduce((sum, item) => sum + (typeof item.tokenUsage === "number" ? item.tokenUsage : 0), 0), accounting: providerCalls.some((item) => item.usageAccounting === "synthetic") ? "synthetic" : "provider", costUsd: null },
       selectedExecutor: { id: executor.id, model: executor.model }
     };
@@ -248,7 +282,6 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
     await rm(workspace, { recursive: true, force: true });
   }
 }
-
 function capability(command: string | null, status: ExecutorStatus, limitations: string[], model: string | null = process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null): ImplementationExecutorCapability { const result = { id: implementationExecutorContract.id, status, supports: [...implementationExecutorContract.modes], providerCalls: true, runtime: [...implementationExecutorContract.runtimes], providerRequirements: ["existing local coding-agent credential mechanism"], networkRequirements: ["provider transport; denied unless separately authorized"], maxLimits: implementationExecutorContract.maxLimits, limitations, model } as ImplementationExecutorCapability; Object.defineProperty(result, "command", { value: command, enumerable: false }); return result; }
 async function configuredCommand(): Promise<{ command: string; model: string | null } | null> { const env = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND?.trim(); if (env) return { command: env, model: process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null }; const config = await loadAdminConfig(); const provider = config.config.providers.find((item) => item.id === "codex-cli" && item.type === "cli" && item.enabled && item.command); if (provider?.command) return { command: provider.command, model: provider.defaultModel ?? null }; return executableAvailable("codex").then((ready) => ready ? { command: "codex", model: process.env.RUNFORGE_IMPLEMENTATION_MODEL ?? null } : null); }
 async function executableAvailable(command: string): Promise<boolean> { if (command.includes("/")) return access(command).then(() => true, () => false); return execFileAsync("sh", ["-c", `command -v "$1" >/dev/null 2>&1`, "sh", command]).then(() => true, () => false); }
@@ -286,7 +319,6 @@ async function progress(request: ImplementationExecutorRequest, phase: string, d
 function validateChangedPaths(files: string[], zones: string[], max: number): string[] { const errors: string[] = []; if (files.length > max) errors.push(`Changed files exceed limit ${max}.`); const pathZones = zones.filter((zone) => !/\s/.test(zone)).map((zone) => zone.replace(/^\.\//, "").replace(/\*\*|\*/g, "").replace(/\/$/, "")); for (const file of files) { if (file.startsWith("../") || file.startsWith("/")) errors.push(`Path escapes workspace: ${file}.`); const zone = pathZones.find((item) => item && (file === item || file.startsWith(`${item}/`))); if (zone) errors.push(`Changed path is forbidden: ${file} (${zone}).`); } return errors; }
 function unsafeDirtyLines(status: string): string[] { return lines(status).filter((line) => { const path = line.slice(3).replace(/^"|"$/g, ""); return !path.startsWith(".runforge/") && !path.startsWith(".runforge-") && !path.startsWith("artifacts/"); }); }
 function buildPrompt(request: ImplementationExecutorRequest, iteration: number, validations: CommandDiagnostic[]): string { const context = request.spec.discovery.explicitFiles; return [`You are the RunForge bounded implementation executor. Work only in the current disposable Git worktree.`, `Task: ${request.spec.task.text}`, `Goal: ${request.spec.task.goal}`, `Acceptance criteria:\n${request.acceptanceCriteria.map((item) => `- ${item}`).join("\n")}`, `Bounded context profile: ${request.spec.discovery.profile}; max ${request.spec.discovery.maxFiles} files, ${request.spec.discovery.maxBytes} bytes, approximately ${request.spec.discovery.maxTokens} tokens. Start with only these explicit files:\n${context.length ? context.map((item) => `- ${item}`).join("\n") : "- Files named by the task and validation commands"}\nStop condition: ${request.spec.discovery.stopCondition}\nDo not enumerate or read the full repository/governance corpus. If context must expand, state the exact file and reason first.`, `Forbidden zones:\n${request.forbiddenZones.map((item) => `- ${item}`).join("\n")}`, `Validation commands:\n${request.validationProfile.commands.map((item) => `- ${item}`).join("\n")}`, `Provider token budget: at most ${request.spec.execution.maxProviderTokens} total and ${request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"]} for this phase.`, ...(request.checkpointRepair ? [`Verified repair source: checkpoint ${request.checkpointRepair.checkpointId} (${request.checkpointRepair.checkpointDigest}).${request.checkpointRepair.repairIntent ? ` Bounded owner repair intent: ${request.checkpointRepair.repairIntent}` : ""}`] : []), `Iteration: ${iteration}. ${iteration ? `Repair these failures:\n${validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}\nstdout: ${item.stdout}\nstderr: ${item.stderr}`).join("\n")}` : "Inspect, plan, implement, and add/update tests as required."}`, `Do not create a Git commit; leave changes uncommitted so RunForge can validate and create the final local commit.`, `Do not push, open a PR, merge, deploy, access secrets/DB/production, or modify forbidden paths. Do not merely propose a patch: edit files and validate. If no change is required, say exactly 'no change required' with evidence. If semantics are ambiguous, stop and say 'ambiguous product decision'.`].join("\n\n"); }
-
 async function buildContextPlan(request: ImplementationExecutorRequest, root: string): Promise<Record<string, unknown>> {
   const mentioned = request.spec.task.text.match(/(?:src|tests|scripts|schemas|docs|config)\/[A-Za-z0-9._/-]+/g) ?? [];
   const files = [...new Set([...request.spec.discovery.explicitFiles, ...mentioned])].slice(0, request.spec.discovery.maxFiles);
@@ -294,8 +326,7 @@ async function buildContextPlan(request: ImplementationExecutorRequest, root: st
   const totalBytes = reads.reduce((sum, item) => sum + ("bytes" in item && typeof item.bytes === "number" ? item.bytes : 0), 0);
   return { schemaVersion: 1, profile: request.spec.discovery.profile, limits: { maxFiles: request.spec.discovery.maxFiles, maxBytes: request.spec.discovery.maxBytes, maxTokens: request.spec.discovery.maxTokens }, reads, deduplicated: true, totalFiles: reads.length, totalBytes, withinBounds: reads.length <= request.spec.discovery.maxFiles && totalBytes <= request.spec.discovery.maxBytes, stopCondition: request.spec.discovery.stopCondition, expansionPolicy: "Every additional file requires an explicit reason in provider evidence." };
 }
-
-async function runAgent(commandText: string, model: string | null, cwd: string, prompt: string, timeoutMs: number, signal: AbortSignal | undefined, root: string, iteration: number): Promise<{ startedAt: string; finishedAt: string; durationMs: number; exitCode: number | null; signal: NodeJS.Signals | null; summary: string; cancelled: boolean; timedOut: boolean; stdout: string; stderr: string; truncation: { stdout: boolean; stderr: boolean; limitBytes: number }; failureReason: string | null; tokenUsage: number | null; stdoutArtifact: string; stderrArtifact: string }> {
+async function runAgent(commandText: string, model: string | null, cwd: string, prompt: string, timeoutMs: number, signal: AbortSignal | undefined, root: string, iteration: number | "semantic-review"): Promise<{ startedAt: string; finishedAt: string; durationMs: number; exitCode: number | null; signal: NodeJS.Signals | null; summary: string; cancelled: boolean; timedOut: boolean; stdout: string; stderr: string; truncation: { stdout: boolean; stderr: boolean; limitBytes: number }; failureReason: string | null; tokenUsage: number | null; stdoutArtifact: string; stderrArtifact: string }> {
   const argv = splitCommand(commandText); const command = argv.shift()!; const isCodex = /(?:^|\/)codex$/.test(command);
   const args = isCodex ? [...argv, "exec", "--ephemeral", "--json", "--sandbox", "workspace-write", "--cd", cwd, ...(model ? ["--model", model] : []), prompt] : argv;
   const started = Date.now(), startedAt = new Date(started).toISOString(); let stdout = "", stderr = "", timedOut = false, cancelled = false;

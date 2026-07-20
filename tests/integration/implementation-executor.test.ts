@@ -79,12 +79,14 @@ describe("implementation executor", () => {
     expect(result.implementation).toMatchObject({ status: "implemented_and_validated", performed: true, changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), localBranch: "runforge/executor-success-1/standalone-attempt-1", localCommit: expect.any(String), patchPackage: expect.any(String) });
     expect(result.validation).toHaveLength(4);
     expect((result.validation as Array<Record<string, unknown>>).every((item) => item.exitCode === 0 && typeof item.stdout === "string" && typeof item.stderr === "string")).toBe(true);
-    expect(result.providerCalls).toMatchObject([{ providerCalls: true, networkAuthorized: true }, { providerCalls: true, networkAuthorized: true }]);
-    expect(result.providerCalls).toMatchObject([{ tokenUsage: 100 }, { tokenUsage: 100 }]);
+    expect(result.providerCalls).toHaveLength(3);
+    expect(result.providerCalls.filter((call: Record<string, unknown>) => call.purpose === "semantic-review")).toHaveLength(1);
+    expect(result.providerCalls).toEqual(expect.arrayContaining([expect.objectContaining({ purpose: "semantic-review", invocationId: "semantic-review-1", providerCalls: true, networkAuthorized: true, validatedCheckpointId: "repair-1", timeoutMs: expect.any(Number), deadlineAt: expect.any(String) })]));
     expect(result).toMatchObject({
       status: "awaiting_external_session",
       agreement: { profile: "local-ready", requestedProfile: "local-ready", effectiveProfile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]), awaitingPhases: expect.arrayContaining([{ phaseId: "remotePush", responsibleParty: "external_session", prerequisites: [] }]) },
-      handoff: { profile: "local-ready", changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), patch: "implementation.patch", branch: "runforge/executor-success-1/standalone-attempt-1", commit: expect.any(String), findings: [] },
+      review: { structural: { kind: "structural", status: "passed", evidence: expect.any(Array) }, semantic: { kind: "semantic", status: "completed", performed: true, selectedReviewer: { provider: "local-coding-agent", model: null }, reviewer: { invocationId: "semantic-review-1" }, confidence: "high", limitations: [], findings: [] } },
+      handoff: { profile: "local-ready", changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), patch: "implementation.patch", branch: "runforge/executor-success-1/standalone-attempt-1", commit: expect.any(String), findings: [], semanticReview: { status: "completed", performed: true, confidence: "high" } },
       next: { party: "external_session", exactAction: expect.stringContaining("remotePush") },
       implementation: { unresolvedAcceptanceCriteria: [] },
       git: { branch: "runforge/executor-success-1/standalone-attempt-1", commit: expect.any(String) },
@@ -113,10 +115,69 @@ describe("implementation executor", () => {
       agreement: { profile: "assist-only", requestedProfile: "assist-only", effectiveProfile: "assist-only" },
       handoff: { profile: "assist-only", patch: "implementation.patch", branch: null, commit: null },
       next: { party: "external_session" },
+      review: { structural: { kind: "structural", status: "passed" }, semantic: { kind: "semantic", status: "forbidden", performed: false, selectedReviewer: { provider: null, model: null }, confidence: "unknown", findings: [], delegation: { party: "external_session" } } },
     });
+    expect(result.providerCalls.filter((call: Record<string, unknown>) => call.purpose === "semantic-review")).toHaveLength(0);
     expect(await git(repo, ["rev-parse", "HEAD"])).toBe(before);
     expect(await git(repo, ["for-each-ref", "--format=%(refname) %(objectname)"])).toBe(refsBefore);
     expect(await readFile(String(result.implementation.patchPackage), "utf8")).toContain("diff --git");
+  });
+
+  it("preserves completed RunForge scope and delegates when the semantic reviewer is unavailable", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository();
+    const result = await execute(repo, "EXECUTOR-SEMANTIC-UNAVAILABLE-1", "SEMANTIC_UNAVAILABLE fix add", ["node test.js"]);
+    expect(result).toMatchObject({
+      status: "awaiting_external_session",
+      implementation: { status: "implemented_and_validated", performed: true },
+      review: { structural: { kind: "structural", status: "passed" }, semantic: { kind: "semantic", status: "unavailable", performed: false, selectedReviewer: { provider: "local-coding-agent", model: null }, confidence: "unknown", limitations: [expect.stringContaining("unavailable")], findings: [], delegation: { party: "external_session" } } },
+      handoff: { semanticReview: { status: "unavailable", performed: false, delegation: { party: "external_session" } } },
+      handoffPackage: { semanticReview: { status: "unavailable" }, nextResponsibleParty: "external_session" },
+      agreement: { runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation"]), awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "external_session" })]) },
+    });
+  });
+
+  it("passes complete review context after a validated checkpoint exists", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository();
+    const result = await execute(repo, "EXECUTOR-SEMANTIC-CONTEXT-1", "SEMANTIC_CONTEXT fix add", ["node test.js"]);
+    expect(result).toMatchObject({
+      implementation: { status: "implemented_and_validated" },
+      artifact: { bestValidatedCheckpointId: "implementation-0" },
+      review: { semantic: { status: "completed", performed: true, confidence: "high" } },
+      providerCalls: expect.arrayContaining([expect.objectContaining({ purpose: "semantic-review", validatedCheckpointId: "implementation-0" })]),
+    });
+  });
+
+  it("times out only the semantic review phase and preserves completed RunForge scope plus its validated checkpoint", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository();
+    const result = await execute(repo, "EXECUTOR-SEMANTIC-TIMEOUT-1", "SEMANTIC_TIMEOUT fix add", ["node test.js"]);
+    expect(result).toMatchObject({
+      status: "awaiting_external_session",
+      implementation: { status: "implemented_and_validated", performed: true },
+      artifact: { status: "available", bestValidatedCheckpointId: "implementation-0", checkpoints: [expect.objectContaining({ id: "implementation-0", validationPassed: true })] },
+      review: { structural: { status: "passed" }, semantic: { status: "unavailable", performed: false, limitations: [expect.stringContaining("timed out")], delegation: { party: "external_session" } } },
+      handoffPackage: { bestValidatedCheckpoint: "implementation-0", latestSafePatch: expect.stringContaining("implementation-0"), semanticReview: { status: "unavailable", performed: false }, nextResponsibleParty: "external_session" },
+      agreement: { runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation"]), awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "external_session" })]) },
+      providerCalls: expect.arrayContaining([expect.objectContaining({ purpose: "semantic-review", timedOut: true, timeoutMs: expect.any(Number), validatedCheckpointId: "implementation-0" })]),
+    });
+    const reviewCall = result.providerCalls.find((call: Record<string, unknown>) => call.purpose === "semantic-review");
+    expect(reviewCall.timeoutMs).toBeLessThan(1_000);
+  }, 10_000);
+
+  it("propagates blocking structured semantic findings into the result and portable handoff", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository();
+    const result = await execute(repo, "EXECUTOR-SEMANTIC-FINDING-1", "SEMANTIC_FINDING fix add", ["node test.js"]);
+    const finding = { severity: "high", file: "calculator.js", location: "1:1", category: "correctness", blocking: true };
+    expect(result).toMatchObject({
+      status: "awaiting_owner",
+      implementation: { status: "implemented_and_validated", performed: true }, ownerGate: { required: true },
+      review: { structural: { kind: "structural", status: "passed" }, semantic: { status: "completed", performed: true, confidence: "high", findings: [finding] } },
+      handoff: { findings: [finding], semanticReview: { status: "completed", performed: true, confidence: "high", findings: [finding] } },
+      handoffPackage: { findings: [finding], semanticReview: { status: "completed", performed: true, confidence: "high", findings: [finding] } },
+    });
   });
 
   it.each([["external_session", "implementation"], ["external_system", "repair"]] as const)("hands %s-owned implementation off in %s mode without invoking the configured coding adapter", async (party, mode) => {
@@ -544,7 +605,7 @@ describe("implementation executor", () => {
 async function repository(withSensitiveContext = false): Promise<string> { const repo = await mkdtemp(join(tmpdir(), "runforge-implementation-repo-")); await cp(fixture, repo, { recursive: true }); if (withSensitiveContext) { const path = join(repo, "calculator.js"); const source = await readFile(path, "utf8"); const context = ["// API", "_KEY=", "existingvalue", "\n"].join(""); await writeFile(path, context + source); } await git(repo, ["init", "-b", "main"]); await git(repo, ["add", "."]); await git(repo, ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]); return repo; }
 async function git(cwd: string, args: string[]): Promise<string> { return (await exec("git", args, { cwd })).stdout; }
 function spec(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []) { return { schemaVersion: 2, taskId, task: { text, goal: "Make the deterministic fixture satisfy acceptance", acceptanceCriteria: ["validation is green", "local patch evidence exists"] }, target: { repository: repo, workingDirectory: "." }, execution: { mode: "implementation", maxRepairIterations: 2 }, runtime: { preference: "local-disposable", externalNetwork: "allowed", dependencyPreparation: "disabled" }, validation: { mode: "explicit", commands }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true, forbiddenAreas }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
-async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
+async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); if (text.includes("SEMANTIC_TIMEOUT")) value.execution.timeoutMs = 1_000; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
 async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string, executionMode: "implementation" | "repair" = "implementation", attempt?: number, dirtyPolicy?: string): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.execution.mode = executionMode; value.executionAgreement = executionAgreement; if (dirtyPolicy) value.target.dirtyPolicy = dirtyPolicy; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId, attempt }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
 async function poll(url: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("task did not finish"); }
 async function pollPhase(url: string, phase: string): Promise<void> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (task.progress?.phase === phase) return; await new Promise((done) => setTimeout(done, 25)); } throw new Error(`task did not reach ${phase}`); }

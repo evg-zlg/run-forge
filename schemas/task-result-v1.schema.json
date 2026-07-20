@@ -79,6 +79,7 @@
     },
     "validationPlan": { "$ref": "#/$defs/validationPlan" },
     "validationAggregate": { "$ref": "#/$defs/validationAggregate" },
+    "review": { "$ref": "#/$defs/review" },
     "artifacts": true,
     "git": { "type": "object" },
     "ownerGate": {
@@ -155,6 +156,33 @@
       "type": "array",
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1 }
+    },
+    "semanticFinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["severity", "file", "location", "category", "evidence", "recommendation", "blocking"],
+      "properties": {
+        "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+        "file": { "type": "string", "minLength": 1 }, "location": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 }, "evidence": { "type": "string", "minLength": 1 },
+        "recommendation": { "type": "string", "minLength": 1 }, "blocking": { "type": "boolean" }
+      }
+    },
+    "semanticReview": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "status", "performed", "selectedReviewer", "reviewer", "confidence", "limitations", "findings", "evidence", "delegation"],
+      "properties": {
+        "kind": { "const": "semantic" }, "status": { "enum": ["completed", "unavailable", "forbidden"] },
+        "performed": { "type": "boolean" },
+        "selectedReviewer": { "type": "object", "additionalProperties": false, "required": ["provider", "model"], "properties": { "provider": { "type": ["string", "null"] }, "model": { "type": ["string", "null"] } } },
+        "reviewer": { "type": "object", "additionalProperties": false, "required": ["provider", "model", "invocationId"], "properties": { "provider": { "type": ["string", "null"] }, "model": { "type": ["string", "null"] }, "invocationId": { "type": ["string", "null"] } } },
+        "confidence": { "enum": ["high", "medium", "low", "unknown"] }, "limitations": { "$ref": "#/$defs/strings" },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/semanticFinding" } }, "evidence": { "$ref": "#/$defs/strings" },
+        "delegation": { "anyOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["party", "reason", "exactAction"], "properties": { "party": { "enum": ["external_session", "owner"] }, "reason": { "type": "string", "minLength": 1 }, "exactAction": { "type": "string", "minLength": 1 } } }] }
+      }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false, "required": ["structural", "semantic"],
+      "properties": { "structural": { "type": "object", "additionalProperties": false, "required": ["kind", "status", "evidence"], "properties": { "kind": { "const": "structural" }, "status": { "$ref": "#/$defs/validationAggregate" }, "evidence": { "$ref": "#/$defs/strings" } } }, "semantic": { "$ref": "#/$defs/semanticReview" } }
     },
     "phaseOwnership": {
       "type": "object",
@@ -324,7 +352,9 @@
         "branch": { "type": ["string", "null"], "minLength": 1 },
         "commit": { "type": ["string", "null"], "minLength": 1 },
         "validation": { "type": "array", "items": { "$ref": "#/$defs/handoffValidation" } },
-        "findings": { "$ref": "#/$defs/strings" },
+        "findings": { "type": "array", "items": { "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/semanticFinding" }] } },
+        "structuralEvidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
+        "semanticReview": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/semanticReview" }] },
         "risks": { "$ref": "#/$defs/strings" },
         "nextActions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/nextAction" } },
         "publicationInstructions": { "$ref": "#/$defs/strings" },

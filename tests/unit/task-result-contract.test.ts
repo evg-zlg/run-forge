@@ -90,6 +90,8 @@ describe("agreement-aware task result contract", () => {
       commit: null,
       validation: [{ command: "pnpm test", status: "passed", exitCode: 0, evidence: ["test.log"], lane: "git-evidence", cwd: "/evidence", argv: ["git", "diff", "--check"], repositoryIdentity: "/repo", boundSha: "abc123", capabilities: ["git-read-only-evidence"], safetyAssertions: ["argv_only_no_shell"] }],
       findings: ["finding A", "finding B"],
+      structuralEvidence: [],
+      semanticReview: null,
       risks: ["owner review remains"],
       nextActions: [{
         party: "external_session", exactAction: "Apply patch.diff in the target worktree.",
