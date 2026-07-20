@@ -81,6 +81,8 @@ export function publicTaskSpecContract(): Record<string, unknown> {
     runtimeIds: taskRuntimeIds,
     validationContract: {
       capabilities: VALIDATION_CAPABILITIES, acceptance: VALIDATION_ACCEPTANCE, outcomes: VALIDATION_OUTCOMES, preflightSchemaVersion: 1,
+      lanes: { product: ["docker-validation", "local-disposable-validation"], gitEvidence: "git-evidence" },
+      gitEvidence: { binding: ["canonicalRepositoryIdentity", "expectedTargetSha"], execution: "argv-only", network: false, mutations: false },
       autoDiscoveryDefaults: { acceptance: "required", evidenceRole: "product-validation", unknownCommands: "capability_unsupported_until_explicitly_described" },
     },
     runtimeDefaults: { implementation: executor.defaultRuntime, repair: executor.defaultRuntime, inspection: "docker", validation: "docker" },

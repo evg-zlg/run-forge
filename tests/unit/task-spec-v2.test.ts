@@ -99,6 +99,8 @@ describe("TaskSpec v2", () => {
     expect(contract.validationContract).toMatchObject({
       preflightSchemaVersion: 1,
       autoDiscoveryDefaults: { acceptance: "required", evidenceRole: "product-validation", unknownCommands: "capability_unsupported_until_explicitly_described" },
+      lanes: { product: ["docker-validation", "local-disposable-validation"], gitEvidence: "git-evidence" },
+      gitEvidence: { binding: ["canonicalRepositoryIdentity", "expectedTargetSha"], execution: "argv-only", network: false, mutations: false },
     });
     expect(contract.implementationRequest.taskSpec.executionAgreement).toEqual({ schemaVersion: 1, profile: "local-ready" });
     const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(fileSchema);
@@ -127,10 +129,10 @@ describe("TaskSpec v2", () => {
     await expect(normalizeTaskSpecV2(value)).rejects.toThrow(message);
   });
 
-  it("rejects output inside target and unsafe commands", async () => {
+  it("rejects output inside target and unsafe shell commands while deferring Git to capability preflight", async () => {
     const repo = await gitRepo();
     await expect(normalizeTaskSpecV2({ ...minimal(repo), artifacts: { root: join(repo, "artifacts") } })).rejects.toThrow("outside target.repository");
-    await expect(normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["git push origin main"] } })).rejects.toThrow("Unsafe validation command");
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["git push origin main"] } })).resolves.toMatchObject({ validation: { requirements: [{ acceptance: "evidence-only" }] } });
     await expect(normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["rg credentials src"] } })).resolves.toBeDefined();
     await expect(normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["echo $API_KEY"] } })).rejects.toThrow("environment credentials");
   });
@@ -242,6 +244,12 @@ describe("TaskSpec v2", () => {
       requirements: [{ command: "custom-check", requiredCapabilities: ["shell", "database"], acceptance: "optional", evidenceRole: "integration-evidence", fallbacks: ["Use CI evidence"], source: "explicit" }],
       projectPolicy: { deniedCapabilities: ["production"], skippedCommands: [] },
     });
+  });
+
+  it("preserves unsupported Git forms for capability preflight instead of shell execution", async () => {
+    const repo = await gitRepo();
+    const spec = await normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["git fetch origin"] } });
+    expect(spec.validation.requirements[0]).toMatchObject({ command: "git fetch origin", acceptance: "evidence-only", evidenceRole: "git-evidence" });
   });
 
   it("includes decisive post-apply stages in normalized validation", async () => {

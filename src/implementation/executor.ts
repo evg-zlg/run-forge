@@ -10,10 +10,12 @@ import { implementationExecutorContract, runtimeCompatibleWithImplementationExec
 import { persistDurableCheckpoint } from "./durable-checkpoint.js";
 import { executionPhaseOwner } from "../product/execution-agreement.js";
 import {
-  aggregateValidationOutcomes, buildValidationPreflightPlan, classifyValidationExecution, runtimeCapabilities,
-  type ValidationAggregateStatus, type ValidationCommandOutcome, type ValidationPlanEntry, type ValidationPreflightPlan,
+  aggregateValidationOutcomes, buildMultiLaneValidationPreflightPlan, runtimeCapabilities,
+  type ValidationAggregateStatus, type ValidationPreflightPlan,
 } from "../validation/capability-contract.js";
+import { createGitEvidenceBinding, parseGitEvidenceCommand } from "../validation/git-evidence-lane.js";
 import { detectPackageValidationCapabilities } from "./validation-runtime-capabilities.js";
+import { runValidation, type CommandDiagnostic } from "./validation-command-runner.js";
 
 const execFileAsync = promisify(execFile);
 const credentialCache = new Map<string, { at: number; ready: boolean }>();
@@ -24,17 +26,7 @@ export type ImplementationExecutorCapability = {
   maxLimits: { timeoutMs: number; repairIterations: number; changedFiles: number; patchBytes: number; providerTokens: number };
   limitations: string[]; command: string | null; model: string | null;
 };
-export type CommandDiagnostic = {
-  command: string; cwd: string; startedAt: string; finishedAt: string; durationMs: number;
-  executor: string; runtime: string;
-  exitCode: number | null; signal: NodeJS.Signals | null; stdout: string; stderr: string;
-  stdoutTruncated: boolean; stderrTruncated: boolean; timedOut: boolean; setupFailure: boolean;
-  truncation: { stdout: boolean; stderr: boolean; limitBytes: number }; artifactPaths: string[];
-  failureReason: string | null; classification: "product" | "setup" | "runtime" | "provider" | "infrastructure" | null;
-  diagnosticGap: boolean; infrastructureDefect: string | null; artifactPath: string;
-  outcome: ValidationCommandOutcome; acceptance: ValidationPlanEntry["acceptance"]; evidenceRole: string;
-  requiredCapabilities: ValidationPlanEntry["requiredCapabilities"]; availableCapabilities: ValidationPlanEntry["availableCapabilities"];
-};
+export type { CommandDiagnostic } from "./validation-command-runner.js";
 export type ImplementationExecutorRequest = {
   spec: TaskSpecV2; targetRepository: string; workingDirectory: string; projectProfile: Record<string, unknown>;
   acceptanceCriteria: string[]; authorityEnvelope: TaskSpecV2["authority"]; forbiddenZones: string[];
@@ -127,14 +119,35 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
     commands: request.validationProfile.commands, executionRoot, workspaceRoot: workspace,
   });
   const detectedRuntime = runtimeCapabilities({
-    runtime: "local-disposable", hasGitMetadata, hasGitHistory: hasGitMetadata, hasWorkingTreeIndex: hasGitMetadata,
+    runtime: "local-disposable", hasGitMetadata: false,
     packageManager: packageCapabilities.packageManager, dependencies: packageCapabilities.dependencies,
     network: request.runtimePolicy.externalNetwork === "allowed",
     providerModel: request.authorityEnvelope.allowProviderCalls,
   });
-  const validationPlan = buildValidationPreflightPlan({
-    requirements: request.validationProfile.requirements, profile: request.validationProfile.profile,
-    policy: request.validationProfile.projectPolicy, runtime: detectedRuntime, cwd: executionRoot,
+  let gitBinding;
+  let gitLaneUnavailableReason: string | undefined;
+  if (hasGitMetadata) {
+    try {
+      gitBinding = await createGitEvidenceBinding({ targetRepository: request.targetRepository, evidenceWorkspace: workspace, expectedSha: request.spec.target.expectedSha });
+    } catch (error) {
+      gitLaneUnavailableReason = error instanceof Error ? error.message : String(error);
+    }
+  } else {
+    gitLaneUnavailableReason = "A separate Git evidence lane with repository metadata is unavailable.";
+  }
+  const validationPlan = buildMultiLaneValidationPreflightPlan({
+    requirements: request.validationProfile.requirements, profile: request.validationProfile.profile, policy: request.validationProfile.projectPolicy,
+    productLane: { ...detectedRuntime, cwd: executionRoot },
+    ...(gitBinding ? { gitLane: {
+      runtime: "git-evidence", lane: "git-evidence", cwd: workspace,
+      available: ["filesystem", "git-read-only-evidence", "git-metadata", "git-history", "working-tree-index", "local-disposable"],
+      repositoryIdentity: gitBinding.repositoryIdentity, boundSha: gitBinding.boundSha, safetyAssertions: gitBinding.safetyAssertions,
+    } } : {}),
+    ...(gitLaneUnavailableReason ? { gitLaneUnavailableReason } : {}),
+    parseGit: (command) => {
+      const parsed = parseGitEvidenceCommand(command, request.spec.target.expectedSha);
+      return parsed.supported ? { supported: true, argv: parsed.argv, reason: "supported" } : parsed;
+    },
   });
   await writeFile(join(request.artifactRoot, "validation-plan.json"), JSON.stringify(validationPlan, null, 2) + "\n");
   const providerCalls: Array<Record<string, unknown>> = [];
@@ -178,7 +191,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       if (safetyErrors.length) { unresolved = safetyErrors; status = "blocked_with_owner_gate"; }
       await progress(request, "validate", `Running ${request.validationProfile.commands.length} validation command(s).`);
       validations.splice(0, validations.length);
-      if (!safetyErrors.length) for (let index = 0; index < validationPlan.commands.length; index += 1) validations.push(await runValidation(validationPlan.commands[index]!, request.artifactRoot, iteration, index, request.spec.execution.timeoutMs, request.signal));
+      if (!safetyErrors.length) for (let index = 0; index < validationPlan.commands.length; index += 1) validations.push(await runValidation(validationPlan.commands[index]!, request.artifactRoot, iteration, index, request.spec.execution.timeoutMs, request.signal, gitBinding));
       const validationAggregate = aggregateValidationOutcomes(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole })));
       const validationPassed = !safetyErrors.length && ["passed", "completed_with_validation_gaps"].includes(validationAggregate);
       if (!validationPassed && !safetyErrors.length) unresolved = validations.filter((item) => item.outcome !== "passed").map((item) => `${item.command}: ${item.outcome}${item.infrastructureDefect ? ` (${item.infrastructureDefect})` : ""}`);
@@ -301,42 +314,5 @@ async function runAgent(commandText: string, model: string | null, cwd: string, 
 }
 function extractSummary(stdout: string, stderr: string): string { const finals = stdout.split(/\r?\n/).flatMap((line) => { try { const item = JSON.parse(line) as Record<string, any>; const text = item.msg?.message ?? item.message ?? item.text ?? item.item?.text; return typeof text === "string" ? [text] : []; } catch { return []; } }); return (finals.at(-1) ?? stdout ?? stderr).slice(-20_000); }
 export function extractTokenUsage(stdout: string): number | null { const values = stdout.split(/\r?\n/).flatMap((line) => { try { const item = JSON.parse(line) as Record<string, any>; const usage = item.usage ?? item.token_usage ?? item.item?.usage; const input = usage?.input_tokens ?? usage?.inputTokens, cached = usage?.cached_input_tokens ?? usage?.cachedInputTokens ?? 0, output = usage?.output_tokens ?? usage?.outputTokens; if (Number.isFinite(input) && Number.isFinite(output) && Number.isFinite(cached)) return [Math.max(0, Number(input) - Number(cached)) + Number(output)]; const explicit = usage?.total_tokens ?? usage?.totalTokens ?? item.total_tokens; return Number.isFinite(explicit) ? [Number(explicit)] : []; } catch { return []; } }); return values.length ? Math.max(...values) : null; }
-async function runValidation(plan: ValidationPlanEntry, root: string, iteration: number, index: number, timeoutMs: number, signal?: AbortSignal): Promise<CommandDiagnostic> {
-  const started = Date.now(), startedAt = new Date(started).toISOString();
-  let stdout = "", stderr = "", timedOut = false, setupFailure = false, cancelled = false;
-  const artifactPath = `validation/iteration-${iteration}/command-${index}.json`;
-  await mkdir(dirname(join(root, artifactPath)), { recursive: true });
-  const finish = async (execution: { exitCode: number | null; childSignal: NodeJS.Signals | null }): Promise<CommandDiagnostic> => {
-    const finishedAt = new Date().toISOString();
-    stdout = redactProviderOutput(stdout); stderr = redactProviderOutput(stderr);
-    const outcome = classifyValidationExecution({ plan, exitCode: execution.exitCode, signal: execution.childSignal, timedOut, cancelled, spawnError: setupFailure, stdout, stderr });
-    const stdoutTruncated = Buffer.byteLength(stdout) > 1_000_000, stderrTruncated = Buffer.byteLength(stderr) > 1_000_000;
-    const diagnosticGap = outcome.outcome !== "passed" && !stdout.trim() && !stderr.trim() && plan.disposition === "execute";
-    const classification = outcome.outcome === "product_failed" ? "product" : outcome.outcome === "setup_failed" ? "setup"
-      : ["runtime_failed", "timed_out", "cancelled"].includes(outcome.outcome) ? "runtime" : null;
-    const diagnostic: CommandDiagnostic = {
-      command: plan.command, cwd: plan.cwd, executor: "local-coding-agent", runtime: plan.runtime,
-      startedAt, finishedAt, durationMs: Date.now() - started, exitCode: execution.exitCode, signal: execution.childSignal,
-      stdout: stdout.slice(0, 1_000_000), stderr: stderr.slice(0, 1_000_000), stdoutTruncated, stderrTruncated,
-      truncation: { stdout: stdoutTruncated, stderr: stderrTruncated, limitBytes: 1_000_000 }, artifactPaths: [artifactPath],
-      timedOut, setupFailure, failureReason: outcome.reason, classification, diagnosticGap,
-      infrastructureDefect: diagnosticGap ? "non-zero exit produced empty stdout and stderr" : null, artifactPath,
-      outcome: outcome.outcome, acceptance: plan.acceptance, evidenceRole: plan.evidenceRole,
-      requiredCapabilities: plan.requiredCapabilities, availableCapabilities: plan.availableCapabilities,
-    };
-    await writeFile(join(root, artifactPath), JSON.stringify(diagnostic, null, 2) + "\n");
-    return diagnostic;
-  };
-  if (plan.disposition !== "execute") return finish({ exitCode: null, childSignal: null });
-  return new Promise((resolveRun) => {
-    const child = spawn(plan.command, { cwd: plan.cwd, shell: true, stdio: ["ignore", "pipe", "pipe"], env: safeRuntimeEnv() });
-    const stop = () => { cancelled = true; child.kill("SIGTERM"); };
-    signal?.addEventListener("abort", stop, { once: true });
-    const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); }, timeoutMs);
-    child.stdout?.on("data", (chunk) => { stdout += chunk; }); child.stderr?.on("data", (chunk) => { stderr += chunk; });
-    child.on("error", (error) => { setupFailure = true; stderr += error.message; });
-    child.on("close", (exitCode, childSignal) => { clearTimeout(timer); signal?.removeEventListener("abort", stop); void finish({ exitCode, childSignal }).then(resolveRun); });
-  });
-}
 function safeRuntimeEnv(): NodeJS.ProcessEnv { const allowed = ["HOME", "PATH", "SHELL", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "LANG", "LC_ALL", "CODEX_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"]; return Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]!]])); }
 function redactProviderOutput(value: string): string { return value.replace(/\b(?:gh[pousr]_|github_pat_|glpat-|sk-)[A-Za-z0-9_-]{12,}\b/gi, "[REDACTED]").replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]{12,}/gi, "$1[REDACTED]").replace(/\b(password|passwd|api[_-]?key|access[_-]?token|secret|credential)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]"); }

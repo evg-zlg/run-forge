@@ -43,7 +43,11 @@ export type ResultGate = { name: string; status: "satisfied" | "pending" | "bloc
 export type ResultEvidence = { kind: "artifact" | "command" | "commit" | "patch" | "review" | "other"; reference: string; summary: string };
 
 export type ResultNextAction = { party: NextParty; exactAction: string; gates: ResultGate[]; evidence: ResultEvidence[] };
-export type HandoffValidation = { command: string; status: ValidationCommandOutcome | "failed" | "not_run"; exitCode: number | null; evidence: string[] };
+export type HandoffValidation = {
+  command: string; status: ValidationCommandOutcome | "failed" | "not_run"; exitCode: number | null; evidence: string[];
+  lane?: string; cwd?: string; argv?: string[]; repositoryIdentity?: string | null; boundSha?: string | null;
+  capabilities?: string[]; safetyAssertions?: string[];
+};
 
 export type HandoffSafety = {
   targetMainMutation: false; targetMainPush: false; targetPrMerge: false; deploy: false;
@@ -146,6 +150,13 @@ export function buildNormalizedHandoffPackage(input: NormalizedHandoffInput): No
       status: item.status,
       exitCode: item.exitCode,
       evidence: normalizedStrings(item.evidence),
+      ...(item.lane ? { lane: requiredText(item.lane, `handoff.validation[${index}].lane`) } : {}),
+      ...(item.cwd ? { cwd: requiredText(item.cwd, `handoff.validation[${index}].cwd`) } : {}),
+      ...(item.argv ? { argv: item.argv.map((arg, argIndex) => requiredText(arg, `handoff.validation[${index}].argv[${argIndex}]`)) } : {}),
+      ...(item.repositoryIdentity !== undefined ? { repositoryIdentity: nullableText(item.repositoryIdentity, `handoff.validation[${index}].repositoryIdentity`) } : {}),
+      ...(item.boundSha !== undefined ? { boundSha: nullableText(item.boundSha, `handoff.validation[${index}].boundSha`) } : {}),
+      ...(item.capabilities ? { capabilities: normalizedStrings(item.capabilities) } : {}),
+      ...(item.safetyAssertions ? { safetyAssertions: normalizedStrings(item.safetyAssertions) } : {}),
     };
   });
   return {

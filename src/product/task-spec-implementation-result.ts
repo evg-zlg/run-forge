@@ -163,7 +163,10 @@ function implementationAgreement(spec: TaskSpecV2, result: ImplementationExecuto
 function implementationPhaseEvidence(phase: ExecutionPhaseId, result: ImplementationExecutorResult): string[] {
   if (phase === "implementation") return result.changedFiles.length ? result.changedFiles : ["no_change_required"];
   if (phase === "localValidation") return result.validationResults.length
-    ? result.validationResults.flatMap((item) => item.artifactPaths)
+    ? result.validationResults.flatMap((item) => [
+      ...item.artifactPaths.map((artifact) => `${item.lane}:${artifact}`),
+      `lane=${item.lane};cwd=${item.cwd};repository=${item.repositoryIdentity ?? "not-applicable"};boundSha=${item.boundSha ?? "not-applicable"};safety=${item.safetyAssertions.join(",") || "product-lane-policy"}`,
+    ])
     : ["no_change_required"];
   if (phase === "patchPackage") return [result.patchPackage ?? "no_change_required"];
   if (phase === "localBranch") return result.localBranch ? [result.localBranch] : [];
@@ -214,6 +217,13 @@ function implementationHandoff(
       status: item.outcome,
       exitCode: item.exitCode,
       evidence: item.artifactPaths,
+      lane: item.lane,
+      cwd: item.cwd,
+      ...(item.argv ? { argv: item.argv } : {}),
+      repositoryIdentity: item.repositoryIdentity,
+      boundSha: item.boundSha,
+      capabilities: item.requiredCapabilities,
+      safetyAssertions: item.safetyAssertions,
     })),
     findings: result.unresolvedFindings,
     risks: status === "workflow_completed" ? [] : ["The remaining workflow phase is outside this completed RunForge execution."],

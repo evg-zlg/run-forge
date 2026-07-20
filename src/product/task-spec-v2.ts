@@ -92,7 +92,9 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   if (validationMode === "explicit" && !explicitCommands.length) throw new Error("validation.mode='explicit' requires validation.commands.");
   const commands = validationMode === "auto" ? inspection.validationCommands : explicitCommands;
   if (!commands.length) throw new Error("No validation commands were discovered; set validation.mode='explicit' and provide commands.");
-  const blocked = blockedCommandReports(commands, "main");
+  // Git validation is never executed as a shell command. Its dedicated lane performs stricter
+  // structural parsing and records unsupported forms as capability_unsupported before spawn.
+  const blocked = blockedCommandReports(commands.filter((command) => !/^git(?:\s|$)/.test(command.trim())), "main");
   if (blocked[0]) throw new Error(`Unsafe validation command: ${blocked[0].reason}`);
   const requirementInputs = array(validationRaw.requirements).map((value, index) => {
     const item = object(value, `validation.requirements[${index}] must be an object.`);

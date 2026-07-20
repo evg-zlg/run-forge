@@ -10,6 +10,7 @@ describe("capability-aware validation contract", () => {
     expect(VALIDATION_CAPABILITIES).toEqual([
       "filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies",
       "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production",
+      "git-read-only-evidence",
     ]);
   });
 

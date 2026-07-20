@@ -67,7 +67,7 @@ describe("agreement-aware task result contract", () => {
       patch: " patch.diff ",
       branch,
       commit: null,
-      validation: [{ command: " pnpm test ", status: "passed", exitCode: 0, evidence: [" test.log ", "test.log"] }],
+      validation: [{ command: " pnpm test ", status: "passed", exitCode: 0, evidence: [" test.log ", "test.log"], lane: "git-evidence", cwd: "/evidence", argv: ["git", "diff", "--check"], repositoryIdentity: "/repo", boundSha: "abc123", capabilities: ["git-read-only-evidence"], safetyAssertions: ["argv_only_no_shell"] }],
       findings: [" finding B ", "finding A"],
       risks: ["owner review remains"],
       nextActions: [{
@@ -88,7 +88,7 @@ describe("agreement-aware task result contract", () => {
       patch: "patch.diff",
       branch,
       commit: null,
-      validation: [{ command: "pnpm test", status: "passed", exitCode: 0, evidence: ["test.log"] }],
+      validation: [{ command: "pnpm test", status: "passed", exitCode: 0, evidence: ["test.log"], lane: "git-evidence", cwd: "/evidence", argv: ["git", "diff", "--check"], repositoryIdentity: "/repo", boundSha: "abc123", capabilities: ["git-read-only-evidence"], safetyAssertions: ["argv_only_no_shell"] }],
       findings: ["finding A", "finding B"],
       risks: ["owner review remains"],
       nextActions: [{

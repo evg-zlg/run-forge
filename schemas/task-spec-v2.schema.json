@@ -58,7 +58,7 @@
         "commands": { "type": "array", "items": { "type": "string", "minLength": 1 } },
         "requirements": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["command"], "properties": {
           "command": { "type": "string", "minLength": 1 },
-          "capabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production"] } },
+          "capabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production", "git-read-only-evidence"] } },
           "acceptance": { "enum": ["required", "optional", "advisory", "evidence-only"] },
           "evidenceRole": { "type": "string", "minLength": 1 },
           "fallbacks": { "type": "array", "items": { "type": "string", "minLength": 1 } }
@@ -66,10 +66,10 @@
         "profile": { "type": "object", "additionalProperties": false, "properties": {
           "id": { "type": "string", "minLength": 1 }, "defaultAcceptance": { "enum": ["required", "optional", "advisory", "evidence-only"] },
           "defaultEvidenceRole": { "type": "string", "minLength": 1 },
-          "additionalCapabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production"] } }
+          "additionalCapabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production", "git-read-only-evidence"] } }
         } },
         "projectPolicy": { "type": "object", "additionalProperties": false, "properties": {
-          "deniedCapabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production"] } },
+          "deniedCapabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production", "git-read-only-evidence"] } },
           "skippedCommands": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
         } }
       }

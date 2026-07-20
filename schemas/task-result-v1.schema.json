@@ -95,7 +95,7 @@
     "limitations": { "type": "array" }
   },
   "$defs": {
-    "validationCapability": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production"] },
+    "validationCapability": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production", "git-read-only-evidence"] },
     "validationAcceptance": { "enum": ["required", "optional", "advisory", "evidence-only"] },
     "validationOutcome": { "enum": ["passed", "product_failed", "setup_failed", "runtime_failed", "capability_unsupported", "skipped_by_policy", "timed_out", "cancelled"] },
     "validationAggregate": { "enum": ["passed", "completed_with_validation_gaps", "blocked_by_capability", "blocked_by_policy", "product_failed", "setup_failed", "runtime_failed", "timed_out", "cancelled"] },
@@ -103,11 +103,13 @@
       "type": "object", "additionalProperties": false, "required": ["schemaVersion", "createdAt", "profile", "runtime", "commands"],
       "properties": {
         "schemaVersion": { "const": 1 }, "createdAt": { "type": "string", "minLength": 1 }, "profile": { "type": "object" }, "runtime": { "type": "object" },
+        "lanes": { "type": "array", "items": { "type": "object", "required": ["runtime", "lane", "cwd", "available"], "properties": { "runtime": { "type": "string" }, "lane": { "type": "string" }, "cwd": { "type": "string" }, "available": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } }, "repositoryIdentity": { "type": "string" }, "boundSha": { "type": "string" }, "safetyAssertions": { "$ref": "#/$defs/strings" } } } },
         "commands": { "type": "array", "items": { "type": "object", "required": ["command", "runtime", "lane", "cwd", "requiredCapabilities", "availableCapabilities", "supported", "reason", "fallbacks", "acceptance", "evidenceRole", "disposition"], "properties": {
           "command": { "type": "string", "minLength": 1 }, "runtime": { "type": "string", "minLength": 1 }, "lane": { "type": "string", "minLength": 1 }, "cwd": { "type": "string", "minLength": 1 },
           "requiredCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } }, "availableCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } },
           "supported": { "type": "boolean" }, "reason": { "type": "string", "minLength": 1 }, "fallbacks": { "type": "array", "items": { "type": "string", "minLength": 1 } },
-          "acceptance": { "$ref": "#/$defs/validationAcceptance" }, "evidenceRole": { "type": "string", "minLength": 1 }, "disposition": { "enum": ["execute", "capability_unsupported", "skipped_by_policy"] }
+          "acceptance": { "$ref": "#/$defs/validationAcceptance" }, "evidenceRole": { "type": "string", "minLength": 1 }, "disposition": { "enum": ["execute", "capability_unsupported", "skipped_by_policy"] },
+          "argv": { "$ref": "#/$defs/strings" }, "repositoryIdentity": { "type": "string" }, "boundSha": { "type": "string" }, "safetyAssertions": { "$ref": "#/$defs/strings" }
         } } }
       }
     },
@@ -229,7 +231,10 @@
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "status": { "enum": ["satisfied", "pending", "blocked"] },
-        "evidence": { "$ref": "#/$defs/strings" }
+        "evidence": { "$ref": "#/$defs/strings" },
+        "lane": { "type": "string", "minLength": 1 }, "cwd": { "type": "string", "minLength": 1 }, "argv": { "$ref": "#/$defs/strings" },
+        "repositoryIdentity": { "type": ["string", "null"] }, "boundSha": { "type": ["string", "null"] },
+        "capabilities": { "$ref": "#/$defs/strings" }, "safetyAssertions": { "$ref": "#/$defs/strings" }
       }
     },
     "evidence": {

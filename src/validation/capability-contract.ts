@@ -3,6 +3,7 @@ export const VALIDATION_CAPABILITIES = [
   "filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager",
   "dependencies", "shell", "network", "credentials", "docker", "local-disposable",
   "provider-model", "database", "production",
+  "git-read-only-evidence",
 ] as const;
 
 export type ValidationCapability = (typeof VALIDATION_CAPABILITIES)[number];
@@ -50,6 +51,13 @@ export type ValidationRuntimeCapabilities = {
   available: ValidationCapability[];
 };
 
+export type ValidationLane = ValidationRuntimeCapabilities & {
+  cwd: string;
+  repositoryIdentity?: string;
+  boundSha?: string;
+  safetyAssertions?: string[];
+};
+
 export type ValidationPlanEntry = ValidationCommandRequirement & {
   runtime: string;
   lane: string;
@@ -59,6 +67,10 @@ export type ValidationPlanEntry = ValidationCommandRequirement & {
   supported: boolean;
   reason: string;
   disposition: "execute" | "capability_unsupported" | "skipped_by_policy";
+  argv?: string[];
+  repositoryIdentity?: string;
+  boundSha?: string;
+  safetyAssertions?: string[];
 };
 
 export type ValidationPreflightPlan = {
@@ -66,6 +78,7 @@ export type ValidationPreflightPlan = {
   createdAt: string;
   profile: ValidationProfile;
   runtime: ValidationRuntimeCapabilities;
+  lanes?: ValidationLane[];
   commands: ValidationPlanEntry[];
 };
 
@@ -112,7 +125,7 @@ const detectors: KnownCommandDetector[] = [
       const history = /\b(?:log|show|rev-list|merge-base|blame)\b/.test(value);
       const worktree = /\b(?:diff|status|add|reset|ls-files)\b/.test(value);
       return {
-        requiredCapabilities: unique(["filesystem", "shell", "git-metadata", ...(history ? ["git-history"] as const : []), ...(worktree ? ["working-tree-index"] as const : [])]),
+        requiredCapabilities: unique(["filesystem", "git-read-only-evidence", "git-metadata", ...(history ? ["git-history"] as const : []), ...(worktree ? ["working-tree-index"] as const : [])]),
         acceptance: "evidence-only", evidenceRole: "git-evidence", fallbacks: [],
       };
     },
@@ -207,6 +220,55 @@ export function buildValidationPreflightPlan(input: {
           : missing.length ? `Missing capabilities: ${missing.join(", ")}.` : "All required capabilities are available.";
       return { ...requirement, runtime: input.runtime.runtime, lane: input.runtime.lane, cwd: input.cwd, availableCapabilities: unique([...available]), missingCapabilities: missing, supported, reason, disposition };
     }),
+  };
+}
+
+/** Routes Git evidence away from file-only/product lanes and rejects unsafe Git syntax before execution. */
+export function buildMultiLaneValidationPreflightPlan(input: {
+  requirements: readonly ValidationCommandRequirement[];
+  profile: ValidationProfile;
+  policy?: Partial<ValidationProjectPolicy>;
+  productLane: ValidationLane;
+  gitLane?: ValidationLane;
+  gitLaneUnavailableReason?: string;
+  parseGit(command: string): { supported: boolean; argv?: string[]; reason: string };
+  now?: Date;
+}): ValidationPreflightPlan {
+  const product = buildValidationPreflightPlan({
+    requirements: input.requirements.filter((item) => !/^git(?:\s|$)/.test(item.command.trim())),
+    profile: input.profile, policy: input.policy, runtime: input.productLane, cwd: input.productLane.cwd, now: input.now,
+  });
+  const gitRequirements = input.requirements.filter((item) => /^git(?:\s|$)/.test(item.command.trim()));
+  const fallbackLane: ValidationLane = input.gitLane ?? {
+    runtime: "git-evidence", lane: "git-evidence", cwd: input.productLane.cwd, available: [],
+    safetyAssertions: ["git_metadata_unavailable_in_product_lane"],
+  };
+  const gitBase = buildValidationPreflightPlan({
+    requirements: gitRequirements, profile: input.profile, policy: input.policy,
+    runtime: fallbackLane, cwd: fallbackLane.cwd, now: input.now,
+  });
+  const gitCommands = gitBase.commands.map((entry) => {
+    const parsed = input.parseGit(entry.command);
+    const supported = entry.supported && parsed.supported && Boolean(input.gitLane);
+    const disposition = entry.disposition === "skipped_by_policy" ? "skipped_by_policy" as const
+      : supported ? "execute" as const : "capability_unsupported" as const;
+    const reason = disposition === "skipped_by_policy" ? entry.reason
+      : supported ? "Safe read-only Git form is supported in the SHA-bound Git evidence lane."
+        : !input.gitLane ? input.gitLaneUnavailableReason ?? "A separate Git evidence lane with repository metadata is unavailable." : parsed.reason;
+    return {
+      ...entry, supported, disposition, reason,
+      ...(parsed.argv ? { argv: parsed.argv } : {}),
+      ...(fallbackLane.repositoryIdentity ? { repositoryIdentity: fallbackLane.repositoryIdentity } : {}),
+      ...(fallbackLane.boundSha ? { boundSha: fallbackLane.boundSha } : {}),
+      ...(fallbackLane.safetyAssertions ? { safetyAssertions: fallbackLane.safetyAssertions } : {}),
+    };
+  });
+  const order = new Map(input.requirements.map((item, index) => [item.command, index]));
+  return {
+    schemaVersion: 1, createdAt: (input.now ?? new Date()).toISOString(), profile: input.profile,
+    runtime: input.productLane,
+    lanes: [input.productLane, ...(input.gitLane ? [input.gitLane] : [])],
+    commands: [...product.commands, ...gitCommands].sort((a, b) => (order.get(a.command) ?? 0) - (order.get(b.command) ?? 0)),
   };
 }
 
