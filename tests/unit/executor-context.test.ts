@@ -22,7 +22,13 @@ describe("bounded implementation context", () => {
     expect(result.prompt).not.toContain("outside sentinel");
     expect(result.prompt).not.toContain("sk-");
     expect(serializedPlan).not.toContain("export const value");
-    expect(result.plan).toMatchObject({ withinBounds: true, totalFiles: 5 });
+    expect(result.plan).toMatchObject({ withinBounds: true, totalFiles: 5, expansionHistory: [] });
+    expect((result.plan.omitted as Array<Record<string, unknown>>)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ file: "secret.ts", status: "rejected", reason: "secret-like content" }),
+      expect.objectContaining({ file: "linked.ts", status: "rejected", reason: "non-regular file", bytes: 0 }),
+      expect.objectContaining({ file: "../escape.ts", status: "rejected", reason: "path escapes workspace" }),
+    ]));
+    expect((result.plan.omitted as Array<Record<string, unknown>>)).toHaveLength(3);
     expect((result.plan.reads as Array<Record<string, unknown>>)).toEqual(expect.arrayContaining([
       expect.objectContaining({ file: "secret.ts", status: "rejected", reason: "secret-like content" }),
       expect.objectContaining({ file: "linked.ts", status: "rejected", reason: "non-regular file" }),

@@ -31,7 +31,16 @@ export async function buildContextPlan(request: ImplementationExecutorRequest, r
   }
   const totalBytes = reads.reduce((sum, item) => sum + (typeof item.bytes === "number" ? item.bytes : 0), 0);
   const estimatedTokens = Math.ceil(Buffer.byteLength(contents.join("\n\n")) / 4);
-  return { prompt: contents.join("\n\n"), plan: { schemaVersion: 1, profile: request.spec.discovery.profile, limits: { maxFiles: request.spec.discovery.maxFiles, maxBytes: request.spec.discovery.maxBytes, maxTokens: request.spec.discovery.maxTokens }, reads, deduplicated: true, totalFiles: reads.length, totalBytes, estimatedTokens, withinBounds: reads.length <= request.spec.discovery.maxFiles && totalBytes <= request.spec.discovery.maxBytes && estimatedTokens <= request.spec.discovery.maxTokens, stopCondition: request.spec.discovery.stopCondition, expansionPolicy: "Every additional file requires an explicit reason in provider evidence." } };
+  const omitted = reads
+    .filter((item) => item.status !== "planned")
+    .map((item) => ({ file: item.file, status: item.status, reason: item.reason, bytes: item.bytes }));
+  const expansionHistory: Array<Record<string, unknown>> = [];
+  return {
+    prompt: contents.join("\n\n"),
+    plan: {
+      schemaVersion: 1, profile: request.spec.discovery.profile, limits: { maxFiles: request.spec.discovery.maxFiles, maxBytes: request.spec.discovery.maxBytes, maxTokens: request.spec.discovery.maxTokens }, reads, omitted, expansionHistory, deduplicated: true, totalFiles: reads.length, totalBytes, estimatedTokens, withinBounds: reads.length <= request.spec.discovery.maxFiles && totalBytes <= request.spec.discovery.maxBytes && estimatedTokens <= request.spec.discovery.maxTokens, stopCondition: request.spec.discovery.stopCondition, expansionPolicy: "Every additional file requires an explicit reason in provider evidence."
+    }
+  };
 }
 
 function isInside(root: string, path: string): boolean { const rel = relative(root, path); return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/")); }
