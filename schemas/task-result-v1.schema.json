@@ -79,6 +79,7 @@
     },
     "validationPlan": { "$ref": "#/$defs/validationPlan" },
     "validationAggregate": { "$ref": "#/$defs/validationAggregate" },
+    "validationNegotiation": { "$ref": "#/$defs/validationNegotiation" },
     "review": { "$ref": "#/$defs/review" },
     "artifacts": true,
     "git": { "type": "object" },
@@ -100,6 +101,24 @@
     "validationAcceptance": { "enum": ["required", "optional", "advisory", "evidence-only"] },
     "validationOutcome": { "enum": ["passed", "product_failed", "setup_failed", "runtime_failed", "capability_unsupported", "skipped_by_policy", "timed_out", "cancelled"] },
     "validationAggregate": { "enum": ["passed", "completed_with_validation_gaps", "blocked_by_capability", "blocked_by_policy", "product_failed", "setup_failed", "runtime_failed", "timed_out", "cancelled"] },
+    "validationNegotiation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "status", "stage", "runtime", "requirements", "requiredUnsupported", "responsibility"],
+      "properties": {
+        "schemaVersion": { "const": 1 }, "status": { "enum": ["accepted", "rejected"] }, "stage": { "const": "task_acceptance" }, "runtime": { "type": "string", "minLength": 1 },
+        "requirements": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["command", "acceptance", "requiredCapabilities", "disposition", "staticallyUnsupportedCapabilities", "reason", "fallbacks", "blocking"], "properties": {
+          "command": { "type": "string", "minLength": 1 }, "acceptance": { "$ref": "#/$defs/validationAcceptance" }, "requiredCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } },
+          "disposition": { "enum": ["execute", "deferred_preflight", "capability_unsupported", "skipped_by_policy"] }, "staticallyUnsupportedCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } },
+          "reason": { "type": "string", "minLength": 1 }, "fallbacks": { "$ref": "#/$defs/strings" }, "blocking": { "type": "boolean" }
+        } } },
+        "requiredUnsupported": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["command", "reason", "fallbacks"], "properties": { "command": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 }, "fallbacks": { "$ref": "#/$defs/strings" } } } },
+        "responsibility": { "type": "object", "additionalProperties": false, "required": ["executionAgreementId", "structuralReview", "semanticReview"], "properties": {
+          "executionAgreementId": { "type": "string", "pattern": "^ea_v1_[a-f0-9]{24}$" },
+          "structuralReview": { "type": "object", "additionalProperties": false, "required": ["kind", "responsibleParty", "source"], "properties": { "kind": { "const": "structural" }, "responsibleParty": { "$ref": "#/$defs/party" }, "source": { "const": "localValidation" } } },
+          "semanticReview": { "type": "object", "additionalProperties": false, "required": ["kind", "responsibleParty", "source"], "properties": { "kind": { "const": "semantic" }, "responsibleParty": { "$ref": "#/$defs/party" }, "source": { "const": "independentReview" } } }
+        } }
+      }
+    },
     "validationPlan": {
       "type": "object", "additionalProperties": false, "required": ["schemaVersion", "createdAt", "profile", "runtime", "commands"],
       "properties": {

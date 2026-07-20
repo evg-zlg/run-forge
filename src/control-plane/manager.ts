@@ -17,7 +17,7 @@ import { assertAgreementProjectBinding, buildExecutionAgreementContext } from ".
 import { listDurableCheckpoints } from "../implementation/durable-checkpoint.js";
 import { acceptCompletedResult, discardCompletedResult } from "./completed-result-acceptance.js";
 import { exposeCheckpointRepairDigests, startCheckpointRepair, type CheckpointRepairRequest } from "./checkpoint-repair.js";
-import { buildTimeoutContract } from "./timeout-contract.js";
+import { buildTimeoutContract } from "./timeout-contract.js"; import { acceptValidationCapabilities } from "./validation-negotiation.js";
 export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
 const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs;
 const heartbeatIntervalMs = 1_000;
@@ -109,12 +109,13 @@ export class ControlPlaneManager {
     if (runforgeOwns(executionAgreement, "localCommit") && !input.authority.localCommit) throw preflightError("local_commit_authority_denied", "The effective agreement requires localCommit authority for the RunForge-owned localCommit phase.", normalized, input.authority);
     assertAgreementAccepted(executionAgreement, taskId);
     assertAgreementMatchesTask(executionAgreement, normalized, preflightAgreement);
+    const validationNegotiation = acceptValidationCapabilities(normalized, executionAgreement, taskId);
     await this.store.saveAgreement(executionAgreement);
     const selected = implementation && !delegatedImplementation ? await selectImplementationExecutor(normalized) : null;
     if (selected && !selected.selected) throw new ControlPlaneError(503, "implementation_executor_unavailable", selected.reason, { requestedMode: normalized.execution.mode, availableExecutors: selected.rejected.map((item) => item.id), rejectedAlternatives: selected.rejected, authorityFailures: [], operation: "start_new_task", newTaskRequired: true }, true, taskId);
     const effectiveTimeoutMs = Math.min(normalized.execution.timeoutMs, this.timing.executionTimeoutMs, implementationExecutorContract.maxLimits.timeoutMs);
     const now = new Date().toISOString(); const task: ControlTaskRecord = {
-      id: taskId, projectId: project?.id ?? null, status: "queued", specPath, artifactRoot, executionAgreement, authority: input.authority, publicationRequested,
+      id: taskId, projectId: project?.id ?? null, status: "queued", specPath, artifactRoot, executionAgreement, validationNegotiation, authority: input.authority, publicationRequested,
       publicationGate: publicationRequested === "draft-pr" ? { required: true, status: "blocked_until_implementation_completes", reason: "Remote publication is a separate decision." } : { required: false, status: "not_requested" }, ownerGate: { required: false, status: "not_required" },
       timeout: buildTimeoutContract(normalized.execution.timeoutMs, effectiveTimeoutMs, this.timing.executionTimeoutMs, implementationExecutorContract.maxLimits.timeoutMs, now),
       createdAt: now, updatedAt: now, startedAt: null, finishedAt: null, error: null, decisions: [], events: [], progress: progress(now, effectiveTimeoutMs), recovery: null,
@@ -132,7 +133,7 @@ export class ControlPlaneManager {
     }
     return task;
   }); }
-  async getResult(id: string): Promise<Record<string, unknown>> { const task = await this.getTask(id); let published = await this.store.readPublishedResult(id); if (!published && task.status === "interrupted") { await this.writeInterruptedResult(task); published = await this.store.readPublishedResult(id); } if (!published || published.executionId !== task.progress.executionId) throw new ControlPlaneError(404, "result_not_ready", `Result is not available for active execution ${task.progress.executionId ?? "pending"}.`, undefined, true, id); const repairAware = await exposeCheckpointRepairDigests({ task, result: published.result, store: this.store }); const bounded = boundPublicResult(repairAware); const agreement = projectAgreementLifecycle(task, published.result); return { ...bounded.result, ...(task.recovery ? { recovery: task.recovery } : {}), controlPlane: { status: task.status, progress: { ...task.progress, agreement }, agreement, ...(task.executionAgreement ? { executionAgreement: task.executionAgreement } : {}), recovery: task.recovery, ownerGate: task.ownerGate, publicationGate: task.publicationGate, authority: task.authority, ...(bounded.truncatedFields.length ? { responseBounds: { truncated: true, ...publicResultLimits, truncatedFields: bounded.truncatedFields } } : {}) } }; }
+  async getResult(id: string): Promise<Record<string, unknown>> { const task = await this.getTask(id); let published = await this.store.readPublishedResult(id); if (!published && task.status === "interrupted") { await this.writeInterruptedResult(task); published = await this.store.readPublishedResult(id); } if (!published || published.executionId !== task.progress.executionId) throw new ControlPlaneError(404, "result_not_ready", `Result is not available for active execution ${task.progress.executionId ?? "pending"}.`, undefined, true, id); const repairAware = await exposeCheckpointRepairDigests({ task, result: published.result, store: this.store }); const bounded = boundPublicResult(repairAware); const agreement = projectAgreementLifecycle(task, published.result); return { ...bounded.result, ...(task.validationNegotiation ? { validationNegotiation: task.validationNegotiation } : {}), ...(task.recovery ? { recovery: task.recovery } : {}), controlPlane: { status: task.status, progress: { ...task.progress, agreement }, agreement, ...(task.executionAgreement ? { executionAgreement: task.executionAgreement } : {}), ...(task.validationNegotiation ? { validationNegotiation: task.validationNegotiation } : {}), recovery: task.recovery, ownerGate: task.ownerGate, publicationGate: task.publicationGate, authority: task.authority, ...(bounded.truncatedFields.length ? { responseBounds: { truncated: true, ...publicResultLimits, truncatedFields: bounded.truncatedFields } } : {}) } }; }
   async acceptCompletedResult(id: string, input: { decisionId: string; checkpointId: string; delivery: "patch" | "local_commit" }): Promise<Record<string, unknown>> { return this.withLock(id, async () => { const task = await this.readTask(id); return acceptCompletedResult({ task, request: input, store: this.store, persist: (type, detail) => this.persist(task, type, detail) }); }); }
   async discardCompletedResult(id: string, input: { decisionId: string; checkpointId: string; confirmation: "discard_result" }): Promise<Record<string, unknown>> { return this.withLock(id, async () => { const task = await this.readTask(id); return discardCompletedResult({ task, request: input, store: this.store, persist: (type, detail) => this.persist(task, type, detail) }); }); }
   async repairFromCheckpoint(id: string, request: CheckpointRepairRequest): Promise<Record<string, unknown>> { return this.withLock(id, async () => { const task = await this.readTask(id); return startCheckpointRepair({ task, request, store: this.store, acceptedSourceIsCurrent: () => this.acceptedSourceIsCurrent(task), beginAttempt: (source) => this.beginAttempt(task, "execution", source), persist: (type, detail) => this.persist(task, type, detail) }); }); }
@@ -268,7 +269,7 @@ export class ControlPlaneManager {
     const context = await this.continuationContext(task);
     if (!context || !nativeMatchesContinuationContext(native, context.binding)) { task.continuation.state = "unrecoverable"; await this.store.saveTask(task); return; }
     task.continuation.sourceExecutionId = task.progress.executionId;
-    const snapshot = { schemaVersion: 1, ...context.binding, authority: task.authority, decisionId: task.continuation.decisionId, executionIdentity: task.continuation.sourceExecutionId, taskSpec: context.spec, specPath: basename(task.specPath), runtime: object(context.spec.runtime), bindingHash: continuationBindingHash(context.binding, task.authority, context.spec), native };
+    const snapshot = { schemaVersion: 1, ...context.binding, authority: task.authority, executionAgreement: task.executionAgreement, validationNegotiation: task.validationNegotiation, decisionId: task.continuation.decisionId, executionIdentity: task.continuation.sourceExecutionId, taskSpec: context.spec, specPath: basename(task.specPath), runtime: object(context.spec.runtime), bindingHash: continuationBindingHash(context.binding, task.authority, context.spec), native };
     await this.store.saveContinuation(task.id, snapshot); task.continuation.state = "available"; await this.store.saveTask(task);
   }
   private async restoreContinuation(task: ControlTaskRecord): Promise<boolean> {
@@ -282,7 +283,7 @@ export class ControlPlaneManager {
     const binding = context.binding;
     const matches = snapshot.schemaVersion === 1 && snapshot.taskId === binding.taskId && snapshot.projectId === binding.projectId && snapshot.repository === binding.repository && snapshot.workingDirectory === binding.workingDirectory && snapshot.sourceBranch === binding.sourceBranch && snapshot.sourceSha === binding.sourceSha
       && snapshot.decisionId === task.continuation.decisionId && snapshot.executionIdentity === sourceExecutionId && JSON.stringify(snapshot.authority) === JSON.stringify(task.authority) && snapshot.bindingHash === continuationBindingHash(binding, task.authority, context.spec)
-      && JSON.stringify(snapshot.taskSpec) === JSON.stringify(context.spec) && nativeMatchesContinuationContext(object(snapshot.native), binding);
+      && JSON.stringify(snapshot.taskSpec) === JSON.stringify(context.spec) && JSON.stringify(snapshot.executionAgreement) === JSON.stringify(task.executionAgreement) && JSON.stringify(snapshot.validationNegotiation) === JSON.stringify(task.validationNegotiation) && nativeMatchesContinuationContext(object(snapshot.native), binding);
     if (!matches) return false;
     task.continuation.sourceExecutionId = sourceExecutionId; await this.store.saveTask(task); return true;
   }

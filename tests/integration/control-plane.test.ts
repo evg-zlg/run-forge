@@ -14,6 +14,71 @@ const servers: ControlPlaneServerInstance[] = [];
 afterEach(async () => { await Promise.all(servers.splice(0).map((item) => item.close())); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("local control-plane HTTP lifecycle", () => {
+  it("publishes the validation/reviewer contract and a schema-valid multi-lane example", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-discovery-"))) - 1]!;
+    const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
+    const discovery = await json(await fetch(`${instance.url}/v1/capabilities/discovery`));
+    expect(discovery).toMatchObject({
+      negotiation: { beforeProviderInvocation: true, requiredUnsupported: { httpStatus: 422, providerInvocations: 0 }, nonRequiredUnsupported: { accepted: true, productFailed: false } },
+      lanes: { "git-evidence": { network: false, credentials: false, mutations: false, safetyAssertions: expect.arrayContaining(["argv_only_no_shell", "source_state_immutable"]) } },
+      review: { distinction: expect.stringContaining("never substitutes"), backends: expect.arrayContaining([expect.objectContaining({ kind: "structural_review", status: "available" }), expect.objectContaining({ kind: "semantic_review", quality: expect.any(String), limitations: expect.any(Array) })]) },
+      responsibility: { structuralReviewPhase: "localValidation", semanticReviewPhase: "independentReview", preservedAcross: expect.arrayContaining(["retry", "restart", "continuation", "normalized result", "handoff"]) },
+      schemas: { validationRequirements: "/schemas/task-spec-v2.schema.json#/properties/validation/properties/requirements", validationPlan: "/schemas/task-result-v1.schema.json#/$defs/validationPlan" },
+    });
+    const schema = await json(await fetch(`${instance.url}/schemas/task-spec-v2.schema.json`));
+    const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(schema);
+    expect(validate(discovery.examples.multiLaneTaskSpec), JSON.stringify(validate.errors)).toBe(true);
+    const resultSchema = await json(await fetch(`${instance.url}/schemas/task-result-v1.schema.json`));
+    const resultAjv = new Ajv2020({ strict: true, strictRequired: false }); resultAjv.addSchema(resultSchema);
+    const validateNegotiation = resultAjv.getSchema("https://runforge.local/schemas/task-result-v1.schema.json#/$defs/validationNegotiation");
+    expect(validateNegotiation).toBeTypeOf("function");
+    expect(await json(await fetch(`${instance.url}/v1/capabilities`))).toMatchObject({ validation: { endpoint: "/v1/capabilities/discovery" } });
+    expect(await json(await fetch(`${instance.url}/.well-known/runforge`))).toMatchObject({ validation: { negotiation: { beforeProviderInvocation: true } } });
+  });
+
+  it("rejects impossible required validation before execution and accepts non-required gaps", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-negotiation-"))) - 1]!;
+    const repository = await syntheticRepository(); let executions = 0;
+    const previous = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = process.execPath;
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), {
+      runTaskSpec: async (specPath) => { executions += 1; const spec = JSON.parse(await readFile(specPath, "utf8")); await mkdir(spec.artifacts.root, { recursive: true }); await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
+      recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never),
+    });
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
+    const resultSchema = await json(await fetch(`${instance.url}/schemas/task-result-v1.schema.json`));
+    const resultAjv = new Ajv2020({ strict: true, strictRequired: false }); resultAjv.addSchema(resultSchema);
+    const validateNegotiation = resultAjv.getSchema("https://runforge.local/schemas/task-result-v1.schema.json#/$defs/validationNegotiation")!;
+    const withRequirement = (taskId: string, acceptance: "required" | "optional" | "advisory" | "evidence-only") => ({
+      ...implementationTaskSpec(taskId, repository),
+      validation: { mode: "explicit", commands: ["node --version"], requirements: [{ command: "node --version", capabilities: ["database"], acceptance, evidenceRole: "capability-sentinel", fallbacks: ["Delegate database evidence to the external session."] }] },
+    });
+    try {
+      const rejected = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: withRequirement("VALIDATION-REQUIRED-1", "required"), authority: implementationAuthority() }) });
+      expect(rejected.status).toBe(422);
+      expect(await json(rejected)).toMatchObject({ error: { code: "validation_capability_unavailable", taskId: "VALIDATION-REQUIRED-1", details: { negotiation: { status: "rejected", requiredUnsupported: [{ command: "node --version" }] } } } });
+      expect(executions).toBe(0);
+      expect(await manager.store.getTask("VALIDATION-REQUIRED-1")).toBeNull();
+
+      for (const acceptance of ["optional", "advisory", "evidence-only"] as const) {
+        const taskId = `VALIDATION-${acceptance.toUpperCase().replace("-", "_")}-1`;
+        const accepted = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: withRequirement(taskId, acceptance), authority: implementationAuthority() }) });
+        expect(accepted.status).toBe(202);
+        expect(await json(accepted)).toMatchObject({ validationNegotiation: { status: "accepted", requirements: [{ acceptance, disposition: "capability_unsupported", blocking: false }], responsibility: { structuralReview: { source: "localValidation" }, semanticReview: { source: "independentReview" } } } });
+        await eventually(async () => (await manager.getTask(taskId)).status === "completed");
+        const result = await json(await fetch(`${instance.url}/v1/tasks/${taskId}/result`));
+        expect(result.status).toBe("completed");
+        expect(result.validationNegotiation).toMatchObject({ status: "accepted", requirements: [{ acceptance, blocking: false }] });
+        expect(validateNegotiation!(result.validationNegotiation), JSON.stringify(validateNegotiation!.errors)).toBe(true);
+        expect(result.status).not.toBe("product_failed");
+        expect((await new ControlPlaneStore(stateRoot).getTask(taskId))?.validationNegotiation).toEqual(result.validationNegotiation);
+      }
+      expect(executions).toBe(3);
+    } finally {
+      if (previous === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previous;
+    }
+  });
+
   it("publishes degraded adapter-honest capabilities and negotiates durable registered-project context", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-project-agreement-"))) - 1]!;
     const previous = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;

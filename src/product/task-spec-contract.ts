@@ -17,6 +17,22 @@ export const implementationExecutorContract = {
   maxLimits: { timeoutMs: 1_800_000, repairIterations: 3, changedFiles: 100, patchBytes: 5_000_000, providerTokens: 200_000 }
 };
 
+/** Schema-valid public example showing product and read-only Git evidence lanes. */
+export const multiLaneTaskSpecExample = {
+  schemaVersion: 2, taskId: "VALIDATE-MULTI-LANE-1",
+  task: { text: "Validate the bounded change and collect Git evidence.", goal: "Return product validation plus SHA-bound read-only Git evidence.", acceptanceCriteria: ["Product validation passes", "Git evidence is recorded without source mutation"] },
+  target: { repository: "/absolute/path/to/project", workingDirectory: "." },
+  execution: { mode: "implementation", maxRepairIterations: 2, timeoutMs: 300000, maxProviderTokens: 100000 },
+  executionAgreement: { schemaVersion: 1, profile: "local-ready" },
+  runtime: { preference: "local-disposable", dependencyPreparation: "if-needed", externalNetwork: "allowed" },
+  validation: { mode: "explicit", commands: ["corepack pnpm test", "git diff --check"], requirements: [
+    { command: "corepack pnpm test", capabilities: ["package-manager", "dependencies"], acceptance: "required", evidenceRole: "product-validation", fallbacks: [] },
+    { command: "git diff --check", capabilities: ["git-read-only-evidence"], acceptance: "evidence-only", evidenceRole: "git-evidence", fallbacks: ["Attach the external session's SHA-bound diff evidence."] },
+  ] },
+  authority: { profile: "bounded-implementation", forbiddenAreas: [".env", "secrets"], allowProviderCalls: true, allowNetwork: true },
+  git: { publication: "none", branch: null }, merge: { policy: "never" }, deploy: { policy: "never" }, repair: { mode: "none", plan: null },
+} as const;
+
 export function defaultRuntimeForMode(mode: TaskExecutionMode): TaskRuntimeId {
   return implementationExecutorContract.modes.includes(mode as "implementation" | "repair")
     ? implementationExecutorContract.defaultRuntime
@@ -84,6 +100,8 @@ export function publicTaskSpecContract(): Record<string, unknown> {
       lanes: { product: ["docker-validation", "local-disposable-validation"], gitEvidence: "git-evidence" },
       gitEvidence: { binding: ["canonicalRepositoryIdentity", "expectedTargetSha"], execution: "argv-only", network: false, mutations: false },
       autoDiscoveryDefaults: { acceptance: "required", evidenceRole: "product-validation", unknownCommands: "capability_unsupported_until_explicitly_described" },
+      taskAcceptanceNegotiation: { stage: "before_provider_invocation", requiredUnsupported: "http_422_validation_capability_unavailable", nonRequiredUnsupported: "accepted_and_reported_as_validation_gap" },
+      multiLaneTaskSpecExample,
     },
     runtimeDefaults: { implementation: executor.defaultRuntime, repair: executor.defaultRuntime, inspection: "docker", validation: "docker" },
     implementationExecutorIds: [executor.id],
