@@ -153,7 +153,7 @@ function safeEndpoint(value = DEFAULT_OPENROUTER_ENDPOINT): string {
 }
 
 function validateRequest(request: OpenRouterExecutionRequest): void {
-  if (!request.model || !request.messages.length || !Number.isInteger(request.maxCalls) || request.maxCalls < 1 || request.maxCalls > 20 || !Number.isFinite(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > 600_000 || (request.retryDelayMs !== undefined && (!Number.isFinite(request.retryDelayMs) || request.retryDelayMs < 0 || request.retryDelayMs > 60_000))) throw new OpenRouterExecutionError("invalid_request", "OpenRouter request limits are invalid.");
+  if (!request.model || !request.messages.length || !Number.isInteger(request.maxCalls) || request.maxCalls < 1 || request.maxCalls > 20 || !Number.isFinite(request.timeoutMs) || request.timeoutMs < 1 || request.timeoutMs > 1_800_000 || (request.retryDelayMs !== undefined && (!Number.isFinite(request.retryDelayMs) || request.retryDelayMs < 0 || request.retryDelayMs > 60_000))) throw new OpenRouterExecutionError("invalid_request", "OpenRouter request limits are invalid.");
   if (request.reasoning !== undefined) {
     const reasoning = object(request.reasoning);
     if (!reasoning) throw new OpenRouterExecutionError("invalid_request", "OpenRouter reasoning config is invalid.");

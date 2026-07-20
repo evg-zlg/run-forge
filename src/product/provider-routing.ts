@@ -51,7 +51,7 @@ export function normalizeProviderRouting(value: unknown, execution: { maxProvide
   if (fallbackPolicy === "same_provider" && retry.maxAttempts < 2) throw new Error("providerRouting.fallbackPolicy='same_provider' requires providerRouting.retry.maxAttempts of at least 2.");
   if (provider === "local" && fallbackPolicy !== "none") throw new Error("providerRouting.provider='local' only supports fallbackPolicy='none'.");
   if (provider === "local" && Object.keys(reasoning ?? {}).length > 0) throw new Error("providerRouting.reasoning is only supported when providerRouting.provider='openrouter'.");
-  return { provider, fallbackPolicy, models, maxCalls: integer(raw.maxCalls, "providerRouting.maxCalls", 1, 32, 4), tokenBudget: { total, perPhase }, ...(raw.costBudgetUsd === undefined ? {} : { costBudgetUsd: finiteNumber(raw.costBudgetUsd, "providerRouting.costBudgetUsd", 0, 1_000) }), timeoutMs: integer(raw.timeoutMs, "providerRouting.timeoutMs", 1_000, Math.min(execution.timeoutMs, 600_000), Math.min(execution.timeoutMs, 600_000)), retry, ...(Object.keys(reasoning ?? {}).length > 0 ? { reasoning } : {}) };
+  return { provider, fallbackPolicy, models, maxCalls: integer(raw.maxCalls, "providerRouting.maxCalls", 1, 32, 4), tokenBudget: { total, perPhase }, ...(raw.costBudgetUsd === undefined ? {} : { costBudgetUsd: finiteNumber(raw.costBudgetUsd, "providerRouting.costBudgetUsd", 0, 1_000) }), timeoutMs: integer(raw.timeoutMs, "providerRouting.timeoutMs", 1_000, execution.timeoutMs, execution.timeoutMs), retry, ...(Object.keys(reasoning ?? {}).length > 0 ? { reasoning } : {}) };
 }
 
 export function assertNoCredentialLikeKey(key: string, path: string): void {
