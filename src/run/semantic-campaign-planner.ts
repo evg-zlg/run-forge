@@ -49,12 +49,12 @@ export async function planSemanticCampaign(campaignId: string, spec: CampaignSpe
   const usage = { tokens: 0, costUsd: 0 };
   const first = await invoke(chat, model, prompt, spec, usage, 1, false);
   const checked = validateDraft(first.content, spec);
-  if (checked.nodes) return { plan: trustedPlan(campaignId, spec, checked.nodes), evidence: { mode: "semantic-openrouter", model, attempts: 1, repaired: false, usage, validationCodes: [] } };
+  if (checked.nodes) return { plan: trustedPlan(campaignId, spec, checked.nodes), evidence: { mode: "semantic-openrouter", model, attempts: 1, repaired: false, usage, validationCodes: checked.notices ?? [] } };
   const repair = repairPrompt(checked.codes, first.content, spec);
   const second = await invoke(chat, model, repair, spec, usage, 2, true);
   const repaired = validateDraft(second.content, spec);
   if (!repaired.nodes) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: 2, repaired: true, usage, validationCodes: [...new Set([...checked.codes, ...repaired.codes])].sort() });
-  return { plan: trustedPlan(campaignId, spec, repaired.nodes), evidence: { mode: "semantic-openrouter", model, attempts: 2, repaired: true, usage, validationCodes: checked.codes } };
+  return { plan: trustedPlan(campaignId, spec, repaired.nodes), evidence: { mode: "semantic-openrouter", model, attempts: 2, repaired: true, usage, validationCodes: [...new Set([...checked.codes, ...(repaired.notices ?? [])])].sort() } };
 }
 
 async function invoke(chat: Chat, model: string, content: string, spec: CampaignSpec, usage: { tokens: number; costUsd: number }, attempts: number, repaired: boolean): Promise<OpenRouterExecutionResult> {
@@ -68,7 +68,7 @@ async function invoke(chat: Chat, model: string, content: string, spec: Campaign
   }
 }
 
-function validateDraft(content: string, spec: CampaignSpec): { nodes?: DraftNode[]; codes: string[] } {
+function validateDraft(content: string, spec: CampaignSpec): { nodes?: DraftNode[]; codes: string[]; notices?: string[] } {
   let value: unknown;
   try { value = JSON.parse(extractJson(content)); } catch { return { codes: ["INVALID_JSON"] }; }
   const root = object(value);
@@ -101,11 +101,10 @@ function validateDraft(content: string, spec: CampaignSpec): { nodes?: DraftNode
   if (!codes.has("INVALID_DEPENDENCY") && detectCycle(nodes).length) codes.add("CYCLE");
   if (hasConcurrentOverlap(nodes)) codes.add("OVERLAPPING_SCOPE");
   if (spec.authority.implementation) { const dependedOn = new Set(nodes.flatMap((node) => node.dependsOn)); const sinks = nodes.filter((node) => !dependedOn.has(node.id)); if (!sinks.some((node) => /test|valid|verif|check/i.test(`${node.goal} ${node.acceptanceCriteria.join(" ")}`))) codes.add("MISSING_FINAL_VALIDATION"); }
-  const tokens = nodes.reduce((sum, node) => sum + node.estimatedTokens, 0);
-  const cost = nodes.reduce((sum, node) => sum + (node.estimatedCostUsd ?? 0), 0);
-  if (tokens > Math.floor(spec.limits.maxTokens * .8)) codes.add("CHILD_TOKEN_RESERVE_EXCEEDED");
-  if (spec.limits.maxCostUsd !== undefined && cost > spec.limits.maxCostUsd * .8) codes.add("CHILD_COST_RESERVE_EXCEEDED");
-  return codes.size ? { codes: [...codes].sort() } : { nodes, codes: [] };
+  const notices: string[] = [];
+  if (nodes.length * 1_000 > Math.floor(spec.limits.maxTokens * .8)) codes.add("MINIMUM_CHILD_BUDGET_EXCEEDED");
+  if (!codes.size) normalizeEstimates(nodes, spec, notices);
+  return codes.size ? { codes: [...codes].sort() } : { nodes, codes: [], notices };
 }
 
 function trustedPlan(campaignId: string, spec: CampaignSpec, draft: DraftNode[]): CampaignPlan {
@@ -141,6 +140,7 @@ function repairPrompt(codes: string[], previous: string, spec: CampaignSpec): st
 function extractJson(text: string): string { const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i); return (fenced?.[1] ?? text).trim(); }
 function hasConcurrentOverlap(nodes: DraftNode[]): boolean { const byId = new Map(nodes.map((node) => [node.id, node])); const reaches = (from: string, target: string, seen = new Set<string>()): boolean => from === target || (!seen.has(from) && (seen.add(from), (byId.get(from)?.dependsOn ?? []).some((dep) => reaches(dep, target, seen)))); for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) { const a = nodes[i]!, b = nodes[j]!; if (reaches(a.id, b.id) || reaches(b.id, a.id)) continue; if (a.writeScopes.some((left) => b.writeScopes.some((right) => scopeOverlap(left, right)))) return true; } return false; }
 function scopeOverlap(left: string, right: string): boolean { const a = left.replace(/\/$/, ""), b = right.replace(/\/$/, ""); return a === b || a.startsWith(`${b}/`) || b.startsWith(`${a}/`); }
+function normalizeEstimates(nodes: DraftNode[], spec: CampaignSpec, notices: string[]): void { const tokenCap = Math.floor(spec.limits.maxTokens * .8), tokenTotal = nodes.reduce((sum, node) => sum + node.estimatedTokens, 0); if (tokenTotal > tokenCap) { const room = tokenCap - nodes.length * 1_000, weights = nodes.map((node) => Math.max(0, node.estimatedTokens - 1_000)), rawWeightTotal = weights.reduce((sum, value) => sum + value, 0), equal = rawWeightTotal === 0, denominator = equal ? nodes.length : rawWeightTotal; let assigned = 0; nodes.forEach((node, index) => { const extra = index === nodes.length - 1 ? room - assigned : Math.floor(room * (equal ? 1 : weights[index]!) / denominator); node.estimatedTokens = 1_000 + Math.max(0, extra); assigned += Math.max(0, extra); }); notices.push("TOKEN_ESTIMATES_NORMALIZED"); } const costCap = spec.limits.maxCostUsd === undefined ? null : spec.limits.maxCostUsd * .8, costTotal = nodes.reduce((sum, node) => sum + (node.estimatedCostUsd ?? 0), 0); if (costCap !== null && costTotal > costCap) { const ratio = costCap / costTotal; for (const node of nodes) if (node.estimatedCostUsd !== undefined) node.estimatedCostUsd = Number((node.estimatedCostUsd * ratio).toFixed(6)); notices.push("COST_ESTIMATES_NORMALIZED"); } }
 function phaseBudget(total: number): Record<string, number> { return { startup: Math.floor(total * .03), analysis: Math.floor(total * .12), implementation: Math.floor(total * .55), validation: Math.floor(total * .1), repair: Math.floor(total * .12), review: Math.floor(total * .05), publication: 0 }; }
 function providerBudget(total: number): Record<string, number> { const planner = Math.max(100, Math.floor(total * .2)), repair = Math.max(100, Math.floor(total * .15)), reviewer = Math.max(100, Math.floor(total * .1)); return { planner, implementer: Math.max(400, total - planner - repair - reviewer), repair, reviewer }; }
 function safePath(value: string): boolean { return Boolean(value) && !value.startsWith("/") && !value.split("/").includes("..") && !excludedPath.test(value); }

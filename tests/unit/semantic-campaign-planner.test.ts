@@ -46,4 +46,11 @@ describe("semantic campaign planner", () => {
     expect(chat).not.toHaveBeenCalled();
     expect(result.evidence).toMatchObject({ mode: "deterministic-local", attempts: 0, usage: { tokens: 0, costUsd: 0 } });
   });
+
+  it("normalizes advisory child estimates while preserving the validated DAG", async () => {
+    const oversized = structuredClone(valid); oversized.nodes.forEach((node) => { node.estimatedTokens = 15_000; node.estimatedCostUsd = 1; });
+    const result = await planSemanticCampaign("cmp_v1_623456789012345678901234", spec(), { chatCompletion: async () => response(JSON.stringify(oversized)), repositoryManifest: {} });
+    expect(result.plan.estimatedTokens).toBe(16_000); expect(result.plan.estimatedCostUsd).toBeCloseTo(.8);
+    expect(result.evidence.validationCodes).toEqual(["TOKEN_ESTIMATES_NORMALIZED", "COST_ESTIMATES_NORMALIZED"]);
+  });
 });
