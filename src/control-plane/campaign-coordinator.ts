@@ -7,6 +7,7 @@ import { boundPublicResult } from "./manager-results.js";
 import { ControlPlaneError, type CampaignPlan, type CampaignRecord, type CampaignSpec, type ControlTaskRecord } from "./contracts.js";
 import { CampaignIntegration, CampaignIntegrationError } from "./campaign-integration.js";
 import { accountCampaignChildUsage, aggregateCampaignUsage as aggregateUsageFromValue, campaignChildCompletion, childReservationTokens, deterministicPlannerEvidence, failedPlannerEvidence, finiteNumber, object, reconcileCampaignResult, releaseCampaignReservation, reserveCampaignChild, reservedUsage, taskIdFromSpec, usageFromEvidence } from "./campaign-coordinator-state.js";
+import { CampaignCoordinatorLease } from "./campaign-coordinator-lease.js";
 
 type Deps = {
   root: string;
@@ -19,14 +20,18 @@ type Deps = {
 
 export class CampaignCoordinator {
   private readonly activeCampaignLoops = new Map<string, Promise<void>>();
-  private readonly integration: CampaignIntegration;
-  constructor(private readonly deps: Deps) { this.integration = deps.integration ?? new CampaignIntegration(); }
-  async initialize(): Promise<void> { for (const campaign of await this.readCampaigns()) if (["planning", "queued", "running"].includes(campaign.status)) this.ensureCampaignLoop(campaign.id); }
-  close(): void { this.activeCampaignLoops.clear(); }
+  private readonly integration: CampaignIntegration; private readonly lease: CampaignCoordinatorLease;
+  private generation = 0;
+  constructor(private readonly deps: Deps) { this.integration = deps.integration ?? new CampaignIntegration(); this.lease = new CampaignCoordinatorLease(deps.root); }
+  async initialize(): Promise<void> { this.activate(); try { for (const campaign of await this.readCampaigns()) if (["planning", "queued", "running"].includes(campaign.status)) this.ensureCampaignLoop(campaign.id); } catch (error) { this.close(); throw error; } }
+  close(): void { this.generation += 1; this.activeCampaignLoops.clear(); this.lease.release(); }
   async createCampaign(spec: CampaignSpec): Promise<CampaignRecord> {
+    this.activate();
     if (!spec.authority.inspect) throw new ControlPlaneError(403, "authority_denied", "inspect authority is required to create a campaign.");
+    if (spec.providerRouting.provider === "openrouter" && (!spec.authority.providerCalls || !spec.authority.network)) throw new ControlPlaneError(403, "authority_denied", "OpenRouter campaigns require providerCalls and network authority before semantic planning.");
     if (spec.authority.implementation && !spec.authority.providerCalls) throw new ControlPlaneError(403, "authority_denied", "Campaign authority expansion rejected: implementation requires providerCalls authority.");
     if (spec.authority.implementation && spec.providerRouting.provider === "local") throw new ControlPlaneError(422, "invalid_campaign", "Local implementation campaigns are disabled; use an isolated OpenRouter integration campaign.");
+    if (spec.authority.implementation && spec.providerRouting.provider === "openrouter" && !spec.target.repository) throw new ControlPlaneError(422, "invalid_campaign", "OpenRouter implementation campaigns require an explicit target.repository.");
     if (spec.authority.implementation && spec.providerRouting.provider === "openrouter" && spec.target.projectId) throw new ControlPlaneError(422, "invalid_campaign", "OpenRouter implementation campaigns require a repository target, not projectId dual binding.");
     if (spec.authority.implementation && spec.providerRouting.provider === "openrouter" && (!spec.authority.localBranch || !spec.authority.localCommit)) throw new ControlPlaneError(403, "authority_denied", "OpenRouter implementation campaigns require localBranch and localCommit authority for isolated reconciliation.");
     if (spec.providerRouting.provider === "openrouter" && spec.providerRouting.fallbackPolicy && spec.providerRouting.fallbackPolicy !== "none") throw new ControlPlaneError(422, "invalid_campaign", "OpenRouter campaigns must set fallbackPolicy='none'.");
@@ -34,7 +39,6 @@ export class CampaignCoordinator {
     const now = new Date().toISOString();
     const id = `cmp_v1_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
     const record: CampaignRecord = { schemaVersion: 1, id, status: "planning", spec, plan: null, plannerEvidence: null, integration: null, children: {}, usage: { tokens: 0, costUsd: 0, tasks: 0 }, reserved: { tokens: 0, costUsd: 0 }, checkpoints: [], failures: [], result: null, createdAt: now, updatedAt: now };
-    // Generic Git integrity is not a complete project validation contract.
     if (spec.authority.implementation && !spec.validationContract?.requiredCommands.length) {
       record.status = "on_hold";
       record.failures.push({ at: now, reason: "campaign_validation_contract_unknown" });
@@ -69,7 +73,7 @@ export class CampaignCoordinator {
       await this.saveCampaign(record);
       return record;
     }
-    validateCampaignPlan(plan, { maxTasks: spec.limits.maxTasks, maxTokens: spec.limits.maxTokens, maxCostUsd: spec.limits.maxCostUsd }, spec.authority, { requireOpenRouter: spec.providerRouting.provider === "openrouter" });
+    validateCampaignPlan(plan, { maxTasks: spec.limits.maxTasks, maxTokens: spec.limits.maxTokens, maxCostUsd: spec.limits.maxCostUsd }, spec.authority, { requireOpenRouter: spec.providerRouting.provider === "openrouter", implementation: spec.authority.implementation, requiredValidationCommands: spec.validationContract?.requiredCommands });
     const cycle = detectCycle(plan.nodes.map((item) => ({ id: item.id, dependsOn: item.dependsOn })));
     if (cycle.length) throw new ControlPlaneError(422, "campaign_cycle_detected", `Campaign plan contains a cycle: ${cycle.join(" -> ")}`);
     record.plan = plan;
@@ -95,9 +99,12 @@ export class CampaignCoordinator {
     if (!["completed", "failed", "on_hold"].includes(campaign.status) || !campaign.result) throw new ControlPlaneError(404, "campaign_result_not_ready", `Campaign result is not ready: ${id}`);
     return campaign.result;
   }
+  private activate(): void { if (!this.lease.active) { this.lease.acquire(); this.generation += 1; } } private current(generation: number): boolean { return this.lease.active && this.generation === generation; }
   private ensureCampaignLoop(id: string): void {
     if (this.activeCampaignLoops.has(id)) return;
-    const loop = this.runCampaign(id).catch((error) => this.handleCampaignLoopFailure(id, error)).finally(() => this.activeCampaignLoops.delete(id));
+    const generation = this.generation;
+    let loop: Promise<void>;
+    loop = this.runCampaign(id, generation).catch((error) => this.current(generation) ? this.handleCampaignLoopFailure(id, error) : undefined).finally(() => { if (this.activeCampaignLoops.get(id) === loop) this.activeCampaignLoops.delete(id); });
     this.activeCampaignLoops.set(id, loop);
   }
   private async handleCampaignLoopFailure(id: string, error: unknown): Promise<void> {
@@ -107,15 +114,16 @@ export class CampaignCoordinator {
     campaign.failures.push({ at: new Date().toISOString(), reason });
     await this.finishCampaign(campaign, "failed");
   }
-  private async runCampaign(id: string): Promise<void> {
+  private async runCampaign(id: string, generation: number): Promise<void> {
     while (true) {
+      if (!this.current(generation)) return;
       const campaign = await this.readCampaign(id);
       if (!campaign || !campaign.plan || ["completed", "failed", "on_hold"].includes(campaign.status)) return;
       campaign.status = "running";
       let progressed = false;
       for (const child of Object.values(campaign.children)) {
         if (child.status === "dispatching") {
-          const node = campaign.plan.nodes.find((item) => item.id === child.nodeId);
+          if (!this.current(generation)) return; const node = campaign.plan.nodes.find((item) => item.id === child.nodeId);
           if (!node) return this.failReservedChild(campaign, child, "CAMPAIGN_NODE_MISSING");
           await this.dispatchReservedChild(campaign, child, node, this.taskSpecForNode(campaign, node));
           progressed = true;
@@ -138,7 +146,7 @@ export class CampaignCoordinator {
           }
           if (!child.accounted) {
             accountCampaignChildUsage(campaign, child, result);
-            const integrationStatus = await this.integrateCompletedChild(campaign, child, task);
+            if (!this.current(generation)) return; const integrationStatus = await this.integrateCompletedChild(campaign, child, task);
             if (integrationStatus === "repair_started") continue;
             if (integrationStatus === "failed") { campaign.status = "failed"; continue; }
           }
@@ -147,7 +155,7 @@ export class CampaignCoordinator {
         } else if (["failed", "interrupted", "awaiting_owner_decision"].includes(task.status)) {
           progressed = true;
           if (!child.accounted) { const result = await this.deps.getResult(child.taskId).catch(() => ({})); accountCampaignChildUsage(campaign, child, result); }
-          if (await this.retryFailedChild(campaign, child, task.error ?? "CHILD_EXECUTION_FAILED")) continue;
+          if (!this.current(generation)) return; if (await this.retryFailedChild(campaign, child, task.error ?? "CHILD_EXECUTION_FAILED")) continue;
           child.status = "failed"; child.finishedAt = new Date().toISOString(); child.error = task.error ?? "child_failed"; campaign.status = "failed"; campaign.failures.push({ at: child.finishedAt, nodeId: child.nodeId, taskId: child.taskId, reason: child.error });
         } else child.status = "running";
       }
@@ -172,8 +180,7 @@ export class CampaignCoordinator {
             return this.finishCampaign(campaign, "failed");
           }
           const child = campaign.children[node.id]!;
-          reserveCampaignChild(campaign, child, node, taskIdFromSpec(this.taskSpecForNode(campaign, node)));
-          // Persist before dispatch so restart reconciliation cannot spend this budget twice.
+          if (!this.current(generation)) return; reserveCampaignChild(campaign, child, node, taskIdFromSpec(this.taskSpecForNode(campaign, node)));
           await this.saveCampaign(campaign);
           await this.dispatchReservedChild(campaign, child, node, this.taskSpecForNode(campaign, node));
           progressed = true;
@@ -205,7 +212,6 @@ export class CampaignCoordinator {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
-  /** Adopt a durable TaskSpec taskId before creating a replacement after restart. */
   private async dispatchReservedChild(campaign: CampaignRecord, child: CampaignRecord["children"][string], node: CampaignPlan["nodes"][number], taskSpec: Record<string, unknown>): Promise<void> {
     const expectedId = child.taskId ?? taskIdFromSpec(taskSpec);
     if (!expectedId) throw new ControlPlaneError(422, "invalid_campaign", `Campaign node '${node.id}' has no deterministic task id.`);
@@ -214,7 +220,6 @@ export class CampaignCoordinator {
       child.status = task.status === "queued" ? "queued" : "running";
       child.startedAt ??= new Date().toISOString();
       campaign.updatedAt = new Date().toISOString();
-      // Persist immediately after the external createTask side effect.
       await this.saveCampaign(campaign);
     };
     const existing = await this.deps.getTask(expectedId).catch(() => null);
@@ -223,7 +228,6 @@ export class CampaignCoordinator {
     try {
       created = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec, authority: campaign.spec.authority, publicationRequested: "none" });
     } catch (error) {
-      // Reconcile a deterministic id created concurrently after our first read.
       const raced = await this.deps.getTask(expectedId).catch(() => null);
       if (raced) return bind(raced);
       releaseCampaignReservation(campaign, child);
@@ -253,7 +257,6 @@ export class CampaignCoordinator {
   private taskSpecForNode(campaign: CampaignRecord, node: CampaignPlan["nodes"][number], repair?: { nodeId: string; attempt: number; code: string; kind: "ir" | "er" }): Record<string, unknown> {
     const source = node.taskSpec;
     const taskSpec = structuredClone(source), target = object(taskSpec.target), task = object(taskSpec.task);
-    // Keep the planner write boundary executable and distinct from read context.
     const discovery = object(taskSpec.discovery);
     taskSpec.discovery = { ...discovery, writeScopes: [...(node.writeScopes ?? [])] };
     const integration = campaign.integration;
@@ -261,14 +264,11 @@ export class CampaignCoordinator {
       taskSpec.target = { ...target, repository: integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: integration.headSha };
       const routing = object(taskSpec.providerRouting), tokenBudget = object(routing.tokenBudget), execution = object(taskSpec.execution), implementation = execution.mode === "implementation";
       const configuredTotal = finiteNumber(tokenBudget.total) ?? finiteNumber(execution.maxProviderTokens) ?? 1_000;
-      // A node estimate is a hard reservation bounded by the live campaign remainder.
       const nodeReservation = finiteNumber(node.estimatedTokens) ?? configuredTotal;
-      // Protect peers without subtracting this child's own authorized reservation.
       const campaignRemaining = Math.max(0, campaign.spec.limits.maxTokens - campaign.usage.tokens - reservedUsage(campaign).tokens + childReservationTokens(campaign, node.id));
       const total = Math.min(configuredTotal, nodeReservation, campaignRemaining);
       taskSpec.execution = implementation ? { ...execution, maxRepairIterations: 0, maxProviderTokens: total } : execution;
       taskSpec.providerRouting = { ...routing, maxCalls: implementation ? 1 : routing.maxCalls, tokenBudget: { ...tokenBudget, total, perPhase: implementation ? { planner: 0, implementer: total, repair: 0, reviewer: 0 } : object(tokenBudget.perPhase) } };
-      // Bind final validation to the integrated head and immutable campaign base.
       const validation = object(taskSpec.validation);
       if (typeof validation.mode === "string" && Array.isArray(validation.commands)) {
         const replaceBase = (value: unknown): unknown => typeof value === "string" ? value.replaceAll("__CAMPAIGN_BASE__", integration.baseSha) : value;
@@ -292,7 +292,6 @@ export class CampaignCoordinator {
     const patchPath = join(task.artifactRoot, "implementation.patch");
     const execution = object(node.taskSpec.execution);
     if (!await lstat(patchPath).catch(() => null)) {
-      // Only implementation children must produce an integration patch.
       return execution.mode === "implementation" ? this.integrationFailure(campaign, child, "IMPLEMENTATION_PATCH_MISSING") : "complete";
     }
     const discovery = object(node.taskSpec.discovery), allowedScopes = node.writeScopes ?? (Array.isArray(discovery.explicitFiles) ? discovery.explicitFiles.filter((item): item is string => typeof item === "string") : []);
