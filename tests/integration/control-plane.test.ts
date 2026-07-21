@@ -88,6 +88,10 @@ describe("local control-plane HTTP lifecycle", () => {
     await writeFile(dockerPath, `#!/bin/sh
 if [ "$1" = "--version" ]; then echo "Docker version 99.0.0, build test"; exit 0; fi
 printf '%s\\n' "$*" >> "${dockerLog}"
+if [ "$1" = "volume" ]; then
+  if [ "$2" = "create" ]; then for argument in "$@"; do volume="$argument"; done; printf '%s\\n' "$volume"; fi
+  exit 0
+fi
 workspace=""
 last=""
 for argument in "$@"; do
@@ -160,6 +164,17 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
       const invocations = await readFile(dockerLog, "utf8");
       expect(invocations).toContain("node --version"); expect(invocations).toContain("test ! -d .git");
       expect(invocations).not.toContain("git diff --check"); expect(invocations).not.toContain(databaseCommand);
+      const lifecycle = invocations.trim().split("\n");
+      const createIndex = lifecycle.findIndex((line) => line.startsWith("volume create "));
+      const removeIndex = lifecycle.findIndex((line) => line.startsWith("volume rm -f "));
+      const runIndexes = lifecycle.flatMap((line, index) => line.startsWith("run ") ? [index] : []);
+      const volume = lifecycle[createIndex]!.split(" ").at(-1)!;
+      expect(volume).toMatch(/^runforge-validation-tmp-validation-multilane-dogfood-1-[a-z0-9.-]+-[a-f0-9]{16}$/);
+      expect(runIndexes).toHaveLength(2);
+      expect(runIndexes.every((index) => lifecycle[index]!.includes(`type=volume,src=${volume},dst=/runforge-tmp`))).toBe(true);
+      expect(createIndex).toBeLessThan(runIndexes[0]!);
+      expect(removeIndex).toBeGreaterThan(runIndexes.at(-1)!);
+      expect(lifecycle[removeIndex]).toBe(`volume rm -f ${volume}`);
       expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim()).toBe(before.head);
       expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim()).toBe(before.status);
     } finally {
