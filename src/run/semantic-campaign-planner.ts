@@ -42,6 +42,7 @@ const excludedPath = /(^|\/)(?:\.git|\.env(?:\..*)?|node_modules|dist|coverage|a
 const campaignBasePlaceholder = "__CAMPAIGN_BASE__";
 const minimumPlannerCompletionTokens = 1_000;
 const plannerSystemPrompt = "Return only strict JSON. Never emit TaskSpec, authority, credentials, prose, or markdown.";
+const plannerFramingTokenMargin = 256;
 
 export async function planSemanticCampaign(campaignId: string, spec: CampaignSpec, options: Options = {}): Promise<SemanticCampaignPlannerResult> {
   if (spec.providerRouting.provider === "local") return { plan: planCampaignFromGoal(campaignId, spec), evidence: emptyEvidence("deterministic-local", null) };
@@ -62,7 +63,9 @@ export async function planSemanticCampaign(campaignId: string, spec: CampaignSpe
 
 async function invoke(chat: Chat, model: string, content: string, spec: CampaignSpec, usage: { tokens: number; costUsd: number }, attempts: number, repaired: boolean): Promise<OpenRouterExecutionResult> {
   const remaining = spec.limits.maxTokens - usage.tokens;
-  const promptTokens = Math.ceil((plannerSystemPrompt.length + content.length) / 4);
+  // One token per UTF-8 byte plus a fixed chat-framing margin is intentionally
+  // conservative: it never assumes ASCII text or a favorable tokenizer ratio.
+  const promptTokens = Buffer.byteLength(plannerSystemPrompt, "utf8") + Buffer.byteLength(content, "utf8") + plannerFramingTokenMargin;
   const completionBudget = Math.min(12_000, Math.floor(spec.limits.maxTokens / 3), remaining - promptTokens);
   if (completionBudget < minimumPlannerCompletionTokens) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: attempts - 1, repaired, usage, validationCodes: ["PLANNER_TOKEN_BUDGET_EXHAUSTED"] });
   try {
@@ -71,6 +74,7 @@ async function invoke(chat: Chat, model: string, content: string, spec: Campaign
     usage.tokens += consumed;
     usage.costUsd += result.usage.costUsd ?? 0;
     if (consumed > remaining) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_TOKEN_BUDGET_EXCEEDED"] });
+    if (spec.limits.maxCostUsd !== undefined && usage.costUsd >= spec.limits.maxCostUsd) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_COST_BUDGET_EXCEEDED"] });
     return result;
   } catch (error) {
     if (error instanceof SemanticCampaignPlannerError) throw error;

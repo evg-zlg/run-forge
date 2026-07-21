@@ -10,7 +10,7 @@ const valid = { nodes: [{ id: "inspect", goal: "Inspect feature", acceptanceCrit
 
 describe("semantic campaign planner", () => {
   it("turns a semantic draft into trusted bounded task specs", async () => {
-    const chat = vi.fn(async () => response(JSON.stringify(valid)));
+    const chat = vi.fn(async (_request: unknown) => response(JSON.stringify(valid)));
     const result = await planSemanticCampaign("cmp_v1_123456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: { files: ["src/a.ts"] } });
     expect(result.plan.nodes).toHaveLength(3);
     expect(result.plan.nodes[1]!.taskSpec).toMatchObject({ target: { expectedSha: "abcdef1234567" }, providerRouting: { provider: "openrouter", fallbackPolicy: "none" }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" }, discovery: { explicitFiles: ["src/a.ts"] } });
@@ -20,6 +20,9 @@ describe("semantic campaign planner", () => {
     expect(result.plan.nodes[0]!.taskSpec).toMatchObject({ execution: { mode: "inspection" }, authority: { allowProviderCalls: false, allowNetwork: false } });
     expect(JSON.stringify(result.evidence)).not.toMatch(/src\/a|Evidence recorded|request/);
     expect(result.evidence).toMatchObject({ mode: "semantic-openrouter", attempts: 1, repaired: false, usage: { tokens: 100, costUsd: .001 } });
+    const request = chat.mock.calls[0]![0] as any;
+    const promptUpperBound = request.messages.reduce((sum: number, message: { content: string }) => sum + Buffer.byteLength(message.content, "utf8"), 0) + 256;
+    expect(request.maxTokens + promptUpperBound).toBeLessThanOrEqual(spec().limits.maxTokens);
   });
 
   it("repairs one invalid draft and aggregates provider usage", async () => {
@@ -110,5 +113,12 @@ describe("semantic campaign planner", () => {
     await expect(planSemanticCampaign("cmp_v1_923456789012345678901234", exhausted, { chatCompletion: once, repositoryManifest: {} })).rejects.toThrow(/PLANNER_TOKEN_BUDGET_EXHAUSTED/);
     expect(once).toHaveBeenCalledTimes(1);
     expect((once.mock.calls[0]![0] as { maxTokens: number }).maxTokens).toBeLessThanOrEqual(8_000);
+  });
+
+  it("stops after the first call when cumulative planner cost reaches the hard cap", async () => {
+    const capped = spec(); capped.limits.maxCostUsd = .01;
+    const chat = vi.fn(async () => response("not json", 100, .01));
+    await expect(planSemanticCampaign("cmp_v1_a23456789012345678901234", capped, { chatCompletion: chat, repositoryManifest: {} })).rejects.toThrow(/PLANNER_COST_BUDGET_EXCEEDED/);
+    expect(chat).toHaveBeenCalledTimes(1);
   });
 });

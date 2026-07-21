@@ -61,14 +61,29 @@ function finiteNonNegative(value: unknown): value is number { return typeof valu
 function validateImplementationSinks(plan: CampaignPlan, requiredCommands: string[]): void {
   const dependedOn = new Set(plan.nodes.flatMap((node) => node.dependsOn));
   const sinks = plan.nodes.filter((node) => !dependedOn.has(node.id));
+  const implementations = plan.nodes.filter((node) => object(node.taskSpec).execution?.mode === "implementation");
+  if (!implementations.length) throw new Error("implementation campaign plan requires at least one implementation node.");
+  if (sinks.length !== 1) throw new Error("implementation campaign plan requires exactly one global terminal validation sink.");
   const commands = new Set<string>();
+  const requirementAcceptances = new Map<string, string[]>();
   for (const node of sinks) {
     const task = object(node.taskSpec), execution = object(task.execution), authority = object(task.authority), discovery = object(task.discovery), validation = object(task.validation);
     const scopes = [...(node.writeScopes ?? []), ...(Array.isArray(discovery.writeScopes) ? discovery.writeScopes : [])];
     if (execution.mode !== "validation" || authority.profile !== "read-only" || authority.allowProviderCalls === true || authority.allowNetwork === true || scopes.length) throw new Error(`implementation campaign terminal node ${node.id} must be validation-only and read-only.`);
     if (validation.mode !== "explicit" || !Array.isArray(validation.commands)) throw new Error(`implementation campaign terminal node ${node.id} requires explicit validation commands.`);
     for (const command of validation.commands) if (typeof command === "string") commands.add(command);
+    if (!Array.isArray(validation.requirements)) throw new Error(`implementation campaign terminal node ${node.id} requires explicit validation requirements.`);
+    for (const requirement of validation.requirements) { const item = object(requirement); if (typeof item.command === "string") requirementAcceptances.set(item.command, [...(requirementAcceptances.get(item.command) ?? []), String(item.acceptance ?? "default")]); }
+    const ancestors = transitiveDependencies(node.id, new Map(plan.nodes.map((item) => [item.id, item.dependsOn])));
+    for (const implementation of implementations) if (!ancestors.has(implementation.id)) throw new Error(`global terminal validation sink must depend on implementation node ${implementation.id}.`);
   }
-  for (const command of requiredCommands) if (!commands.has(command)) throw new Error(`campaign final validation sinks omit required command: ${command}`);
-  if (![...commands].some((command) => /^git diff --check (?:__CAMPAIGN_BASE__|[a-f0-9]{40,64})\.\.\.HEAD$/.test(command))) throw new Error("campaign final validation sinks require a meaningful campaign Git diff range.");
+  for (const command of requiredCommands) {
+    if (!commands.has(command)) throw new Error(`campaign final validation sinks omit required command: ${command}`);
+    if (!strictlyRequired(requirementAcceptances.get(command))) throw new Error(`campaign final validation command must have required acceptance: ${command}`);
+  }
+  const integrity = [...commands].find((command) => /^git diff --check (?:__CAMPAIGN_BASE__|[a-f0-9]{40,64})\.\.\.HEAD$/.test(command));
+  if (!integrity) throw new Error("campaign final validation sinks require a meaningful campaign Git diff range.");
+  if (!strictlyRequired(requirementAcceptances.get(integrity))) throw new Error("campaign Git integrity requirement must have required acceptance.");
 }
+function transitiveDependencies(id: string, graph: Map<string, string[]>, seen = new Set<string>()): Set<string> { for (const dependency of graph.get(id) ?? []) if (!seen.has(dependency)) { seen.add(dependency); transitiveDependencies(dependency, graph, seen); } return seen; }
+function strictlyRequired(values: string[] | undefined): boolean { return values !== undefined && values.length > 0 && values.every((value) => value === "required"); }
