@@ -47,6 +47,23 @@ describe("CampaignCoordinator reliability", () => {
     expect(campaignChildCompletion({ status: "workflow_completed", validationAggregate: "blocked_by_capability" }, "validation")).toEqual({ completed: false, reason: "campaign_child_validation_incomplete:blocked_by_capability" });
   });
 
+  it("accepts only the authenticated max-calls delegated-review failure shape", () => {
+    const reason = "Semantic reviewer invocation was unavailable: openrouter_max_calls_exceeded";
+    const semanticReview = { kind: "semantic", status: "unavailable", performed: false, selectedReviewer: { provider: "openrouter", model: "qwen/qwen3-coder-next" }, reviewer: { provider: null, model: null, invocationId: null }, confidence: "unknown", limitations: [reason], findings: [], evidence: [], delegation: { party: "external_session", reason, exactAction: "Perform an independent semantic review in the delegated session and attach structured findings to this handoff." } };
+    const settlement = { status: "completed", actualExecutorMode: "implementation", workflow: { status: "failed", implementationCompleted: true, validationCompleted: true, validationAggregate: "completed_with_validation_gaps", budgetExceeded: false, publicationBlocked: true, ownerDecisionRequired: false, handoff: { semanticReview } }, implementation: { status: "implemented_and_validated" }, validationAggregate: "completed_with_validation_gaps", review: { semantic: structuredClone(semanticReview) }, ownerGate: { required: false }, publication: { status: "on_hold", performed: false } };
+    expect(campaignChildCompletion(settlement, "implementation")).toEqual({ completed: true, reason: "" });
+    expect(campaignChildCompletion({ ...settlement, review: { semantic: { ...semanticReview, limitations: [] } } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, workflow: { ...settlement.workflow, handoff: { semanticReview: { ...semanticReview, delegation: { ...semanticReview.delegation, party: "owner" } } } } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, review: { semantic: { ...semanticReview, performed: true } } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, workflow: { ...settlement.workflow, validationAggregate: "passed" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, ownerGate: { required: true } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, workflow: { ...settlement.workflow, budgetExceeded: true } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, workflow: { ...settlement.workflow, ownerDecisionRequired: true } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, workflow: { ...settlement.workflow, ownerGate: { required: true } } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, budget: { exceeded: true } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, publication: { status: "published", performed: true } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+  });
+
   it("persists aggregate reservations and refuses to overschedule after actual usage replaces one reservation", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-reservations-")); roots.push(root);
     const tasks = new Map<string, ControlTaskRecord>();
