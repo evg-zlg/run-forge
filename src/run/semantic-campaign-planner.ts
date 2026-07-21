@@ -54,6 +54,10 @@ export async function planSemanticCampaign(campaignId: string, spec: CampaignSpe
   const first = await invoke(chat, model, prompt, spec, usage, 1, false);
   const checked = validateDraft(first.content, spec);
   if (checked.nodes) return { plan: trustedPlan(campaignId, spec, checked.nodes), evidence: { mode: "semantic-openrouter", model, attempts: 1, repaired: false, usage, validationCodes: checked.notices ?? [] } };
+  // maxCostUsd is a hard cap, but today the campaign contract has no
+  // enforceable per-attempt price quote. A second provider call therefore
+  // cannot be proven safe even when the first call happened to be under cap.
+  if (spec.limits.maxCostUsd !== undefined) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: 1, repaired: false, usage, validationCodes: [...new Set([...checked.codes, "PLANNER_REPAIR_COST_UNPROVEN"])].sort() });
   const repair = repairPrompt(checked.codes, first.content, spec);
   const second = await invoke(chat, model, repair, spec, usage, 2, true);
   const repaired = validateDraft(second.content, spec);
