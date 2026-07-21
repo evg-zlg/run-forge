@@ -49,7 +49,7 @@ export async function runOpenRouterAgent(request: ImplementationExecutorRequest,
     if (Buffer.byteLength(rawOutput) > request.spec.execution.maxPatchBytes) throw new Error(`openrouter_response_too_large: exceeds ${request.spec.execution.maxPatchBytes} bytes`);
     const applicableOutput = phase === "implementer" || phase === "repair" ? normalizeOpenRouterDiff(rawOutput) : rawOutput;
     if ((phase === "implementer" || phase === "repair") && rawOutput.trim()) {
-      validateOpenRouterDiff(applicableOutput, { maxBytes: request.spec.execution.maxPatchBytes, maxChangedFiles: request.spec.execution.maxChangedFiles, forbiddenZones: request.forbiddenZones });
+      validateOpenRouterDiff(applicableOutput, { maxBytes: request.spec.execution.maxPatchBytes, maxChangedFiles: request.spec.execution.maxChangedFiles, forbiddenZones: request.forbiddenZones, allowedWriteScopes: request.spec.discovery?.writeScopes });
       await applyDiff(cwd, applicableOutput);
     }
     const output = safeProviderExcerpt(applicableOutput);
@@ -85,7 +85,7 @@ export function normalizeOpenRouterDiff(value: string): string {
   return normalizeNewFileBody(normalized) + "\n";
 }
 
-export function validateOpenRouterDiff(diff: string, limits: { maxBytes: number; maxChangedFiles: number; forbiddenZones: string[] }): string[] {
+export function validateOpenRouterDiff(diff: string, limits: { maxBytes: number; maxChangedFiles: number; forbiddenZones: string[]; allowedWriteScopes?: string[] }): string[] {
   if (Buffer.byteLength(diff) > limits.maxBytes) throw new Error(`openrouter_patch_rejected: patch exceeds ${limits.maxBytes} bytes`);
   if (diff.includes("\0")) throw new Error("openrouter_patch_rejected: patch contains a NUL byte");
   const files = [...diff.matchAll(/^diff --git a\/(.+) b\/(.+)$/gm)].flatMap((match) => [match[1]!, match[2]!]);
@@ -97,6 +97,7 @@ export function validateOpenRouterDiff(diff: string, limits: { maxBytes: number;
     const file = normalizePatchPath(rawFile);
     if (!file || file.startsWith("../") || file.startsWith("/") || file.split("/").includes("..")) throw new Error(`openrouter_patch_rejected: path escapes workspace`);
     if (zones.some((zone) => file === zone || file.startsWith(`${zone}/`))) throw new Error(`openrouter_patch_rejected: changed path is forbidden: ${file}`);
+    if (limits.allowedWriteScopes !== undefined && !limits.allowedWriteScopes.some((scope) => scopeContains(normalizePatchPath(scope), file))) throw new Error(`openrouter_patch_rejected: changed path is outside allowed write scopes: ${file}`);
   }
   if (scanSecrets(addedPatchLines(diff)).status === "failed") throw new Error("openrouter_patch_rejected: secret scan failed");
   return uniqueFiles;
@@ -106,5 +107,6 @@ async function applyDiff(cwd: string, diff: string): Promise<void> { await new P
 function redact(value: string): string { return value.replace(/\b(?:gh[pousr]_|github_pat_|glpat-|sk-)[A-Za-z0-9_-]{12,}\b/gi, "[REDACTED]").replace(/\b(Bearer\s+)[A-Za-z0-9._~+\/-]{12,}/gi, "$1[REDACTED]").replace(/\b(password|passwd|api[_-]?key|access[_-]?token|secret|credential)\s*[:=]\s*[^\s,;]+/gi, "$1=[REDACTED]"); }
 function safeProviderExcerpt(value: string): string { if (scanSecrets(value).status === "failed") return "[redacted: provider output contained secret-like content]"; const redacted = redact(value); return Buffer.byteLength(redacted) <= safeExcerptBytes ? redacted : `${Buffer.from(redacted).subarray(0, safeExcerptBytes).toString("utf8")}\n[truncated provider output]`; }
 function normalizePatchPath(value: string): string { return value.replace(/^\.\//, "").replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, ""); }
+function scopeContains(scope: string, path: string): boolean { return Boolean(scope) && (path === scope || path.startsWith(`${scope}/`)); }
 function addedPatchLines(diff: string): string { return diff.split(/\r?\n/).filter((line) => line.startsWith("+") && !line.startsWith("+++")).map((line) => line.slice(1)).join("\n"); }
 function normalizeNewFileBody(diff: string): string { const lines = diff.split(/\r?\n/); let newFile = false, hunk = false; return lines.map((line) => { if (line.startsWith("diff --git ")) { newFile = false; hunk = false; return line; } if (line === "--- /dev/null") { newFile = true; return line; } if (line.startsWith("@@ ")) { hunk = true; return line; } if (newFile && hunk && !line.startsWith("+") && !line.startsWith("\\ No newline")) return `+${line}`; return line; }).join("\n"); }

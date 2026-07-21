@@ -46,6 +46,7 @@ describe("campaign integration", () => {
     const f = await fixture(), patchPath = join(f.patches, "outside.patch"); await writeFile(patchPath, patch("docs/new.md", "no"));
     await expect(f.integration.integrateChildPatch({ stateRoot: f.state, worktreeRoot: f.worktree.worktreeRoot, patchRoot: f.patches, patchPath, allowedScopes: ["src"], nodeId: "x" })).rejects.toMatchObject({ code: "PATCH_SCOPE_VIOLATION" });
     expect(await f.integration.currentCampaignHead({ stateRoot: f.state, worktreeRoot: f.worktree.worktreeRoot })).toBe(f.baseSha);
+    expect((await exec("git", ["-C", f.worktree.worktreeRoot, "status", "--porcelain"])).stdout).toBe("");
   });
 
   it("rejects traversal, symlink and oversize patch inputs", async () => {

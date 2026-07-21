@@ -57,11 +57,15 @@ export class CampaignIntegration {
     const patch = await readFile(patchPath, "utf8");
     const changedFiles = parsePatchPaths(patch);
     if (!changedFiles.length) { if (patch.trim()) throw failure("PATCH_PATH_UNSUPPORTED"); return { status: "no_changes", headSha: await this.currentCampaignHead(input), commit: null, changedFiles: [] }; }
-    for (const path of changedFiles) if (!safeRelativePath(path) || !input.allowedScopes.some((scope) => scopeContains(scope, path))) throw failure("PATCH_SCOPE_VIOLATION");
     const prior = await this.currentCampaignHead(input);
     const dirty = (await this.git(worktree, ["status", "--porcelain=v1"]).catch(() => { throw failure("WORKTREE_STATUS_FAILED"); })).stdout;
     if (dirty.trim()) throw failure("WORKTREE_NOT_CLEAN");
     try {
+      // Scope rejection is inside the rollback boundary as defense in depth:
+      // the dedicated campaign worktree is restored to the known head for any
+      // rejected child artifact, even if future validation gains a mutating
+      // preflight step.
+      for (const path of changedFiles) if (!safeRelativePath(path) || !input.allowedScopes.some((scope) => scopeContains(scope, path))) throw failure("PATCH_SCOPE_VIOLATION");
       try { await this.git(worktree, ["apply", "--check", patchPath]); }
       catch {
         const alreadyApplied = await this.git(worktree, ["apply", "--reverse", "--check", patchPath]).then(() => true).catch(() => false);

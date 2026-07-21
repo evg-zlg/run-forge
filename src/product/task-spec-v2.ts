@@ -33,7 +33,7 @@ export type TaskSpecV2 = {
   execution: { mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number; budgetMode: "soft" | "hard"; phaseBudgets: Record<"startup" | "analysis" | "implementation" | "validation" | "repair" | "review" | "publication", number> };
   providerRouting: ProviderRouting;
   executionAgreement: TaskSpecExecutionAgreement;
-  discovery: { policy: "auto" | "explicit"; profile: "small-scope" | "standard"; explicitFiles: string[]; maxFiles: number; maxBytes: number; maxTokens: number; stopCondition: string };
+  discovery: { policy: "auto" | "explicit"; profile: "small-scope" | "standard"; explicitFiles: string[]; /** Present only when a campaign has an explicit write boundary. */ writeScopes?: string[]; maxFiles: number; maxBytes: number; maxTokens: number; stopCondition: string };
   runtime: { preference: TaskRuntimeId; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" | "allowed" };
   validation: {
     mode: "auto" | "explicit"; commands: string[]; requirements: ValidationCommandRequirement[];
@@ -124,7 +124,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const policyRaw = optionalObject(validationRaw.projectPolicy, "validation.projectPolicy");
   rejectUnknown(policyRaw, ["deniedCapabilities", "skippedCommands"], "validation.projectPolicy");
   const discoveryRaw = optionalObject(raw.discovery, "discovery");
-  rejectUnknown(discoveryRaw, ["policy", "profile", "explicitFiles", "maxFiles", "maxBytes", "maxTokens", "stopCondition"], "discovery");
+  rejectUnknown(discoveryRaw, ["policy", "profile", "explicitFiles", "writeScopes", "maxFiles", "maxBytes", "maxTokens", "stopCondition"], "discovery");
   const runtimeRaw = optionalObject(raw.runtime, "runtime");
   rejectUnknown(runtimeRaw, ["preference", "dockerImage", "prepareDependencies", "dependencyPreparation", "externalNetwork"], "runtime");
   const authorityRaw = optionalObject(raw.authority, "authority");
@@ -215,7 +215,9 @@ function normalizeExecution(raw: Record<string, unknown>, mode: TaskExecutionMod
 }
 function normalizeDiscovery(raw: Record<string, unknown>): TaskSpecV2["discovery"] {
   const profile = choice(raw.profile ?? "standard", ["small-scope", "standard"], "discovery.profile");
-  return { policy: choice(raw.policy ?? "auto", ["auto", "explicit"], "discovery.policy"), profile, explicitFiles: strings(raw.explicitFiles ?? [], "discovery.explicitFiles"), maxFiles: integer(raw.maxFiles, "discovery.maxFiles", 1, 1_000, profile === "small-scope" ? 20 : 100), maxBytes: integer(raw.maxBytes, "discovery.maxBytes", 1_000, 10_000_000, profile === "small-scope" ? 240_000 : 1_000_000), maxTokens: integer(raw.maxTokens, "discovery.maxTokens", 100, 500_000, profile === "small-scope" ? 30_000 : 100_000), stopCondition: optionalString(raw.stopCondition, "discovery.stopCondition") ?? "Stop when the task, declared files, directly related tests/config, and minimum mandatory policy are sufficient." };
+  const writeScopes = raw.writeScopes === undefined ? undefined : strings(raw.writeScopes, "discovery.writeScopes");
+  if (writeScopes?.some((scope) => !safeWriteScope(scope))) throw new Error("discovery.writeScopes must contain safe relative paths.");
+  return { policy: choice(raw.policy ?? "auto", ["auto", "explicit"], "discovery.policy"), profile, explicitFiles: strings(raw.explicitFiles ?? [], "discovery.explicitFiles"), ...(writeScopes === undefined ? {} : { writeScopes: [...new Set(writeScopes)] }), maxFiles: integer(raw.maxFiles, "discovery.maxFiles", 1, 1_000, profile === "small-scope" ? 20 : 100), maxBytes: integer(raw.maxBytes, "discovery.maxBytes", 1_000, 10_000_000, profile === "small-scope" ? 240_000 : 1_000_000), maxTokens: integer(raw.maxTokens, "discovery.maxTokens", 100, 500_000, profile === "small-scope" ? 30_000 : 100_000), stopCondition: optionalString(raw.stopCondition, "discovery.stopCondition") ?? "Stop when the task, declared files, directly related tests/config, and minimum mandatory policy are sufficient." };
 }
 
 export function redactedTaskSpec(spec: TaskSpecV2): TaskSpecV2 {
@@ -230,6 +232,7 @@ function nullableString(value: unknown, name: string): string | null { return va
 function boolean(value: unknown, name: string): boolean { if (typeof value !== "boolean") throw new Error(`${name} must be boolean.`); return value; }
 function integer(value: unknown, name: string, min: number, max: number, fallback: number): number { const parsed = value === undefined ? fallback : value; if (!Number.isInteger(parsed) || Number(parsed) < min || Number(parsed) > max) throw new Error(`${name} must be an integer from ${min} to ${max}.`); return Number(parsed); }
 function strings(value: unknown, name: string, nonEmpty = false): string[] { if (!Array.isArray(value) || (nonEmpty && !value.length) || value.some((item) => typeof item !== "string" || !item.trim())) throw new Error(`${name} must be ${nonEmpty ? "a non-empty " : "an "}array of non-empty strings.`); return value.map((item) => item.trim()); }
+function safeWriteScope(value: string): boolean { const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, ""); return Boolean(normalized) && !normalized.startsWith("/") && !normalized.split("/").includes("..") && !normalized.split("/").includes(".git"); }
 function choice<T extends string>(value: unknown, choices: readonly T[], name: string): T { if (typeof value !== "string" || !choices.includes(value as T)) throw new Error(`${name} must be one of: ${choices.join(", ")}.`); return value as T; }
 function choices<T extends string>(value: unknown, allowed: readonly T[], name: string): T[] { return strings(value, name).map((item) => choice(item, allowed, name)); }
 function array(value: unknown): unknown[] { if (value === undefined) return []; if (!Array.isArray(value)) throw new Error("validation.requirements must be an array."); return value; }

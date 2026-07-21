@@ -21,6 +21,17 @@ describe("OpenRouter executor safety", () => {
     expect(() => validateOpenRouterDiff(diff("src/large.ts", "x".repeat(500)), { maxBytes: 100, maxChangedFiles: 2, forbiddenZones: [] })).toThrow("exceeds 100 bytes");
   });
 
+  it("rejects a campaign patch outside its explicit write scopes before mutating the workspace", async () => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    const artifactRoot = await mkdtemp(join(tmpdir(), "runforge-openrouter-scope-"));
+    await writeFile(join(artifactRoot, "outside.txt"), "old\n");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(diff("outside.txt", "new"))));
+    const request = { artifactRoot, signal: undefined, forbiddenZones: [], spec: { discovery: { writeScopes: ["src"] }, execution: { maxPatchBytes: 10_000, maxChangedFiles: 2 }, providerRouting: { models: { implementer: "test/model" }, maxCalls: 1, retry: { maxAttempts: 1 }, timeoutMs: 100, tokenBudget: { total: 100, perPhase: { implementer: 100 } } } } } as any;
+    const result = await runOpenRouterAgent(request, artifactRoot, "implement", "implementer", [], 0);
+    expect(result).toMatchObject({ exitCode: 1, failureReason: expect.stringContaining("outside allowed write scopes") });
+    expect(await readFile(join(artifactRoot, "outside.txt"), "utf8")).toBe("old\n");
+  });
+
   it("normalizes a single fenced unified diff", () => {
     expect(normalizeOpenRouterDiff(`\`\`\`diff\n${diff("src/value.ts")}\`\`\``)).toBe(diff("src/value.ts"));
   });
