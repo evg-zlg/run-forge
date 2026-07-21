@@ -1,6 +1,6 @@
 # RunForge Packet Validation
 
-Generated at: 2026-07-21T18:32:32.730Z
+Generated at: 2026-07-21T18:41:07.736Z
 
 Raw outputs:
 - /tmp/runforge-alpha7-packet-validation
@@ -32,7 +32,7 @@ Negative validation:
 - A deliberately broken packet without runId failed packet inspector validation.
 
 Original repo mutation check:
-- Provider repo: /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-provider-repo-jCLV2K
+- Provider repo: /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-provider-repo-hfM7qw
 - state.txt after provider run: "bad\n"
 
 Viewer:

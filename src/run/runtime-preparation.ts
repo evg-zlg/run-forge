@@ -127,6 +127,7 @@ export function preparationDockerArgs(workspace: string, image: string, containe
     "--memory", "2g",
     "--cpus", "2",
     "--user", "0",
+    "--env", `COREPACK_HOME=${join("/workspace", workingDirectory, ".runforge-corepack")}`,
     "--mount", `type=bind,src=${workspace},dst=/workspace`,
     "--workdir", join("/workspace", workingDirectory),
     "--entrypoint", "/bin/sh",

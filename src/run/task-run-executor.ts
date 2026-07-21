@@ -222,6 +222,8 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "--env",
     "npm_config_cache=/tmp/npm-cache",
     "--env",
+    "COREPACK_HOME=/workspace/.runforge-corepack",
+    "--env",
     "TMPDIR=/runforge-tmp",
     "--mount",
     `type=bind,src=${request.cwd},dst=/workspace${writableWorkspace ? "" : ",readonly"}`,
