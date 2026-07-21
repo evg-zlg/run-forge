@@ -6,6 +6,7 @@ import { ControlPlaneManager } from "../../src/control-plane/manager.js";
 import { startControlPlaneServer, type ControlPlaneServerInstance } from "../../src/control-plane/server.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 import type { CampaignPlan, ControlTaskRecord } from "../../src/control-plane/contracts.js";
+import { planCampaignFromGoal } from "../../src/run/task-run-planner.js";
 
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => { while (cleanup.length) await cleanup.pop()!(); });
@@ -62,6 +63,12 @@ describe("control plane campaign integration", () => {
     const { server, manager } = await createHarness();
     const tasks = new Map<string, ControlTaskRecord>();
     let created = 0;
+    (manager as any).planCampaign = async (record: any) => {
+      const plan = planCampaignFromGoal(record.id, record.spec);
+      plan.nodes.forEach((node) => { node.estimatedTokens = 10; });
+      plan.estimatedTokens = plan.nodes.length * 10;
+      return { plan, evidence: { mode: "semantic-openrouter", model: "test-planner", attempts: 1, repaired: false, usage: { tokens: 7, costUsd: .002 }, validationCodes: [] } };
+    };
     (manager as any).createTask = async (input: any) => {
       created += 1;
       const id = `child-${created}`;
@@ -78,6 +85,8 @@ describe("control plane campaign integration", () => {
     expect(final.status).toBe("completed");
     expect(created).toBeGreaterThan(0);
     expect(Object.values(final.children).every((child: any) => child.status === "completed")).toBe(true);
+    expect(final.usage.tokens).toBe(7 + created * 10);
+    expect(final.plannerEvidence).toMatchObject({ model: "test-planner", usage: { tokens: 7, costUsd: .002 } });
   });
 
   test("bounded parallelism and budget overflow propagation", async () => {
@@ -116,6 +125,7 @@ describe("control plane campaign integration", () => {
     cleanup.push(async () => { await rm(root, { recursive: true, force: true }); });
     const managerA = new ControlPlaneManager(new ControlPlaneStore(root));
     await managerA.initialize();
+    (managerA as any).planCampaign = async (record: any) => ({ plan: planCampaignFromGoal(record.id, record.spec), evidence: { mode: "semantic-openrouter", model: "test-planner", attempts: 1, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: [] } });
     const statuses = new Map<string, ControlTaskRecord>();
     let i = 0;
     (managerA as any).createTask = async (input: any) => {

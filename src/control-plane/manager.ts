@@ -2,14 +2,14 @@ import { createHash, randomUUID } from "node:crypto"; import { cp, mkdir, readFi
 import { buildDoctorReport } from "../product/doctor.js"; import { runTaskSpecFile } from "../product/task-spec-runner.js";
 import { loadTaskSpecV2 } from "../product/task-spec-v2.js"; import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor, taskRuntimeIds } from "../product/task-spec-contract.js";
 import { continueExternalExecution, recordOwnerDecision } from "../run/external-execution.js";
-import { ControlPlaneError, type CampaignPlan, type CampaignPlanNode, type CampaignRecord, type CampaignSpec, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
+import { ControlPlaneError, type CampaignPlanNode, type CampaignRecord, type CampaignSpec, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
 import { ControlPlaneStore } from "./state.js";
 import { discoverImplementationExecutors, selectImplementationExecutor } from "../implementation/executor.js";
 import type { ExecutionAgreement } from "../product/execution-agreement.js";
 import { inspectProject } from "../product/project-inspection.js";
 import { assertAgreementAccepted, assertAgreementMatchesTask, negotiateControlPlaneAgreement, negotiateTaskAgreement, technicalCapabilitiesForExecutor, type ExecutionAgreementNegotiationRequest } from "./execution-agreements.js";
 import { boundPublicResult, projectAgreementLifecycle, publicResultLimits, redactPublicValue, settleAcceptedAgreement } from "./manager-results.js";
-import { detectCycle, planCampaignFromGoal, validateCampaignPlan } from "../run/task-run-planner.js";
+import { planSemanticCampaign } from "../run/semantic-campaign-planner.js";
 import { assertAgreementProjectBinding, buildExecutionAgreementContext } from "./manager-project-context.js";
 import { CampaignCoordinator } from "./campaign-coordinator.js";
 import { listDurableCheckpoints } from "../implementation/durable-checkpoint.js"; import { resumeDurableCheckpoint } from "../implementation/checkpoint-resume.js";
@@ -30,7 +30,7 @@ export class ControlPlaneManager {
   async createCampaign(spec: CampaignSpec): Promise<CampaignRecord> { return this.campaigns.createCampaign(spec); }
   async listCampaigns(): Promise<Array<Pick<CampaignRecord, "id" | "status" | "createdAt" | "updatedAt" | "usage">>> { return this.campaigns.listCampaigns(); } async getCampaign(id: string): Promise<CampaignRecord> { return this.campaigns.getCampaign(id); }
   async getCampaignResult(id: string): Promise<Record<string, unknown>> { return this.campaigns.getCampaignResult(id); }
-  private async planCampaign(record: CampaignRecord): Promise<CampaignPlan> { return planCampaignFromGoal(record.id, record.spec); }
+  private async planCampaign(record: CampaignRecord) { return planSemanticCampaign(record.id, record.spec); }
   close(): void { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; this.campaigns.close(); for (const worker of this.active.values()) worker.controller.abort(); this.active.clear(); }
   async inspectProject(input: { path: string; workingDirectory: string; register: boolean; runtime?: "local" | "docker"; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing" }): Promise<Record<string, unknown>> {
     const report = await buildDoctorReport({ repo: input.path, workingDirectory: input.workingDirectory, runtime: input.runtime, dependencyPreparation: input.dependencyPreparation, publication: "none" });

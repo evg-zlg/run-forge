@@ -2,12 +2,13 @@ import { randomUUID } from "node:crypto";
 import { mkdir, readFile, readdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { detectCycle, validateCampaignPlan } from "../run/task-run-planner.js";
+import { SemanticCampaignPlannerError, type CampaignPlannerEvidence, type SemanticCampaignPlannerResult } from "../run/semantic-campaign-planner.js";
 import { boundPublicResult } from "./manager-results.js";
 import { ControlPlaneError, type CampaignPlan, type CampaignRecord, type CampaignSpec, type ControlTaskRecord } from "./contracts.js";
 
 type Deps = {
   root: string;
-  planCampaign: (record: CampaignRecord) => Promise<CampaignPlan>;
+  planCampaign: (record: CampaignRecord) => Promise<CampaignPlan | SemanticCampaignPlannerResult>;
   createTask: (input: { projectId?: string; taskSpec: Record<string, unknown>; authority: CampaignSpec["authority"]; publicationRequested: "none" | "draft-pr" }) => Promise<ControlTaskRecord>;
   getTask: (id: string) => Promise<ControlTaskRecord>;
   getResult: (id: string) => Promise<Record<string, unknown>>;
@@ -25,8 +26,25 @@ export class CampaignCoordinator {
     const now = new Date().toISOString();
     const id = `cmp_v1_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
     const record: CampaignRecord = { schemaVersion: 1, id, status: "planning", spec, plan: null, plannerEvidence: null, children: {}, usage: { tokens: 0, costUsd: 0, tasks: 0 }, checkpoints: [], failures: [], result: null, createdAt: now, updatedAt: now };
-    const plan = await this.deps.planCampaign(record);
-    const plannedBudgetExceeded = plan.estimatedTokens > spec.limits.maxTokens || (spec.limits.maxCostUsd !== undefined && (plan.estimatedCostUsd ?? 0) > spec.limits.maxCostUsd);
+    let planning: CampaignPlan | SemanticCampaignPlannerResult;
+    try { planning = await this.deps.planCampaign(record); }
+    catch (error) {
+      record.status = "failed";
+      record.plannerEvidence = error instanceof SemanticCampaignPlannerError ? error.evidence : failedPlannerEvidence();
+      record.usage.tokens = usageFromEvidence(record.plannerEvidence).tokens;
+      record.usage.costUsd = usageFromEvidence(record.plannerEvidence).costUsd;
+      record.failures.push({ at: now, reason: "semantic_campaign_planning_failed" });
+      record.result = reconcileCampaignResult(record);
+      await this.saveCampaign(record);
+      return record;
+    }
+    const semantic = "plan" in planning ? planning : { plan: planning, evidence: deterministicPlannerEvidence() };
+    const plan = semantic.plan;
+    const plannerUsage = usageFromEvidence(semantic.evidence);
+    record.usage.tokens += plannerUsage.tokens;
+    record.usage.costUsd += plannerUsage.costUsd;
+    record.plannerEvidence = { ...semantic.evidence, createdAt: now, nodeCount: plan.nodes.length };
+    const plannedBudgetExceeded = record.usage.tokens + plan.estimatedTokens > spec.limits.maxTokens || (spec.limits.maxCostUsd !== undefined && record.usage.costUsd + (plan.estimatedCostUsd ?? 0) > spec.limits.maxCostUsd);
     if (plannedBudgetExceeded) {
       record.plan = plan;
       record.status = "failed";
@@ -39,7 +57,6 @@ export class CampaignCoordinator {
     const cycle = detectCycle(plan.nodes.map((item) => ({ id: item.id, dependsOn: item.dependsOn })));
     if (cycle.length) throw new ControlPlaneError(422, "campaign_cycle_detected", `Campaign plan contains a cycle: ${cycle.join(" -> ")}`);
     record.plan = plan;
-    record.plannerEvidence = { planner: "internal-campaign-planner-v1", createdAt: now, nodeCount: plan.nodes.length };
     record.children = Object.fromEntries(plan.nodes.map((node) => [node.id, { nodeId: node.id, dependsOn: node.dependsOn, taskId: null, status: "pending", startedAt: null, finishedAt: null, error: null, accounted: false }]));
     record.status = "queued";
     record.updatedAt = new Date().toISOString();
@@ -163,4 +180,7 @@ export class CampaignCoordinator {
 }
 
 function aggregateUsageFromValue(value: unknown): { tokens: number; costUsd: number } { const totals = { tokens: 0, costUsd: 0 }; const visit = (current: unknown): void => { if (Array.isArray(current)) current.forEach(visit); else if (current && typeof current === "object") for (const [key, entry] of Object.entries(current as Record<string, unknown>)) { if (typeof entry === "number" && Number.isFinite(entry) && /(token|tokens|tokenUsage|totalTokens)/i.test(key)) totals.tokens += entry; else if (typeof entry === "number" && Number.isFinite(entry) && /(cost|costUsd|usd)/i.test(key)) totals.costUsd += entry; else visit(entry); } }; visit(value); return totals; }
+function usageFromEvidence(value: Record<string, unknown> | CampaignPlannerEvidence | null): { tokens: number; costUsd: number } { const usage = value && typeof value.usage === "object" && value.usage !== null ? value.usage as Record<string, unknown> : {}; return { tokens: typeof usage.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : 0, costUsd: typeof usage.costUsd === "number" && Number.isFinite(usage.costUsd) ? usage.costUsd : 0 }; }
+function deterministicPlannerEvidence(): CampaignPlannerEvidence { return { mode: "deterministic-local", model: null, attempts: 0, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: [] }; }
+function failedPlannerEvidence(): CampaignPlannerEvidence { return { mode: "semantic-openrouter", model: null, attempts: 0, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: ["PLANNER_FAILED"] }; }
 function reconcileCampaignResult(campaign: CampaignRecord): Record<string, unknown> { return { schemaVersion: 1, campaignId: campaign.id, status: campaign.status, usage: campaign.usage, failures: campaign.failures, children: Object.values(campaign.children).map((child) => ({ nodeId: child.nodeId, taskId: child.taskId, status: child.status, startedAt: child.startedAt, finishedAt: child.finishedAt, error: child.error })), evidence: Object.values(campaign.children).filter((child) => child.evidence).map((child) => ({ nodeId: child.nodeId, evidence: child.evidence })) }; }
