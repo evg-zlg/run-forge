@@ -177,6 +177,7 @@ export type CampaignPlanNode = {
   id: string;
   taskSpec: Record<string, unknown>;
   dependsOn: string[];
+  writeScopes?: string[];
   estimatedTokens?: number;
   estimatedCostUsd?: number;
 };
@@ -205,6 +206,7 @@ export type CampaignRecord = {
     error: string | null;
     accounted: boolean;
     integrationRepairAttempts: number;
+    executionRetryAttempts: number;
     evidence?: Record<string, unknown>;
   }>;
   usage: { tokens: number; costUsd: number; tasks: number };

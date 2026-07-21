@@ -6,7 +6,7 @@ import { planSemanticCampaign } from "../../src/run/semantic-campaign-planner.js
 const authority = { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false };
 const spec = (provider: "openrouter" | "local" = "openrouter"): CampaignSpec => ({ goal: "Add arbitrary feature", target: { repository: ".", workingDirectory: ".", expectedSha: "abcdef1234567" }, authority, providerRouting: { provider, model: "qwen/qwen3-coder-next", fallbackPolicy: provider === "openrouter" ? "none" : "same_provider" }, limits: { maxTokens: 20_000, maxCostUsd: 1, maxTasks: 4, maxConcurrency: 2 } });
 const response = (content: string, tokens = 100, costUsd = .001): OpenRouterExecutionResult => ({ content, usage: { inputTokens: 40, cachedInputTokens: 0, outputTokens: 60, reasoningTokens: 0, totalTokens: tokens, costUsd }, requestId: "request", finishReason: "stop", attempts: 1 });
-const valid = { nodes: [{ id: "inspect", goal: "Inspect feature", acceptanceCriteria: ["Evidence recorded"], dependsOn: [], explicitFiles: ["src/a.ts"], estimatedTokens: 4_000, estimatedCostUsd: .05 }, { id: "implement", goal: "Implement feature", acceptanceCriteria: ["Focused tests pass"], dependsOn: ["inspect"], explicitFiles: ["src/a.ts"], estimatedTokens: 6_000, estimatedCostUsd: .1 }] };
+const valid = { nodes: [{ id: "inspect", goal: "Inspect feature", acceptanceCriteria: ["Evidence recorded"], dependsOn: [], explicitFiles: ["src/a.ts"], writeScopes: [], estimatedTokens: 4_000, estimatedCostUsd: .05 }, { id: "implement", goal: "Implement feature", acceptanceCriteria: ["Focused tests pass"], dependsOn: ["inspect"], explicitFiles: ["src/a.ts"], writeScopes: ["src/a.ts"], estimatedTokens: 6_000, estimatedCostUsd: .1 }] };
 
 describe("semantic campaign planner", () => {
   it("turns a semantic draft into trusted bounded task specs", async () => {
@@ -33,7 +33,7 @@ describe("semantic campaign planner", () => {
   });
 
   it("repairs concurrent overlapping scopes but permits dependent overlap", async () => {
-    const overlap = { nodes: [{ ...valid.nodes[0], id: "a", dependsOn: [] }, { ...valid.nodes[1], id: "b", dependsOn: [] }] };
+    const overlap = { nodes: [{ ...valid.nodes[0], id: "a", dependsOn: [], writeScopes: ["src/a.ts"] }, { ...valid.nodes[1], id: "b", dependsOn: [] }] };
     const chat = vi.fn().mockResolvedValueOnce(response(JSON.stringify(overlap))).mockResolvedValueOnce(response(JSON.stringify(valid)));
     const result = await planSemanticCampaign("cmp_v1_423456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: {} });
     expect(result.evidence.validationCodes).toContain("OVERLAPPING_SCOPE");

@@ -69,7 +69,7 @@ export class CampaignCoordinator {
         record.status = "failed"; record.failures.push({ at: now, reason: "campaign_integration_worktree_failed" }); record.result = reconcileCampaignResult(record); await this.saveCampaign(record); return record;
       }
     }
-    record.children = Object.fromEntries(plan.nodes.map((node) => [node.id, { nodeId: node.id, dependsOn: node.dependsOn, taskId: null, status: "pending", startedAt: null, finishedAt: null, error: null, accounted: false, integrationRepairAttempts: 0 }]));
+    record.children = Object.fromEntries(plan.nodes.map((node) => [node.id, { nodeId: node.id, dependsOn: node.dependsOn, taskId: null, status: "pending", startedAt: null, finishedAt: null, error: null, accounted: false, integrationRepairAttempts: 0, executionRetryAttempts: 0 }]));
     record.status = "queued";
     record.updatedAt = new Date().toISOString();
     await this.saveCampaign(record);
@@ -115,11 +115,10 @@ export class CampaignCoordinator {
           child.status = "completed";
           child.finishedAt = new Date().toISOString();
         } else if (["failed", "interrupted"].includes(task.status)) {
-          child.status = "failed";
-          child.finishedAt = new Date().toISOString();
-          child.error = task.error ?? "child_failed";
-          campaign.status = "failed";
-          campaign.failures.push({ at: child.finishedAt, nodeId: child.nodeId, taskId: child.taskId, reason: child.error });
+          progressed = true;
+          if (!child.accounted) { const result = await this.deps.getResult(child.taskId).catch(() => ({})), usage = aggregateUsageFromValue(result); campaign.usage.tokens += usage.tokens; campaign.usage.costUsd += usage.costUsd; campaign.usage.tasks += 1; child.evidence = boundPublicResult(result).result; child.accounted = true; }
+          if (await this.retryFailedChild(campaign, child, task.error ?? "CHILD_EXECUTION_FAILED")) continue;
+          child.status = "failed"; child.finishedAt = new Date().toISOString(); child.error = task.error ?? "child_failed"; campaign.status = "failed"; campaign.failures.push({ at: child.finishedAt, nodeId: child.nodeId, taskId: child.taskId, reason: child.error });
         } else child.status = "running";
       }
       if (campaign.status === "failed") return this.finishCampaign(campaign, "failed");
@@ -182,10 +181,10 @@ export class CampaignCoordinator {
     campaign.updatedAt = new Date().toISOString();
     await this.saveCampaign(campaign);
   }
-  private taskSpecForNode(campaign: CampaignRecord, source: Record<string, unknown>, repair?: { nodeId: string; attempt: number; code: string }): Record<string, unknown> {
+  private taskSpecForNode(campaign: CampaignRecord, source: Record<string, unknown>, repair?: { nodeId: string; attempt: number; code: string; kind: "ir" | "er" }): Record<string, unknown> {
     const taskSpec = structuredClone(source), target = object(taskSpec.target), task = object(taskSpec.task);
     if (campaign.integration) taskSpec.target = { ...target, repository: campaign.integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: campaign.integration.headSha };
-    if (repair) { taskSpec.taskId = `${campaign.id.slice(0, 48)}_${repair.nodeId.slice(0, 18)}_ir${repair.attempt}`; taskSpec.task = { ...task, text: `Re-implement this bounded node against the current integrated campaign head after ${repair.code}. ${String(task.text ?? "")}` }; }
+    if (repair) { taskSpec.taskId = `${campaign.id.slice(0, 48)}_${repair.nodeId.slice(0, 18)}_${repair.kind}${repair.attempt}`; taskSpec.task = { ...task, text: `Re-implement this bounded node against the current integrated campaign head after ${repair.code}. ${String(task.text ?? "")}` }; }
     return taskSpec;
   }
   private taskProjectBinding(campaign: CampaignRecord): { projectId?: string } { return !campaign.integration && campaign.spec.target.projectId ? { projectId: campaign.spec.target.projectId } : {}; }
@@ -195,7 +194,7 @@ export class CampaignCoordinator {
     if (!node) return this.integrationFailure(campaign, child, "CAMPAIGN_NODE_MISSING");
     const patchPath = join(task.artifactRoot, "implementation.patch");
     if (!await lstat(patchPath).catch(() => null)) return "complete";
-    const discovery = object(node.taskSpec.discovery), allowedScopes = Array.isArray(discovery.explicitFiles) ? discovery.explicitFiles.filter((item): item is string => typeof item === "string") : [];
+    const discovery = object(node.taskSpec.discovery), allowedScopes = node.writeScopes ?? (Array.isArray(discovery.explicitFiles) ? discovery.explicitFiles.filter((item): item is string => typeof item === "string") : []);
     try {
       const integrated = await this.integration.integrateChildPatch({ stateRoot: this.deps.root, worktreeRoot: campaign.integration.worktreeRoot, patchRoot: task.artifactRoot, patchPath, allowedScopes, nodeId: node.id, maxPatchBytes: finiteNumber(object(node.taskSpec.execution).maxPatchBytes) ?? 500_000 });
       campaign.integration.headSha = integrated.headSha;
@@ -209,12 +208,20 @@ export class CampaignCoordinator {
       const attempt = (child.integrationRepairAttempts ?? 0) + 1;
       const withinBudget = attempt <= 1 && campaign.usage.tokens + (node.estimatedTokens ?? 0) <= campaign.spec.limits.maxTokens && (campaign.spec.limits.maxCostUsd === undefined || campaign.usage.costUsd + (node.estimatedCostUsd ?? 0) <= campaign.spec.limits.maxCostUsd);
       if (!withinBudget) return this.integrationFailure(campaign, child, code);
-      const repairTask = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec: this.taskSpecForNode(campaign, node.taskSpec, { nodeId: node.id, attempt, code }), authority: campaign.spec.authority, publicationRequested: "none" }).catch(() => null);
+      const repairTask = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec: this.taskSpecForNode(campaign, node.taskSpec, { nodeId: node.id, attempt, code, kind: "ir" }), authority: campaign.spec.authority, publicationRequested: "none" }).catch(() => null);
       if (!repairTask) return this.integrationFailure(campaign, child, "INTEGRATION_REPAIR_START_FAILED");
       child.taskId = repairTask.id; child.status = repairTask.status === "queued" ? "queued" : "running"; child.accounted = false; child.integrationRepairAttempts = attempt; child.startedAt = new Date().toISOString(); child.finishedAt = null; child.error = null;
       campaign.integration.repairAttempts += 1;
       return "repair_started";
     }
+  }
+  private async retryFailedChild(campaign: CampaignRecord, child: CampaignRecord["children"][string], code: string): Promise<boolean> {
+    if (!campaign.plan) return false;
+    const node = campaign.plan.nodes.find((item) => item.id === child.nodeId), attempt = (child.executionRetryAttempts ?? 0) + 1;
+    if (!node || attempt > 1 || campaign.usage.tokens + (node.estimatedTokens ?? 0) > campaign.spec.limits.maxTokens || (campaign.spec.limits.maxCostUsd !== undefined && campaign.usage.costUsd + (node.estimatedCostUsd ?? 0) > campaign.spec.limits.maxCostUsd)) return false;
+    const retry = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec: this.taskSpecForNode(campaign, node.taskSpec, { nodeId: node.id, attempt, code, kind: "er" }), authority: campaign.spec.authority, publicationRequested: "none" }).catch(() => null);
+    if (!retry) return false;
+    child.taskId = retry.id; child.status = retry.status === "queued" ? "queued" : "running"; child.accounted = false; child.executionRetryAttempts = attempt; child.startedAt = new Date().toISOString(); child.finishedAt = null; child.error = null; return true;
   }
   private integrationFailure(campaign: CampaignRecord, child: CampaignRecord["children"][string], code: string): "failed" { const at = new Date().toISOString(); child.status = "failed"; child.finishedAt = at; child.error = code; if (campaign.integration) { campaign.integration.status = "failed"; campaign.integration.lastError = code; } campaign.failures.push({ at, nodeId: child.nodeId, ...(child.taskId ? { taskId: child.taskId } : {}), reason: code }); return "failed"; }
   private campaignsDir(): string { return join(this.deps.root, "campaigns"); }
@@ -235,4 +242,4 @@ function deterministicPlannerEvidence(): CampaignPlannerEvidence { return { mode
 function failedPlannerEvidence(): CampaignPlannerEvidence { return { mode: "semantic-openrouter", model: null, attempts: 0, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: ["PLANNER_FAILED"] }; }
 function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function finiteNumber(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) ? value : null; }
-function reconcileCampaignResult(campaign: CampaignRecord): Record<string, unknown> { return { schemaVersion: 1, campaignId: campaign.id, status: campaign.status, usage: campaign.usage, failures: campaign.failures, integration: campaign.integration, children: Object.values(campaign.children).map((child) => ({ nodeId: child.nodeId, taskId: child.taskId, status: child.status, startedAt: child.startedAt, finishedAt: child.finishedAt, error: child.error, integrationRepairAttempts: child.integrationRepairAttempts ?? 0 })), evidence: Object.values(campaign.children).filter((child) => child.evidence).map((child) => ({ nodeId: child.nodeId, evidence: child.evidence })) }; }
+function reconcileCampaignResult(campaign: CampaignRecord): Record<string, unknown> { return { schemaVersion: 1, campaignId: campaign.id, status: campaign.status, usage: campaign.usage, failures: campaign.failures, integration: campaign.integration, children: Object.values(campaign.children).map((child) => ({ nodeId: child.nodeId, taskId: child.taskId, status: child.status, startedAt: child.startedAt, finishedAt: child.finishedAt, error: child.error, integrationRepairAttempts: child.integrationRepairAttempts ?? 0, executionRetryAttempts: child.executionRetryAttempts ?? 0 })), evidence: Object.values(campaign.children).filter((child) => child.evidence).map((child) => ({ nodeId: child.nodeId, evidence: child.evidence })) }; }
