@@ -23,7 +23,9 @@ describe("control plane campaign branch integration", () => {
       (manager as any).planCampaign = async (record: any) => { const plan = planCampaignFromGoal(record.id, record.spec); plan.nodes = [plan.nodes[0]!]; plan.nodes[0]!.id = "implementation"; plan.nodes[0]!.dependsOn = []; plan.nodes[0]!.estimatedTokens = 2_000; plan.nodes[0]!.estimatedCostUsd = .1; (plan.nodes[0]!.taskSpec as any).discovery.explicitFiles = ["src/new.ts"]; plan.estimatedTokens = 2_000; plan.estimatedCostUsd = .1; return { plan, evidence: { mode: "semantic-openrouter", model: "test", attempts: 1, repaired: false, usage: { tokens: 100, costUsd: .001 }, validationCodes: [] } }; };
       (manager as any).createTask = async (input: any) => {
         expect(input.taskSpec.providerRouting.tokenBudget.perPhase).toMatchObject({ planner: 0, repair: 0, reviewer: 0 });
-        expect(input.taskSpec.providerRouting.tokenBudget.perPhase.implementer).toBeGreaterThanOrEqual(30_000);
+        expect(input.taskSpec.providerRouting.tokenBudget.total).toBe(2_000);
+        expect(input.taskSpec.providerRouting.tokenBudget.perPhase.implementer).toBe(2_000);
+        expect(input.taskSpec.execution.maxProviderTokens).toBe(2_000);
         expect(input.taskSpec.execution.maxRepairIterations).toBe(0);
         const task = { id: input.taskSpec.taskId, status: "completed", error: null, artifactRoot: artifacts };
         tasks.set(task.id, task);
@@ -38,6 +40,36 @@ describe("control plane campaign branch integration", () => {
       expect(await readFile(join(final.integration.worktreeRoot, "src/new.ts"), "utf8")).toContain("integrated");
       await expect(readFile(join(repo, "src/new.ts"), "utf8")).rejects.toThrow(); expect((await exec("git", ["-C", repo, "rev-parse", "main"])).stdout.trim()).toBe(baseSha);
       manager.close();
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("fails closed when an implementation child completes without its patch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-campaign-no-patch-")), repo = join(root, "repo"), state = join(root, "state"), artifacts = join(root, "child-artifacts");
+    await mkdir(repo); await mkdir(state); await mkdir(artifacts);
+    try {
+      await exec("git", ["init", "-q", repo]); await writeFile(join(repo, "README.md"), "base\n"); await exec("git", ["-C", repo, "add", "README.md"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]);
+      const baseSha = (await exec("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
+      const manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize(); const tasks = new Map<string, any>();
+      (manager as any).planCampaign = async (record: any) => { const plan = planCampaignFromGoal(record.id, record.spec); plan.nodes = [plan.nodes[0]!]; Object.assign(plan.nodes[0]!, { id: "implementation", dependsOn: [], estimatedTokens: 2_000, estimatedCostUsd: .1 }); Object.assign(plan, { estimatedTokens: 2_000, estimatedCostUsd: .1 }); return { plan, evidence: { mode: "semantic-openrouter", model: "test", attempts: 1, repaired: false, usage: { tokens: 100, costUsd: .001 }, validationCodes: [] } }; };
+      (manager as any).createTask = async (input: any) => { const task = { id: input.taskSpec.taskId, status: "completed", error: null, artifactRoot: artifacts }; tasks.set(task.id, task); return task; }; (manager as any).getTask = async (id: string) => tasks.get(id); (manager as any).getResult = async () => ({ usage: { totalTokens: 100, costUsd: .01 } });
+      const campaign = await manager.createCampaign({ goal: "Make a bounded change", target: { repository: repo, workingDirectory: ".", expectedSha: baseSha }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" }, limits: { maxTokens: 10_000, maxCostUsd: 1, maxTasks: 2, maxConcurrency: 1 } });
+      const deadline = Date.now() + 5_000; let final: any = campaign; while (Date.now() < deadline && !["completed", "failed", "on_hold"].includes(final.status)) { await new Promise((resolve) => setTimeout(resolve, 25)); final = await manager.getCampaign(campaign.id); }
+      expect(final.status).toBe("failed"); expect(final.children.implementation.error).toBe("IMPLEMENTATION_PATCH_MISSING"); expect(final.failures).toContainEqual(expect.objectContaining({ reason: "IMPLEMENTATION_PATCH_MISSING" })); manager.close();
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  it("accepts a validation child without an implementation patch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-campaign-validation-no-patch-")), repo = join(root, "repo"), state = join(root, "state"), artifacts = join(root, "child-artifacts");
+    await mkdir(repo); await mkdir(state); await mkdir(artifacts);
+    try {
+      await exec("git", ["init", "-q", repo]); await writeFile(join(repo, "README.md"), "base\n"); await exec("git", ["-C", repo, "add", "README.md"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]);
+      const baseSha = (await exec("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
+      const manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize(); const tasks = new Map<string, any>();
+      (manager as any).planCampaign = async (record: any) => { const plan = planCampaignFromGoal(record.id, record.spec); plan.nodes = [plan.nodes[0]!]; Object.assign(plan.nodes[0]!, { id: "validation", dependsOn: [], estimatedTokens: 2_000, estimatedCostUsd: .1 }); (plan.nodes[0]!.taskSpec as any).execution.mode = "validation"; Object.assign(plan, { estimatedTokens: 2_000, estimatedCostUsd: .1 }); return { plan, evidence: { mode: "semantic-openrouter", model: "test", attempts: 1, repaired: false, usage: { tokens: 100, costUsd: .001 }, validationCodes: [] } }; };
+      (manager as any).createTask = async (input: any) => { const task = { id: input.taskSpec.taskId, status: "completed", error: null, artifactRoot: artifacts }; tasks.set(task.id, task); return task; }; (manager as any).getTask = async (id: string) => tasks.get(id); (manager as any).getResult = async () => ({ usage: { totalTokens: 100, costUsd: .01 } });
+      const campaign = await manager.createCampaign({ goal: "Validate the bounded change", target: { repository: repo, workingDirectory: ".", expectedSha: baseSha }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" }, limits: { maxTokens: 10_000, maxCostUsd: 1, maxTasks: 2, maxConcurrency: 1 } });
+      const deadline = Date.now() + 5_000; let final: any = campaign; while (Date.now() < deadline && !["completed", "failed", "on_hold"].includes(final.status)) { await new Promise((resolve) => setTimeout(resolve, 25)); final = await manager.getCampaign(campaign.id); }
+      expect(final.status, JSON.stringify(final.failures)).toBe("completed"); manager.close();
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

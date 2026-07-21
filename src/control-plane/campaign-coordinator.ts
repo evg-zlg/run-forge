@@ -149,7 +149,7 @@ export class CampaignCoordinator {
             return this.finishCampaign(campaign, "failed");
           }
           const child = campaign.children[node.id]!;
-          const task = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec: this.taskSpecForNode(campaign, node.taskSpec), authority: campaign.spec.authority, publicationRequested: "none" });
+          const task = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec: this.taskSpecForNode(campaign, node), authority: campaign.spec.authority, publicationRequested: "none" });
           child.taskId = task.id;
           child.status = task.status === "queued" ? "queued" : "running";
           child.startedAt = new Date().toISOString();
@@ -188,13 +188,19 @@ export class CampaignCoordinator {
     campaign.updatedAt = new Date().toISOString();
     await this.saveCampaign(campaign);
   }
-  private taskSpecForNode(campaign: CampaignRecord, source: Record<string, unknown>, repair?: { nodeId: string; attempt: number; code: string; kind: "ir" | "er" }): Record<string, unknown> {
+  private taskSpecForNode(campaign: CampaignRecord, node: CampaignPlan["nodes"][number], repair?: { nodeId: string; attempt: number; code: string; kind: "ir" | "er" }): Record<string, unknown> {
+    const source = node.taskSpec;
     const taskSpec = structuredClone(source), target = object(taskSpec.target), task = object(taskSpec.task);
     if (campaign.integration) {
       taskSpec.target = { ...target, repository: campaign.integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: campaign.integration.headSha };
       const routing = object(taskSpec.providerRouting), tokenBudget = object(routing.tokenBudget), execution = object(taskSpec.execution), implementation = execution.mode === "implementation";
       const configuredTotal = finiteNumber(tokenBudget.total) ?? finiteNumber(execution.maxProviderTokens) ?? 1_000;
-      const total = implementation ? Math.max(30_000, configuredTotal) : configuredTotal;
+      // A node estimate is a reservation, not a hint: never turn a small
+      // campaign node into an unbounded provider request.  The live campaign
+      // remainder also protects resumed/repaired children after prior usage.
+      const nodeReservation = finiteNumber(node.estimatedTokens) ?? configuredTotal;
+      const campaignRemaining = Math.max(0, campaign.spec.limits.maxTokens - campaign.usage.tokens);
+      const total = Math.min(configuredTotal, nodeReservation, campaignRemaining);
       taskSpec.execution = implementation ? { ...execution, maxRepairIterations: 0, maxProviderTokens: total } : execution;
       taskSpec.providerRouting = { ...routing, maxCalls: implementation ? 1 : routing.maxCalls, tokenBudget: { ...tokenBudget, total, perPhase: implementation ? { planner: 0, implementer: total, repair: 0, reviewer: 0 } : object(tokenBudget.perPhase) } };
     }
@@ -203,11 +209,18 @@ export class CampaignCoordinator {
   }
   private taskProjectBinding(campaign: CampaignRecord): { projectId?: string } { return !campaign.integration && campaign.spec.target.projectId ? { projectId: campaign.spec.target.projectId } : {}; }
   private async integrateCompletedChild(campaign: CampaignRecord, child: CampaignRecord["children"][string], task: ControlTaskRecord): Promise<"complete" | "repair_started" | "failed"> {
-    if (!campaign.integration || !campaign.plan) return "complete";
+    if (!campaign.plan) return "complete";
     const node = campaign.plan.nodes.find((item) => item.id === child.nodeId);
     if (!node) return this.integrationFailure(campaign, child, "CAMPAIGN_NODE_MISSING");
+    if (!campaign.integration) return "complete";
     const patchPath = join(task.artifactRoot, "implementation.patch");
-    if (!await lstat(patchPath).catch(() => null)) return "complete";
+    const execution = object(node.taskSpec.execution);
+    if (!await lstat(patchPath).catch(() => null)) {
+      // Inspection/validation nodes legitimately have no patch.  An
+      // implementation child, however, must produce the integration artifact;
+      // accepting it would falsely report a successful campaign change.
+      return execution.mode === "implementation" ? this.integrationFailure(campaign, child, "IMPLEMENTATION_PATCH_MISSING") : "complete";
+    }
     const discovery = object(node.taskSpec.discovery), allowedScopes = node.writeScopes ?? (Array.isArray(discovery.explicitFiles) ? discovery.explicitFiles.filter((item): item is string => typeof item === "string") : []);
     try {
       const integrated = await this.integration.integrateChildPatch({ stateRoot: this.deps.root, worktreeRoot: campaign.integration.worktreeRoot, patchRoot: task.artifactRoot, patchPath, allowedScopes, nodeId: node.id, maxPatchBytes: finiteNumber(object(node.taskSpec.execution).maxPatchBytes) ?? 500_000 });
@@ -222,7 +235,7 @@ export class CampaignCoordinator {
       const attempt = (child.integrationRepairAttempts ?? 0) + 1;
       const withinBudget = attempt <= 1 && campaign.usage.tokens + (node.estimatedTokens ?? 0) <= campaign.spec.limits.maxTokens && (campaign.spec.limits.maxCostUsd === undefined || campaign.usage.costUsd + (node.estimatedCostUsd ?? 0) <= campaign.spec.limits.maxCostUsd);
       if (!withinBudget) return this.integrationFailure(campaign, child, code);
-      const repairTask = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec: this.taskSpecForNode(campaign, node.taskSpec, { nodeId: node.id, attempt, code, kind: "ir" }), authority: campaign.spec.authority, publicationRequested: "none" }).catch(() => null);
+      const repairTask = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec: this.taskSpecForNode(campaign, node, { nodeId: node.id, attempt, code, kind: "ir" }), authority: campaign.spec.authority, publicationRequested: "none" }).catch(() => null);
       if (!repairTask) return this.integrationFailure(campaign, child, "INTEGRATION_REPAIR_START_FAILED");
       child.taskId = repairTask.id; child.status = repairTask.status === "queued" ? "queued" : "running"; child.accounted = false; child.integrationRepairAttempts = attempt; child.startedAt = new Date().toISOString(); child.finishedAt = null; child.error = null;
       campaign.integration.repairAttempts += 1;
@@ -233,7 +246,7 @@ export class CampaignCoordinator {
     if (!campaign.plan) return false;
     const node = campaign.plan.nodes.find((item) => item.id === child.nodeId), attempt = (child.executionRetryAttempts ?? 0) + 1;
     if (!node || attempt > 1 || campaign.usage.tokens + (node.estimatedTokens ?? 0) > campaign.spec.limits.maxTokens || (campaign.spec.limits.maxCostUsd !== undefined && campaign.usage.costUsd + (node.estimatedCostUsd ?? 0) > campaign.spec.limits.maxCostUsd)) return false;
-    const retry = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec: this.taskSpecForNode(campaign, node.taskSpec, { nodeId: node.id, attempt, code, kind: "er" }), authority: campaign.spec.authority, publicationRequested: "none" }).catch(() => null);
+    const retry = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec: this.taskSpecForNode(campaign, node, { nodeId: node.id, attempt, code, kind: "er" }), authority: campaign.spec.authority, publicationRequested: "none" }).catch(() => null);
     if (!retry) return false;
     child.taskId = retry.id; child.status = retry.status === "queued" ? "queued" : "running"; child.accounted = false; child.executionRetryAttempts = attempt; child.startedAt = new Date().toISOString(); child.finishedAt = null; child.error = null; return true;
   }
