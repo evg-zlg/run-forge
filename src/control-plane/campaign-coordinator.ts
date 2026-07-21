@@ -114,7 +114,7 @@ export class CampaignCoordinator {
           }
           child.status = "completed";
           child.finishedAt = new Date().toISOString();
-        } else if (["failed", "interrupted"].includes(task.status)) {
+        } else if (["failed", "interrupted", "awaiting_owner_decision"].includes(task.status)) {
           progressed = true;
           if (!child.accounted) { const result = await this.deps.getResult(child.taskId).catch(() => ({})), usage = aggregateUsageFromValue(result); campaign.usage.tokens += usage.tokens; campaign.usage.costUsd += usage.costUsd; campaign.usage.tasks += 1; child.evidence = boundPublicResult(result).result; child.accounted = true; }
           if (await this.retryFailedChild(campaign, child, task.error ?? "CHILD_EXECUTION_FAILED")) continue;
@@ -170,7 +170,7 @@ export class CampaignCoordinator {
     while (Date.now() < deadline) {
       for (const taskId of activeTaskIds) {
         const task = await this.deps.getTask(taskId).catch(() => null);
-        if (task && ["completed", "failed", "interrupted"].includes(task.status)) return;
+        if (task && ["completed", "failed", "interrupted", "awaiting_owner_decision"].includes(task.status)) return;
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
@@ -183,7 +183,11 @@ export class CampaignCoordinator {
   }
   private taskSpecForNode(campaign: CampaignRecord, source: Record<string, unknown>, repair?: { nodeId: string; attempt: number; code: string; kind: "ir" | "er" }): Record<string, unknown> {
     const taskSpec = structuredClone(source), target = object(taskSpec.target), task = object(taskSpec.task);
-    if (campaign.integration) taskSpec.target = { ...target, repository: campaign.integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: campaign.integration.headSha };
+    if (campaign.integration) {
+      taskSpec.target = { ...target, repository: campaign.integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: campaign.integration.headSha };
+      const routing = object(taskSpec.providerRouting), tokenBudget = object(routing.tokenBudget), total = finiteNumber(tokenBudget.total) ?? finiteNumber(object(taskSpec.execution).maxProviderTokens) ?? 1_000, implementer = Math.max(1_000, Math.floor(total * .9));
+      taskSpec.providerRouting = { ...routing, maxCalls: 2, tokenBudget: { ...tokenBudget, total, perPhase: { planner: 0, implementer, repair: Math.max(0, total - implementer), reviewer: 0 } } };
+    }
     if (repair) { taskSpec.taskId = `${campaign.id.slice(0, 48)}_${repair.nodeId.slice(0, 18)}_${repair.kind}${repair.attempt}`; taskSpec.task = { ...task, text: `Re-implement this bounded node against the current integrated campaign head after ${repair.code}. ${String(task.text ?? "")}` }; }
     return taskSpec;
   }
@@ -236,7 +240,7 @@ export class CampaignCoordinator {
   }
 }
 
-function aggregateUsageFromValue(value: unknown): { tokens: number; costUsd: number } { const totals = { tokens: 0, costUsd: 0 }; const visit = (current: unknown): void => { if (Array.isArray(current)) current.forEach(visit); else if (current && typeof current === "object") for (const [key, entry] of Object.entries(current as Record<string, unknown>)) { if (typeof entry === "number" && Number.isFinite(entry) && /(token|tokens|tokenUsage|totalTokens)/i.test(key)) totals.tokens += entry; else if (typeof entry === "number" && Number.isFinite(entry) && /(cost|costUsd|usd)/i.test(key)) totals.costUsd += entry; else visit(entry); } }; visit(value); return totals; }
+function aggregateUsageFromValue(value: unknown): { tokens: number; costUsd: number } { const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), usage = object(result.usage), calls = Array.isArray(result.providerCalls) ? result.providerCalls.map(object) : []; const totalTokens = finiteNumber(usage.totalTokens) ?? calls.reduce((sum, call) => sum + (finiteNumber(call.tokenUsage) ?? 0), 0); const costUsd = finiteNumber(usage.costUsd) ?? calls.reduce((sum, call) => sum + (finiteNumber(call.costUsd) ?? 0), 0); return { tokens: totalTokens, costUsd }; }
 function usageFromEvidence(value: Record<string, unknown> | CampaignPlannerEvidence | null): { tokens: number; costUsd: number } { const usage = value && typeof value.usage === "object" && value.usage !== null ? value.usage as Record<string, unknown> : {}; return { tokens: typeof usage.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : 0, costUsd: typeof usage.costUsd === "number" && Number.isFinite(usage.costUsd) ? usage.costUsd : 0 }; }
 function deterministicPlannerEvidence(): CampaignPlannerEvidence { return { mode: "deterministic-local", model: null, attempts: 0, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: [] }; }
 function failedPlannerEvidence(): CampaignPlannerEvidence { return { mode: "semantic-openrouter", model: null, attempts: 0, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: ["PLANNER_FAILED"] }; }

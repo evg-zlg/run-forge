@@ -181,12 +181,12 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   let overrunActual = 0, overrunLimit = request.spec.execution.maxProviderTokens, plannerSummary = "", budgetReason: string | null = null;
   let semanticReview: SemanticReviewResult = { kind: "semantic", status: "forbidden", performed: false, selectedReviewer: { provider: null, model: null }, reviewer: { provider: null, model: null, invocationId: null }, confidence: "unknown", limitations: ["Semantic review has not been reached."], findings: [], evidence: [], delegation: { party: "external_session", reason: "Semantic review has not been reached.", exactAction: "Perform an independent semantic review and attach structured findings." } };
   try {
-    if (openRouter) {
+    if (openRouter && request.spec.providerRouting.tokenBudget.perPhase.planner > 0) {
       const planner = await runOpenRouterAgent(request, executionRoot, buildPrompt(request, 0, validations, "", boundedContext.plannerPrompt), "planner", providerCalls, "planner"); providerCalls.push(providerCall("planner", planner, request, executor, executionRoot, "planner"));
       if (planner.exitCode !== 0) throw new Error(planner.failureReason ?? "openrouter_planner_failed");
       plannerSummary = boundedProviderText(planner.summary); await writeFile(join(request.artifactRoot, "provider", "planner-summary.txt"), plannerSummary, "utf8");
       const plannerOverrun = routingBudgetOverrun(providerCalls, request.spec.providerRouting, "planner"); if (plannerOverrun) { budgetExceeded = true; status = "blocked_with_owner_gate"; overrunPhase = "implementation"; overrunActual = plannerOverrun.actual; overrunLimit = plannerOverrun.limit; budgetReason = plannerOverrun.reason; }
-    }
+    } else if (openRouter) plannerSummary = "The trusted campaign-level semantic plan is authoritative for this bounded child; no duplicate child planner call was requested.";
     for (let iteration = request.checkpointRepair ? 1 : 0; !budgetExceeded && iteration <= request.spec.execution.maxRepairIterations; iteration += 1) {
       const phase = iteration === 0 ? "implement" : "repair";
       await progress(request, phase, iteration === 0 ? "Coding executor is implementing the bounded task." : `Repair iteration ${iteration} is addressing validation failures.`);
