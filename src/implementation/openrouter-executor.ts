@@ -76,9 +76,9 @@ export function normalizeOpenRouterDiff(value: string): string {
   const trimmed = value.trim();
   const fenced = trimmed.match(/```(?:diff|patch)?\s*\n([\s\S]*?)\n```/i);
   const candidate = (fenced?.[1] ?? trimmed).trim();
-  const diffStart = candidate.search(/^diff --git /m);
-  const diff = (diffStart > 0 ? candidate.slice(diffStart) : candidate).trimEnd();
-  const normalized = diff
+  if (candidate && !candidate.startsWith("diff --git ")) throw new Error("openrouter_patch_rejected: response must contain only a unified git diff");
+  if (/^\*\*\* (?:Begin Patch|End Patch|Add File:|Update File:|Delete File:)/m.test(candidate)) throw new Error("openrouter_patch_rejected: response contains a patch service marker");
+  const normalized = candidate.trimEnd()
     .replace(/^diff --git (?!a\/)(\S+) (?!b\/)(\S+)$/gm, "diff --git a/$1 b/$2")
     .replace(/^--- (?!a\/|\/dev\/null)(\S+)$/gm, "--- a/$1")
     .replace(/^\+\+\+ (?!b\/|\/dev\/null)(\S+)$/gm, "+++ b/$1");

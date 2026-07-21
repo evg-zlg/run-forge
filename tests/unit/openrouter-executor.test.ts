@@ -25,6 +25,12 @@ describe("OpenRouter executor safety", () => {
     expect(normalizeOpenRouterDiff(`\`\`\`diff\n${diff("src/value.ts")}\`\`\``)).toBe(diff("src/value.ts"));
   });
 
+  it("rejects prose and patch service markers instead of folding them into a repaired new file", () => {
+    const malformedNewFile = "diff --git a/guide.md b/guide.md\nnew file mode 100644\n--- /dev/null\n+++ b/guide.md\n@@ -0,0 +1,1 @@\nGuide\n";
+    expect(() => normalizeOpenRouterDiff(`Here is the patch:\n${diff("src/value.ts")}`)).toThrow("must contain only a unified git diff");
+    expect(() => normalizeOpenRouterDiff(`${malformedNewFile}*** End Patch\n`)).toThrow("patch service marker");
+  });
+
   it("preserves provider usage when a successful response is rejected after receipt", async () => {
     process.env.OPENROUTER_API_KEY = "test-key";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "not a diff" }, finish_reason: "stop" }], usage: { prompt_tokens: 11, completion_tokens: 7, total_tokens: 18, completion_tokens_details: { reasoning_tokens: 3 }, cost: 0.001 } }), { status: 200, headers: { "x-request-id": "request-1" } })));
