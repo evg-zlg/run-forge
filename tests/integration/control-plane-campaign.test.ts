@@ -77,8 +77,8 @@ describe("control plane campaign integration", () => {
       return fakeTask(id, "queued");
     };
     (manager as any).getTask = async (id: string) => tasks.get(id) ?? fakeTask(id, "failed", "missing");
-    (manager as any).getResult = async () => ({ usage: { totalTokens: 10, costUsd: 0.01 }, checkpoints: [] });
-    const response = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal: "Implement one bounded refactor", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "local" }, limits: { maxTokens: 1000, maxTasks: 3, maxConcurrency: 2 } }) });
+    (manager as any).getResult = async () => ({ status: "workflow_completed", usage: { totalTokens: 10, costUsd: 0.01 }, checkpoints: [] });
+    const response = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal: "Inspect one bounded refactor", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: false, network: false, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "local" }, limits: { maxTokens: 1000, maxTasks: 3, maxConcurrency: 2 } }) });
     expect(response.status).toBe(202);
     const campaign = await response.json();
     const final = await waitForCampaign(server, campaign.id);
@@ -111,8 +111,8 @@ describe("control plane campaign integration", () => {
       return fakeTask(id, "running");
     };
     (manager as any).getTask = async (id: string) => statuses.get(id) ?? fakeTask(id, "failed");
-    (manager as any).getResult = async () => ({ usage: { totalTokens: 30, costUsd: 3 } });
-    const response = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal: "Do independent tasks", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "local" }, limits: { maxTokens: 50, maxCostUsd: 5, maxTasks: 5, maxConcurrency: 2 } }) });
+    (manager as any).getResult = async () => ({ status: "workflow_completed", usage: { totalTokens: 30, costUsd: 3 } });
+    const response = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal: "Do independent tasks", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: false, network: false, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "local" }, limits: { maxTokens: 50, maxCostUsd: 5, maxTasks: 5, maxConcurrency: 2 } }) });
     const campaign = await response.json();
     const final = await waitForCampaign(server, campaign.id);
     expect(maxConcurrent).toBeLessThanOrEqual(2);
@@ -154,7 +154,7 @@ describe("control plane campaign integration", () => {
       return fakeTask(id, "running");
     };
     (managerA as any).getTask = async (id: string) => statuses.get(id) ?? fakeTask(id, "failed");
-    (managerA as any).getResult = async () => ({ usage: { totalTokens: 5, costUsd: 0.1 } });
+    (managerA as any).getResult = async () => ({ status: "workflow_completed", usage: { totalTokens: 5, costUsd: 0.1 } });
     const created = await managerA.createCampaign({ goal: "OpenRouter-only run", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "openrouter/auto", fallbackPolicy: "none" }, limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 } });
     const managerB = new ControlPlaneManager(new ControlPlaneStore(root));
     await managerB.initialize();
@@ -166,5 +166,50 @@ describe("control plane campaign integration", () => {
     while (Date.now() < deadline) { final = await managerB.getCampaign(created.id); if (["completed", "failed", "on_hold"].includes(final.status)) break; await new Promise((resolve) => setTimeout(resolve, 50)); }
     expect(final.status).toBe("completed");
     await expect(managerB.createCampaign({ goal: "Reject authority expansion", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: true, providerCalls: false, network: false, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "local" }, limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 } })).rejects.toThrow(/authority expansion/i);
+  });
+
+  test("holds implementation campaigns when the project validation contract is unknown", async () => {
+    const { manager } = await createHarness();
+    const campaign = await manager.createCampaign({
+      goal: "Change one bounded implementation detail",
+      target: { repository: process.cwd(), workingDirectory: "." },
+      authority: { inspect: true, implementation: true, providerCalls: true, network: false, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false },
+      providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" },
+      limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 },
+    });
+    expect(campaign.status).toBe("on_hold");
+    expect(campaign.failures).toContainEqual(expect.objectContaining({ reason: "campaign_validation_contract_unknown" }));
+    expect(campaign.result).toMatchObject({ status: "on_hold", validation: { contract: { status: "unknown" }, completion: "blocked" } });
+  });
+
+  test("rejects a local implementation bypass", async () => {
+    const { manager } = await createHarness();
+    await expect(manager.createCampaign({
+      goal: "Bypass isolated integration",
+      target: { repository: process.cwd(), workingDirectory: "." },
+      authority: { inspect: true, implementation: true, providerCalls: true, network: false, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false },
+      providerRouting: { provider: "local" }, limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 },
+      validationContract: { source: "explicit", requiredCommands: ["corepack pnpm test"] },
+    })).rejects.toThrow(/Local implementation campaigns are disabled/);
+  });
+
+  test("holds a campaign when a completed child still reports an external workflow handoff", async () => {
+    const { manager } = await createHarness();
+    (manager as any).planCampaign = async (record: any) => ({
+      schemaVersion: 1, campaignId: record.id, estimatedTokens: 1_000,
+      nodes: [{ id: "inspect", dependsOn: [], estimatedTokens: 1_000, taskSpec: { schemaVersion: 2, taskId: `${record.id}_inspect`, task: { text: "inspect", goal: "inspect", acceptanceCriteria: ["evidence"] }, target: { repository: process.cwd(), workingDirectory: "." }, execution: { mode: "inspection" }, providerRouting: { provider: "local" }, authority: { profile: "read-only", allowProviderCalls: false, allowNetwork: false }, runtime: { preference: "local-disposable" }, validation: { mode: "auto", commands: [], requirements: [] }, discovery: { policy: "auto", explicitFiles: [] }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" }, ownerGate: { policy: "stop-and-report" }, repair: { mode: "none", plan: null }, artifacts: { root: "/tmp/unused", resultFormat: "normalized-v1" } } }],
+    });
+    (manager as any).createTask = async () => fakeTask("handoff-child", "completed");
+    (manager as any).getTask = async () => fakeTask("handoff-child", "completed");
+    (manager as any).getResult = async () => ({ status: "awaiting_external_session", workflowCompleted: false, nextAction: { party: "external_session" } });
+    const campaign = await manager.createCampaign({
+      goal: "Inspect and report", target: { repository: process.cwd(), workingDirectory: "." },
+      authority: { inspect: true, implementation: false, providerCalls: false, network: false, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false },
+      providerRouting: { provider: "local" }, limits: { maxTokens: 2_000, maxTasks: 1, maxConcurrency: 1 },
+    });
+    const deadline = Date.now() + 5_000;
+    let final: any = campaign;
+    while (Date.now() < deadline && !["completed", "failed", "on_hold"].includes(final.status)) { await new Promise((resolve) => setTimeout(resolve, 25)); final = await manager.getCampaign(campaign.id); }
+    expect(final).toMatchObject({ status: "on_hold", children: { inspect: { status: "blocked", error: "campaign_child_workflow_incomplete:awaiting_external_session" } } });
   });
 });

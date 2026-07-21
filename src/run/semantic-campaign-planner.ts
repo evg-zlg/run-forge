@@ -39,6 +39,7 @@ type Options = { chatCompletion?: Chat; repositoryManifest?: unknown };
 
 const draftKeys = new Set(["id", "goal", "acceptanceCriteria", "dependsOn", "explicitFiles", "writeScopes", "estimatedTokens", "estimatedCostUsd"]);
 const excludedPath = /(^|\/)(?:\.git|\.env(?:\..*)?|node_modules|dist|coverage|artifacts|validation\/runs|\.runforge|secrets?|credentials?)(\/|$)/i;
+const campaignBasePlaceholder = "__CAMPAIGN_BASE__";
 
 export async function planSemanticCampaign(campaignId: string, spec: CampaignSpec, options: Options = {}): Promise<SemanticCampaignPlannerResult> {
   if (spec.providerRouting.provider === "local") return { plan: planCampaignFromGoal(campaignId, spec), evidence: emptyEvidence("deterministic-local", null) };
@@ -122,13 +123,27 @@ function trustedPlan(campaignId: string, spec: CampaignSpec, draft: DraftNode[])
     const childId = `${campaignId}_${String(index + 1).padStart(2, "0")}`.slice(0, 80);
     const total = Math.max(1_000, Math.min(200_000, node.estimatedTokens));
     const mode = spec.authority.implementation && node.writeScopes.length ? "implementation" : isValidationNode(node) ? "validation" : "inspection";
+    const finalValidation = mode === "validation";
+    const integrityCommand = spec.authority.implementation
+      ? `git diff --check ${campaignBasePlaceholder}...HEAD`
+      : "git diff --check";
+    const requiredCommands = finalValidation
+      ? [...new Set([...(spec.validationContract?.requiredCommands ?? []), integrityCommand])]
+      : ["git diff --check"];
+    const validationRequirements = mode === "implementation"
+      ? [{ command: "git diff --check", capabilities: ["filesystem", "shell"], acceptance: "advisory", evidenceRole: "campaign-validation", fallbacks: [] }]
+      : finalValidation
+        ? requiredCommands.map((command) => /^git(?:\s|$)/.test(command) ? {
+          command, capabilities: ["filesystem", "git-read-only-evidence", "git-metadata", "working-tree-index"], acceptance: "required", evidenceRole: "campaign-final-git-integrity", fallbacks: [],
+        } : { command, acceptance: "required", evidenceRole: "campaign-final-validation", fallbacks: [] })
+        : [];
     const boundedText = node.writeScopes.length ? `${node.goal}\nAllowed write scopes: ${node.writeScopes.join(", ")}. All other explicit files are read-only reference context.` : `${node.goal}\nThis is a read-only ${mode} node. Do not produce or apply a patch.`;
     return { id: node.id, dependsOn: node.dependsOn, writeScopes: node.writeScopes, estimatedTokens: node.estimatedTokens, ...(node.estimatedCostUsd === undefined ? {} : { estimatedCostUsd: node.estimatedCostUsd }), taskSpec: {
       schemaVersion: 2, taskId: childId, task: { text: boundedText, goal: node.goal, acceptanceCriteria: node.acceptanceCriteria }, target: { repository: spec.target.repository ?? ".", workingDirectory: spec.target.workingDirectory ?? ".", ...(spec.target.expectedSha ? { expectedSha: spec.target.expectedSha } : {}) },
       execution: { mode, maxRepairIterations: 1, timeoutMs: 300_000, maxChangedFiles: 20, maxPatchBytes: 500_000, maxProviderTokens: total, budgetMode: "hard", phaseBudgets: phaseBudget(total) },
       providerRouting: { provider: "openrouter", models, maxCalls: 3, tokenBudget: { total, perPhase: providerBudget(total) }, ...(node.estimatedCostUsd === undefined ? {} : { costBudgetUsd: node.estimatedCostUsd }), timeoutMs: 300_000, retry: { maxAttempts: 1 }, fallbackPolicy: "none" },
       authority: { profile: mode === "implementation" ? "bounded-implementation" : "read-only", envelopeFile: null, forbiddenAreas: ["merge", "deploy", "database", "production", "secrets"], allowProviderCalls: mode === "implementation" && Boolean(spec.authority.providerCalls), allowNetwork: mode === "implementation" && Boolean(spec.authority.network) }, runtime: { preference: mode === "validation" ? "docker" : "local-disposable", dependencyPreparation: "if-needed", externalNetwork: mode === "implementation" && spec.authority.network ? "allowed" : "denied" }, git: { publication: "none", branch: null }, merge: { policy: "never" }, deploy: { policy: "never" },
-      discovery: { policy: "explicit", profile: "small-scope", explicitFiles: [...new Set([...node.explicitFiles, ...node.writeScopes])], maxFiles: Math.max(1, Math.min(30, node.explicitFiles.length + node.writeScopes.length || 1)), maxBytes: 400_000, maxTokens: 30_000, stopCondition: "Stop when the bounded node acceptance criteria can be evaluated." }, validation: mode === "implementation" ? { mode: "explicit", commands: ["git diff --check"], requirements: [{ command: "git diff --check", capabilities: ["filesystem", "shell"], acceptance: "advisory", evidenceRole: "campaign-validation", fallbacks: [] }], profile: { id: "campaign-intermediate", defaultAcceptance: "advisory", defaultEvidenceRole: "campaign-validation", additionalCapabilities: [] } } : mode === "validation" ? { mode: "explicit", commands: ["git diff --check"], requirements: [{ command: "git diff --check", capabilities: ["filesystem", "git-read-only-evidence", "git-metadata", "working-tree-index"], acceptance: "required", evidenceRole: "campaign-final-validation", fallbacks: [] }], profile: { id: "campaign-final", defaultAcceptance: "required", defaultEvidenceRole: "campaign-final-validation", additionalCapabilities: [] } } : { mode: "auto", commands: [], requirements: [], profile: { id: "campaign-final", defaultAcceptance: "required", defaultEvidenceRole: "campaign-validation", additionalCapabilities: [] } }, ownerGate: { policy: "stop-and-report" }, repair: { mode: "none", plan: null }, artifacts: { root: `/tmp/runforge-campaign/${childId}`, resultFormat: "normalized-v1" }
+      discovery: { policy: "explicit", profile: "small-scope", explicitFiles: [...new Set([...node.explicitFiles, ...node.writeScopes])], maxFiles: Math.max(1, Math.min(30, node.explicitFiles.length + node.writeScopes.length || 1)), maxBytes: 400_000, maxTokens: 30_000, stopCondition: "Stop when the bounded node acceptance criteria can be evaluated." }, validation: mode === "implementation" ? { mode: "explicit", commands: ["git diff --check"], requirements: validationRequirements, profile: { id: "campaign-intermediate", defaultAcceptance: "advisory", defaultEvidenceRole: "campaign-validation", additionalCapabilities: [] } } : finalValidation ? { mode: "explicit", commands: requiredCommands, requirements: validationRequirements, profile: { id: `campaign-final-${spec.validationContract?.source ?? "unknown"}`, defaultAcceptance: "required", defaultEvidenceRole: "campaign-final-validation", additionalCapabilities: [] } } : { mode: "auto", commands: [], requirements: [], profile: { id: "campaign-final", defaultAcceptance: "required", defaultEvidenceRole: "campaign-validation", additionalCapabilities: [] } }, ownerGate: { policy: "stop-and-report" }, repair: { mode: "none", plan: null }, artifacts: { root: `/tmp/runforge-campaign/${childId}`, resultFormat: "normalized-v1" }
     } };
   });
   return { schemaVersion: 1, campaignId, nodes, estimatedTokens: nodes.reduce((sum, node) => sum + (node.estimatedTokens ?? 0), 0), ...(spec.limits.maxCostUsd === undefined ? {} : { estimatedCostUsd: nodes.reduce((sum, node) => sum + (node.estimatedCostUsd ?? 0), 0) }) };

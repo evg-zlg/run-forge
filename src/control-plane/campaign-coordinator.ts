@@ -25,11 +25,24 @@ export class CampaignCoordinator {
   async createCampaign(spec: CampaignSpec): Promise<CampaignRecord> {
     if (!spec.authority.inspect) throw new ControlPlaneError(403, "authority_denied", "inspect authority is required to create a campaign.");
     if (spec.authority.implementation && !spec.authority.providerCalls) throw new ControlPlaneError(403, "authority_denied", "Campaign authority expansion rejected: implementation requires providerCalls authority.");
+    if (spec.authority.implementation && spec.providerRouting.provider === "local") throw new ControlPlaneError(422, "invalid_campaign", "Local implementation campaigns are disabled; use an isolated OpenRouter integration campaign.");
+    if (spec.authority.implementation && spec.providerRouting.provider === "openrouter" && spec.target.projectId) throw new ControlPlaneError(422, "invalid_campaign", "OpenRouter implementation campaigns require a repository target, not projectId dual binding.");
     if (spec.authority.implementation && spec.providerRouting.provider === "openrouter" && (!spec.authority.localBranch || !spec.authority.localCommit)) throw new ControlPlaneError(403, "authority_denied", "OpenRouter implementation campaigns require localBranch and localCommit authority for isolated reconciliation.");
     if (spec.providerRouting.provider === "openrouter" && spec.providerRouting.fallbackPolicy && spec.providerRouting.fallbackPolicy !== "none") throw new ControlPlaneError(422, "invalid_campaign", "OpenRouter campaigns must set fallbackPolicy='none'.");
+    if (spec.providerRouting.provider === "local" && spec.providerRouting.fallbackPolicy === "same_provider") throw new ControlPlaneError(422, "invalid_campaign", "Local campaigns do not support same-provider fallback semantics.");
     const now = new Date().toISOString();
     const id = `cmp_v1_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
     const record: CampaignRecord = { schemaVersion: 1, id, status: "planning", spec, plan: null, plannerEvidence: null, integration: null, children: {}, usage: { tokens: 0, costUsd: 0, tasks: 0 }, checkpoints: [], failures: [], result: null, createdAt: now, updatedAt: now };
+    // Do not treat a generic Git integrity check as full product validation.
+    // Contract discovery belongs to the caller/doctor/profile layer, not this
+    // semantic planner, so an implementation campaign waits for that evidence.
+    if (spec.authority.implementation && !spec.validationContract?.requiredCommands.length) {
+      record.status = "on_hold";
+      record.failures.push({ at: now, reason: "campaign_validation_contract_unknown" });
+      record.result = reconcileCampaignResult(record);
+      await this.saveCampaign(record);
+      return record;
+    }
     let planning: CampaignPlan | SemanticCampaignPlannerResult;
     try { planning = await this.deps.planCampaign(record); }
     catch (error) {
@@ -107,8 +120,17 @@ export class CampaignCoordinator {
         if (!task) continue;
         if (task.status === "completed") {
           progressed = true;
+          const result = await this.deps.getResult(child.taskId).catch(() => ({}));
+          const completion = campaignChildCompletion(result);
+          if (!completion.completed) {
+            const at = new Date().toISOString();
+            child.status = "blocked"; child.finishedAt = at; child.error = completion.reason;
+            child.evidence = boundPublicResult(result).result;
+            campaign.failures.push({ at, nodeId: child.nodeId, taskId: child.taskId, reason: completion.reason });
+            campaign.status = "on_hold";
+            return this.finishCampaign(campaign, "on_hold");
+          }
           if (!child.accounted) {
-            const result = await this.deps.getResult(child.taskId).catch(() => ({}));
             const usage = aggregateUsageFromValue(result);
             campaign.usage.tokens += usage.tokens;
             campaign.usage.costUsd += usage.costUsd;
@@ -191,8 +213,14 @@ export class CampaignCoordinator {
   private taskSpecForNode(campaign: CampaignRecord, node: CampaignPlan["nodes"][number], repair?: { nodeId: string; attempt: number; code: string; kind: "ir" | "er" }): Record<string, unknown> {
     const source = node.taskSpec;
     const taskSpec = structuredClone(source), target = object(taskSpec.target), task = object(taskSpec.task);
-    if (campaign.integration) {
-      taskSpec.target = { ...target, repository: campaign.integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: campaign.integration.headSha };
+    // Keep the planner's write boundary as executable data, distinct from read
+    // context.  The OpenRouter executor checks it before applying a provider
+    // patch even to its disposable child worktree.
+    const discovery = object(taskSpec.discovery);
+    taskSpec.discovery = { ...discovery, writeScopes: [...(node.writeScopes ?? [])] };
+    const integration = campaign.integration;
+    if (integration) {
+      taskSpec.target = { ...target, repository: integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: integration.headSha };
       const routing = object(taskSpec.providerRouting), tokenBudget = object(routing.tokenBudget), execution = object(taskSpec.execution), implementation = execution.mode === "implementation";
       const configuredTotal = finiteNumber(tokenBudget.total) ?? finiteNumber(execution.maxProviderTokens) ?? 1_000;
       // A node estimate is a reservation, not a hint: never turn a small
@@ -203,6 +231,20 @@ export class CampaignCoordinator {
       const total = Math.min(configuredTotal, nodeReservation, campaignRemaining);
       taskSpec.execution = implementation ? { ...execution, maxRepairIterations: 0, maxProviderTokens: total } : execution;
       taskSpec.providerRouting = { ...routing, maxCalls: implementation ? 1 : routing.maxCalls, tokenBudget: { ...tokenBudget, total, perPhase: implementation ? { planner: 0, implementer: total, repair: 0, reviewer: 0 } : object(tokenBudget.perPhase) } };
+      // The final TaskSpec must be SHA-bound to the current integrated head,
+      // while its Git integrity evidence must cover the whole campaign delta.
+      // The semantic planner emits a non-executable marker because only the
+      // coordinator knows the isolated worktree's immutable base SHA.
+      const validation = object(taskSpec.validation);
+      if (typeof validation.mode === "string" && Array.isArray(validation.commands)) {
+        const replaceBase = (value: unknown): unknown => typeof value === "string" ? value.replaceAll("__CAMPAIGN_BASE__", integration.baseSha) : value;
+        validation.commands = validation.commands.map(replaceBase);
+        if (Array.isArray(validation.requirements)) validation.requirements = validation.requirements.map((requirement) => {
+          const item = object(requirement);
+          return Object.keys(item).length ? { ...item, command: replaceBase(item.command) } : requirement;
+        });
+        taskSpec.validation = validation;
+      }
     }
     if (repair) { taskSpec.taskId = `${campaign.id.slice(0, 48)}_${repair.nodeId.slice(0, 18)}_${repair.kind}${repair.attempt}`; taskSpec.task = { ...task, text: `Re-implement this bounded node against the current integrated campaign head after ${repair.code}. ${String(task.text ?? "")}` }; }
     return taskSpec;
@@ -264,9 +306,34 @@ export class CampaignCoordinator {
 }
 
 function aggregateUsageFromValue(value: unknown): { tokens: number; costUsd: number } { const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), usage = object(result.usage), calls = Array.isArray(result.providerCalls) ? result.providerCalls.map(object) : []; const totalTokens = finiteNumber(usage.totalTokens) ?? calls.reduce((sum, call) => sum + (finiteNumber(call.tokenUsage) ?? 0), 0); const costUsd = finiteNumber(usage.costUsd) ?? calls.reduce((sum, call) => sum + (finiteNumber(call.costUsd) ?? 0), 0); return { tokens: totalTokens, costUsd }; }
+function campaignChildCompletion(value: unknown): { completed: boolean; reason: string } {
+  const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), workflow = object(result.workflow);
+  const status = typeof result.status === "string" ? result.status : "unknown";
+  const workflowStatus = typeof workflow.status === "string" ? workflow.status : undefined;
+  const workflowCompleted = result.workflowCompleted === true || workflow.workflowCompleted === true;
+  const verdict = String(result.verdict ?? workflow.verdict ?? "").toLowerCase();
+  const next = object(result.next ?? result.nextAction ?? workflow.next ?? workflow.nextAction);
+  const nextParty = typeof next.party === "string" ? next.party : null;
+  if (["awaiting_external_session", "runforge_scope_completed", "awaiting_owner", "awaiting_owner_decision", "blocked"].includes(status) || ["awaiting_external_session", "runforge_scope_completed", "awaiting_owner", "blocked"].includes(workflowStatus ?? "")) return { completed: false, reason: `campaign_child_workflow_incomplete:${workflowStatus ?? status}` };
+  if (result.workflowCompleted === false || workflow.workflowCompleted === false) return { completed: false, reason: "campaign_child_workflow_incomplete:workflowCompleted_false" };
+  if (["failed", "blocked", "rejected", "do_not_apply"].includes(verdict)) return { completed: false, reason: `campaign_child_verdict:${verdict}` };
+  if (status === "workflow_completed" || (status === "completed" && workflowStatus === "workflow_completed") || (workflowCompleted && status === "completed")) return { completed: true, reason: "" };
+  return { completed: false, reason: `campaign_child_workflow_incomplete:${status}${nextParty ? `:${nextParty}` : ""}` };
+}
 function usageFromEvidence(value: Record<string, unknown> | CampaignPlannerEvidence | null): { tokens: number; costUsd: number } { const usage = value && typeof value.usage === "object" && value.usage !== null ? value.usage as Record<string, unknown> : {}; return { tokens: typeof usage.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : 0, costUsd: typeof usage.costUsd === "number" && Number.isFinite(usage.costUsd) ? usage.costUsd : 0 }; }
 function deterministicPlannerEvidence(): CampaignPlannerEvidence { return { mode: "deterministic-local", model: null, attempts: 0, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: [] }; }
 function failedPlannerEvidence(): CampaignPlannerEvidence { return { mode: "semantic-openrouter", model: null, attempts: 0, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: ["PLANNER_FAILED"] }; }
 function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function finiteNumber(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) ? value : null; }
-function reconcileCampaignResult(campaign: CampaignRecord): Record<string, unknown> { return { schemaVersion: 1, campaignId: campaign.id, status: campaign.status, usage: campaign.usage, failures: campaign.failures, integration: campaign.integration, children: Object.values(campaign.children).map((child) => ({ nodeId: child.nodeId, taskId: child.taskId, status: child.status, startedAt: child.startedAt, finishedAt: child.finishedAt, error: child.error, integrationRepairAttempts: child.integrationRepairAttempts ?? 0, executionRetryAttempts: child.executionRetryAttempts ?? 0 })), evidence: Object.values(campaign.children).filter((child) => child.evidence).map((child) => ({ nodeId: child.nodeId, evidence: child.evidence })) }; }
+function reconcileCampaignResult(campaign: CampaignRecord): Record<string, unknown> {
+  const contract = campaign.spec.validationContract;
+  const contractKnown = Boolean(contract?.requiredCommands.length);
+  return {
+    schemaVersion: 1, campaignId: campaign.id, status: campaign.status, usage: campaign.usage, failures: campaign.failures, integration: campaign.integration,
+    validation: {
+      contract: contractKnown ? { status: "known", source: contract!.source, requiredCommands: contract!.requiredCommands } : { status: "unknown", requiredCommands: [] },
+      completion: campaign.status === "completed" ? "satisfied" : !contractKnown && campaign.spec.authority.implementation ? "blocked" : "not_completed",
+    },
+    children: Object.values(campaign.children).map((child) => ({ nodeId: child.nodeId, taskId: child.taskId, status: child.status, startedAt: child.startedAt, finishedAt: child.finishedAt, error: child.error, integrationRepairAttempts: child.integrationRepairAttempts ?? 0, executionRetryAttempts: child.executionRetryAttempts ?? 0 })), evidence: Object.values(campaign.children).filter((child) => child.evidence).map((child) => ({ nodeId: child.nodeId, evidence: child.evidence }))
+  };
+}
