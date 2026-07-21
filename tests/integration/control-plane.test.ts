@@ -637,13 +637,28 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
   it("emits execution heartbeats, cancels safely, and reports degraded task aggregates", { timeout: 15_000 }, async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-watchdog-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let executions = 0;
     const manager = new ControlPlaneManager(store, { runTaskSpec: async (specPath) => { const run = ++executions; if (run === 1) await new Promise((done) => setTimeout(done, 80)); else { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); } return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 30, executionTimeoutMs: 1_000 });
-    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-CANCEL-1");
-    await new Promise((done) => setTimeout(done, 20)); const active = await manager.getTask("CONTROL-CANCEL-1"); const cancelAgreementId = active.executionAgreement?.agreementId; expect(active.progress.workerStatus).toBe("active"); expect(Date.parse(active.progress.lastHeartbeatAt!)).toBeGreaterThan(Date.parse(active.progress.startedAt!));
-    expect((await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-1/cancel`, { method: "POST" })).status).toBe(200); expect((await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-1/cancel`, { method: "POST" })).status).toBe(200);
-    await new Promise((done) => setTimeout(done, 90)); const cancelled = await manager.getTask("CONTROL-CANCEL-1"); expect(cancelled).toMatchObject({ status: "interrupted", executionAgreement: { agreementId: cancelAgreementId }, progress: { agreement: { agreementId: cancelAgreementId } }, recovery: { reason: "cancelled_by_operator", retryAvailable: true } }); expect(["completed", "not_required"]).toContain(cancelled.recovery?.cleanupStatus);
-    const now = new Date(Date.now() - 60_000).toISOString(); const lost = { ...(await manager.getTask("CONTROL-CANCEL-1")), id: "CONTROL-LOST-1", status: "running" as const, updatedAt: now, finishedAt: null, progress: { ...active.progress, executionId: "lost-worker", updatedAt: now, lastHeartbeatAt: now, workerStatus: "active" as const } }; await store.saveTask(lost);
-    const health = await manager.health(); expect(health).toMatchObject({ service: { status: "healthy" }, readiness: { acceptingNewTasks: true }, tasks: { active: 0, interrupted: 2 } }); expect((await manager.getTask("CONTROL-LOST-1")).status).toBe("interrupted");
-    await manager.retryTask("CONTROL-CANCEL-1"); await eventually(async () => (await manager.getTask("CONTROL-CANCEL-1")).status === "completed"); expect(executions).toBe(2);
+    const id = "CONTROL-CANCEL-1";
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
+    try {
+      await submit(instance.url, id);
+      let active = await manager.getTask(id);
+      await eventually(async () => {
+        active = await manager.getTask(id);
+        return active.progress.workerStatus === "active" && Date.parse(active.progress.lastHeartbeatAt!) > Date.parse(active.progress.startedAt!);
+      });
+      const cancelAgreementId = active.executionAgreement?.agreementId;
+      expect(active.progress.workerStatus).toBe("active");
+      expect(Date.parse(active.progress.lastHeartbeatAt!)).toBeGreaterThan(Date.parse(active.progress.startedAt!));
+      expect((await fetch(`${instance.url}/v1/tasks/${id}/cancel`, { method: "POST" })).status).toBe(200);
+      expect((await fetch(`${instance.url}/v1/tasks/${id}/cancel`, { method: "POST" })).status).toBe(200);
+      await new Promise((done) => setTimeout(done, 90)); const cancelled = await manager.getTask(id); expect(cancelled).toMatchObject({ status: "interrupted", executionAgreement: { agreementId: cancelAgreementId }, progress: { agreement: { agreementId: cancelAgreementId } }, recovery: { reason: "cancelled_by_operator", retryAvailable: true } }); expect(["completed", "not_required"]).toContain(cancelled.recovery?.cleanupStatus);
+      const now = new Date(Date.now() - 60_000).toISOString(); const lost = { ...(await manager.getTask(id)), id: "CONTROL-LOST-1", status: "running" as const, updatedAt: now, finishedAt: null, progress: { ...active.progress, executionId: "lost-worker", updatedAt: now, lastHeartbeatAt: now, workerStatus: "active" as const } }; await store.saveTask(lost);
+      const health = await manager.health(); expect(health).toMatchObject({ service: { status: "healthy" }, readiness: { acceptingNewTasks: true }, tasks: { active: 0, interrupted: 2 } }); expect((await manager.getTask("CONTROL-LOST-1")).status).toBe("interrupted");
+      await manager.retryTask(id); await eventually(async () => (await manager.getTask(id)).status === "completed"); expect(executions).toBe(2);
+    } finally {
+      await manager.cancelTask(id).catch(() => undefined);
+      await new Promise((done) => setTimeout(done, 90));
+    }
   });
 
   it("returns a formal interruption when no continuation artifact can be trusted", async () => {
