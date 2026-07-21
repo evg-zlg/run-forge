@@ -209,16 +209,22 @@ export type CampaignRecord = {
     nodeId: string;
     dependsOn: string[];
     taskId: string | null;
-    status: "pending" | "queued" | "running" | "completed" | "failed" | "blocked";
+    /** `dispatching` is durable: a restart reconciles its deterministic task id before re-dispatching. */
+    status: "pending" | "dispatching" | "queued" | "running" | "completed" | "failed" | "blocked";
     startedAt: string | null;
     finishedAt: string | null;
     error: string | null;
     accounted: boolean;
+    /** Persisted estimate held while a child can still consume provider budget. */
+    reservedTokens: number;
+    reservedCostUsd: number;
     integrationRepairAttempts: number;
     executionRetryAttempts: number;
     evidence?: Record<string, unknown>;
   }>;
   usage: { tokens: number; costUsd: number; tasks: number };
+  /** Sum of child reservations that have not yet been converted to actual usage. */
+  reserved: { tokens: number; costUsd: number };
   checkpoints: string[];
   failures: Array<{ at: string; nodeId?: string; taskId?: string; reason: string }>;
   result: Record<string, unknown> | null;

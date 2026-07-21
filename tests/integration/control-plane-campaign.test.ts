@@ -76,7 +76,7 @@ describe("control plane campaign integration", () => {
       setTimeout(() => tasks.set(id, fakeTask(id, "completed")), 20);
       return fakeTask(id, "queued");
     };
-    (manager as any).getTask = async (id: string) => tasks.get(id) ?? fakeTask(id, "failed", "missing");
+    (manager as any).getTask = async (id: string) => { const task = tasks.get(id); if (!task) throw new Error("task not found"); return task; };
     (manager as any).getResult = async () => ({ status: "workflow_completed", usage: { totalTokens: 10, costUsd: 0.01 }, checkpoints: [] });
     const response = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal: "Inspect one bounded refactor", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: false, network: false, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "local" }, limits: { maxTokens: 1000, maxTasks: 3, maxConcurrency: 2 } }) });
     expect(response.status).toBe(202);
@@ -153,7 +153,7 @@ describe("control plane campaign integration", () => {
       setTimeout(() => statuses.set(id, fakeTask(id, "completed")), 20);
       return fakeTask(id, "running");
     };
-    (managerA as any).getTask = async (id: string) => statuses.get(id) ?? fakeTask(id, "failed");
+    (managerA as any).getTask = async (id: string) => { const task = statuses.get(id); if (!task) throw new Error("task not found"); return task; };
     (managerA as any).getResult = async () => ({ status: "workflow_completed", usage: { totalTokens: 5, costUsd: 0.1 } });
     const created = await managerA.createCampaign({ goal: "OpenRouter-only run", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "openrouter/auto", fallbackPolicy: "none" }, limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 } });
     const managerB = new ControlPlaneManager(new ControlPlaneStore(root));
