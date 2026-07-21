@@ -80,7 +80,15 @@ function validateDraft(content: string, spec: CampaignSpec): { nodes?: DraftNode
   for (const item of raw) {
     const node = object(item);
     if (!node || Object.keys(node).some((key) => !draftKeys.has(key))) { codes.add("INVALID_FIELDS"); continue; }
-    if (!validId(node.id) || !nonEmpty(node.goal) || !strings(node.acceptanceCriteria, true) || !strings(node.dependsOn) || !strings(node.explicitFiles) || !Number.isInteger(node.estimatedTokens) || Number(node.estimatedTokens) < 1_000 || (node.estimatedCostUsd !== undefined && (!finite(node.estimatedCostUsd) || Number(node.estimatedCostUsd) < 0))) { codes.add("INVALID_NODE"); continue; }
+    let valid = true;
+    if (!validId(node.id)) { codes.add("INVALID_ID"); valid = false; }
+    if (!nonEmpty(node.goal)) { codes.add("INVALID_GOAL"); valid = false; }
+    if (!strings(node.acceptanceCriteria, true)) { codes.add("INVALID_CRITERIA"); valid = false; }
+    if (!strings(node.dependsOn)) { codes.add("INVALID_DEPENDENCIES"); valid = false; }
+    if (!strings(node.explicitFiles)) { codes.add("INVALID_FILE_LIST"); valid = false; }
+    if (!Number.isInteger(node.estimatedTokens) || Number(node.estimatedTokens) < 1_000) { codes.add("INVALID_TOKEN_ESTIMATE"); valid = false; }
+    if (node.estimatedCostUsd !== undefined && (!finite(node.estimatedCostUsd) || Number(node.estimatedCostUsd) < 0)) { codes.add("INVALID_COST_ESTIMATE"); valid = false; }
+    if (!valid) continue;
     const explicitFiles = node.explicitFiles as string[];
     if (explicitFiles.some((file) => !safePath(file))) codes.add("UNSAFE_FILE_SCOPE");
     nodes.push({ id: node.id as string, goal: node.goal as string, acceptanceCriteria: node.acceptanceCriteria as string[], dependsOn: node.dependsOn as string[], explicitFiles, estimatedTokens: Number(node.estimatedTokens), ...(node.estimatedCostUsd === undefined ? {} : { estimatedCostUsd: Number(node.estimatedCostUsd) }) });
