@@ -6,17 +6,17 @@ import { planSemanticCampaign } from "../../src/run/semantic-campaign-planner.js
 const authority = { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false };
 const spec = (provider: "openrouter" | "local" = "openrouter"): CampaignSpec => ({ goal: "Add arbitrary feature", target: { repository: ".", workingDirectory: ".", expectedSha: "abcdef1234567" }, authority, providerRouting: { provider, model: "qwen/qwen3-coder-next", fallbackPolicy: provider === "openrouter" ? "none" : "same_provider" }, limits: { maxTokens: 20_000, maxCostUsd: 1, maxTasks: 4, maxConcurrency: 2 } });
 const response = (content: string, tokens = 100, costUsd = .001): OpenRouterExecutionResult => ({ content, usage: { inputTokens: 40, cachedInputTokens: 0, outputTokens: 60, reasoningTokens: 0, totalTokens: tokens, costUsd }, requestId: "request", finishReason: "stop", attempts: 1 });
-const valid = { nodes: [{ id: "inspect", goal: "Inspect feature", acceptanceCriteria: ["Evidence recorded"], dependsOn: [], explicitFiles: ["src/a.ts"], writeScopes: [], estimatedTokens: 4_000, estimatedCostUsd: .05 }, { id: "implement", goal: "Implement feature", acceptanceCriteria: ["Focused tests pass"], dependsOn: ["inspect"], explicitFiles: ["src/a.ts"], writeScopes: ["src/a.ts"], estimatedTokens: 6_000, estimatedCostUsd: .1 }] };
+const valid = { nodes: [{ id: "inspect", goal: "Inspect feature", acceptanceCriteria: ["Evidence recorded"], dependsOn: [], explicitFiles: ["src/a.ts"], writeScopes: [], estimatedTokens: 4_000, estimatedCostUsd: .05 }, { id: "implement", goal: "Implement feature", acceptanceCriteria: ["Feature is implemented"], dependsOn: ["inspect"], explicitFiles: ["src/a.ts"], writeScopes: ["src/a.ts"], estimatedTokens: 6_000, estimatedCostUsd: .1 }, { id: "validate", goal: "Validate integrated feature", acceptanceCriteria: ["Focused tests pass"], dependsOn: ["implement"], explicitFiles: ["src/a.ts"], writeScopes: [], estimatedTokens: 2_000, estimatedCostUsd: .02 }] };
 
 describe("semantic campaign planner", () => {
   it("turns a semantic draft into trusted bounded task specs", async () => {
     const chat = vi.fn(async () => response(JSON.stringify(valid)));
     const result = await planSemanticCampaign("cmp_v1_123456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: { files: ["src/a.ts"] } });
-    expect(result.plan.nodes).toHaveLength(2);
+    expect(result.plan.nodes).toHaveLength(3);
     expect(result.plan.nodes[1]!.taskSpec).toMatchObject({ target: { expectedSha: "abcdef1234567" }, providerRouting: { provider: "openrouter", fallbackPolicy: "none" }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" }, discovery: { explicitFiles: ["src/a.ts"] } });
     expect(result.plan.nodes[1]!.taskSpec).toMatchObject({ task: { goal: "Implement feature", text: expect.stringContaining("Allowed write scopes: src/a.ts") } });
     expect(result.plan.nodes[1]!.taskSpec).toMatchObject({ validation: { mode: "explicit", commands: ["git diff --check"], requirements: [{ acceptance: "advisory" }], profile: { id: "campaign-intermediate", defaultAcceptance: "advisory" } } });
-    expect(result.plan.nodes[0]!.taskSpec).toMatchObject({ validation: { mode: "auto", profile: { id: "campaign-final", defaultAcceptance: "required" } } });
+    expect(result.plan.nodes[2]!.taskSpec).toMatchObject({ execution: { mode: "validation" }, authority: { allowProviderCalls: false, allowNetwork: false }, runtime: { preference: "docker" }, validation: { mode: "explicit", commands: ["git diff --check"], requirements: [{ command: "git diff --check", acceptance: "required", capabilities: ["filesystem", "git-read-only-evidence", "git-metadata", "working-tree-index"] }], profile: { id: "campaign-final", defaultAcceptance: "required" } } });
     expect(result.plan.nodes[0]!.taskSpec).toMatchObject({ execution: { mode: "inspection" }, authority: { allowProviderCalls: false, allowNetwork: false } });
     expect(JSON.stringify(result.evidence)).not.toMatch(/src\/a|Evidence recorded|request/);
     expect(result.evidence).toMatchObject({ mode: "semantic-openrouter", attempts: 1, repaired: false, usage: { tokens: 100, costUsd: .001 } });
@@ -42,6 +42,26 @@ describe("semantic campaign planner", () => {
     const result = await planSemanticCampaign("cmp_v1_423456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: {} });
     expect(result.evidence.validationCodes).toContain("OVERLAPPING_SCOPE");
     expect(result.plan.nodes[1]!.dependsOn).toEqual(["inspect"]);
+  });
+
+  it("repairs a final validation sink that requests write scopes", async () => {
+    const invalid = structuredClone(valid);
+    invalid.nodes[2]!.writeScopes = ["src/a.ts"];
+    const chat = vi.fn().mockResolvedValueOnce(response(JSON.stringify(invalid))).mockResolvedValueOnce(response(JSON.stringify(valid)));
+    const result = await planSemanticCampaign("cmp_v1_433456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: {} });
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(result.evidence.validationCodes).toContain("FINAL_VALIDATION_WRITE_SCOPES");
+    expect(result.plan.nodes[2]!.writeScopes).toEqual([]);
+  });
+
+  it("repairs an independent implementation sink outside final validation", async () => {
+    const invalid = structuredClone(valid);
+    invalid.nodes.push({ id: "independent-implement", goal: "Implement unrelated feature", acceptanceCriteria: ["Feature is implemented"], dependsOn: [], explicitFiles: ["src/b.ts"], writeScopes: ["src/b.ts"], estimatedTokens: 2_000, estimatedCostUsd: .02 });
+    const chat = vi.fn().mockResolvedValueOnce(response(JSON.stringify(invalid))).mockResolvedValueOnce(response(JSON.stringify(valid)));
+    const result = await planSemanticCampaign("cmp_v1_443456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: {} });
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(result.evidence.validationCodes).toContain("NON_VALIDATION_FINAL_SINK");
+    expect(result.plan.nodes.map((node) => node.id)).not.toContain("independent-implement");
   });
 
   it("keeps local campaigns deterministic without a provider call", async () => {
