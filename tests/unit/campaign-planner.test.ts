@@ -65,4 +65,28 @@ describe("campaign planner unit", () => {
       } as any)
     ).toThrow(/unknown field/i);
   });
+
+  test("rejects implementation plans whose terminal sinks are not complete read-only validation", () => {
+    const task = (mode: string, commands: string[], profile = "read-only") => ({ execution: { mode }, authority: { profile, allowProviderCalls: false, allowNetwork: false }, discovery: { writeScopes: [] }, validation: { mode: "explicit", commands }, providerRouting: { provider: "openrouter", costBudgetUsd: .1, fallbackPolicy: "none" }, merge: { policy: "never" }, deploy: { policy: "never" }, git: { publication: "none" } });
+    const base: any = { schemaVersion: 1, campaignId: "cmp_v1_deadbeefdeadbeefdeadbeef", estimatedTokens: 2_000, estimatedCostUsd: .2, nodes: [
+      { id: "implement", dependsOn: [], writeScopes: ["src/a.ts"], estimatedTokens: 1_000, estimatedCostUsd: .1, taskSpec: task("implementation", ["git diff --check"]) },
+      { id: "sink", dependsOn: ["implement"], writeScopes: [], estimatedTokens: 1_000, estimatedCostUsd: .1, taskSpec: task("inspection", ["corepack pnpm test", "git diff --check __CAMPAIGN_BASE__...HEAD"]) },
+    ] };
+    const options = { requireOpenRouter: true, implementation: true, requiredValidationCommands: ["corepack pnpm test"] };
+    expect(() => validateCampaignPlan(base, { maxTasks: 2, maxTokens: 3_000, maxCostUsd: 1 }, authority, options)).toThrow(/terminal node.*validation-only/i);
+    base.nodes[1].taskSpec.execution.mode = "validation";
+    base.nodes[1].taskSpec.validation.commands = ["git diff --check __CAMPAIGN_BASE__...HEAD"];
+    expect(() => validateCampaignPlan(base, { maxTasks: 2, maxTokens: 3_000, maxCostUsd: 1 }, authority, options)).toThrow(/omit required command/i);
+    base.nodes[1].taskSpec.validation.commands = ["corepack pnpm test", "git diff --check"];
+    expect(() => validateCampaignPlan(base, { maxTasks: 2, maxTokens: 3_000, maxCostUsd: 1 }, authority, options)).toThrow(/meaningful campaign Git diff range/i);
+    base.nodes[1].taskSpec.validation.commands = ["corepack pnpm test", "git diff --check __CAMPAIGN_BASE__...HEAD"];
+    expect(() => validateCampaignPlan(base, { maxTasks: 2, maxTokens: 3_000, maxCostUsd: 1 }, authority, options)).not.toThrow();
+  });
+
+  test("requires cost estimates and child cost caps for every OpenRouter node under a hard cost limit", () => {
+    const plan: any = { schemaVersion: 1, campaignId: "cmp_v1_deadbeefdeadbeefdeadbeef", estimatedTokens: 1_000, estimatedCostUsd: 0, nodes: [{ id: "inspect", dependsOn: [], estimatedTokens: 1_000, taskSpec: { providerRouting: { provider: "openrouter", fallbackPolicy: "none" }, authority: {}, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } } }] };
+    expect(() => validateCampaignPlan(plan, { maxTasks: 1, maxTokens: 2_000, maxCostUsd: 1 }, authority, { requireOpenRouter: true })).toThrow(/finite cost estimate/i);
+    plan.nodes[0].estimatedCostUsd = .1; plan.estimatedCostUsd = .1;
+    expect(() => validateCampaignPlan(plan, { maxTasks: 1, maxTokens: 2_000, maxCostUsd: 1 }, authority, { requireOpenRouter: true })).toThrow(/child cost cap/i);
+  });
 });

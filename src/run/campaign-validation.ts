@@ -19,7 +19,7 @@ export function topoSortPlan(nodes: Array<{ id: string; dependsOn: string[] }>):
   return ordered;
 }
 
-export function validateCampaignPlan(plan: CampaignPlan, limits: { maxTasks: number; maxTokens: number; maxCostUsd?: number }, authority: ControlAuthority, options: { requireOpenRouter: boolean }): void {
+export function validateCampaignPlan(plan: CampaignPlan, limits: { maxTasks: number; maxTokens: number; maxCostUsd?: number }, authority: ControlAuthority, options: { requireOpenRouter: boolean; implementation?: boolean; requiredValidationCommands?: string[] }): void {
   if (!Array.isArray(plan.nodes) || !plan.nodes.length) throw new Error("campaign plan must include at least one node.");
   if (plan.nodes.length > limits.maxTasks) throw new Error("campaign plan exceeds maxTasks.");
   const ids = new Set<string>();
@@ -38,10 +38,37 @@ export function validateCampaignPlan(plan: CampaignPlan, limits: { maxTasks: num
     const text = JSON.stringify(task).toLowerCase();
     if (/\b(?:database|production|secret|merge|deploy)\b/.test(text) && /\bpolicy"\s*:\s*"always|requested"\s*:\s*true/.test(text)) throw new Error(`dangerous requested phase in node ${node.id}`);
     if (options.requireOpenRouter) { const route = object(task.providerRouting); if (route.provider !== "openrouter") throw new Error(`openrouter campaign node ${node.id} attempted local provider.`); if ((route.fallbackPolicy ?? "none") !== "none") throw new Error(`openrouter campaign node ${node.id} attempted fallback expansion.`); }
+    if (limits.maxCostUsd !== undefined && object(task.providerRouting).provider === "openrouter") {
+      const childCap = object(task.providerRouting).costBudgetUsd;
+      if (!finiteNonNegative(node.estimatedCostUsd)) throw new Error(`campaign node ${node.id} requires a finite cost estimate.`);
+      if (!finiteNonNegative(childCap)) throw new Error(`campaign node ${node.id} requires a finite child cost cap.`);
+      if (Number(childCap) > Number(node.estimatedCostUsd)) throw new Error(`campaign node ${node.id} child cost cap exceeds its estimate.`);
+    }
   }
   const cycle = detectCycle(plan.nodes.map((node) => ({ id: node.id, dependsOn: node.dependsOn }))); if (cycle.length) throw new Error(`campaign plan has cycle: ${cycle.join(" -> ")}`);
   const estimatedTokens = plan.nodes.reduce((total, node) => total + (node.estimatedTokens ?? 0), 0); if (estimatedTokens > limits.maxTokens) throw new Error("campaign token budget exceeded by planned estimate.");
-  const estimatedCost = plan.nodes.reduce((total, node) => total + (node.estimatedCostUsd ?? 0), 0); if (limits.maxCostUsd !== undefined && estimatedCost > limits.maxCostUsd) throw new Error("campaign cost budget exceeded by planned estimate.");
+  const estimatedCost = plan.nodes.reduce((total, node) => total + (node.estimatedCostUsd ?? 0), 0);
+  if (limits.maxCostUsd !== undefined) {
+    if (!finiteNonNegative(plan.estimatedCostUsd)) throw new Error("campaign plan requires a finite cost estimate.");
+    if (Math.abs(Number(plan.estimatedCostUsd) - estimatedCost) > 0.000_001) throw new Error("campaign plan cost estimate must equal its node estimates.");
+    if (estimatedCost > limits.maxCostUsd) throw new Error("campaign cost budget exceeded by planned estimate.");
+  }
+  if (options.implementation) validateImplementationSinks(plan, options.requiredValidationCommands ?? []);
 }
 
 function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
+function finiteNonNegative(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value) && value >= 0; }
+function validateImplementationSinks(plan: CampaignPlan, requiredCommands: string[]): void {
+  const dependedOn = new Set(plan.nodes.flatMap((node) => node.dependsOn));
+  const sinks = plan.nodes.filter((node) => !dependedOn.has(node.id));
+  const commands = new Set<string>();
+  for (const node of sinks) {
+    const task = object(node.taskSpec), execution = object(task.execution), authority = object(task.authority), discovery = object(task.discovery), validation = object(task.validation);
+    const scopes = [...(node.writeScopes ?? []), ...(Array.isArray(discovery.writeScopes) ? discovery.writeScopes : [])];
+    if (execution.mode !== "validation" || authority.profile !== "read-only" || authority.allowProviderCalls === true || authority.allowNetwork === true || scopes.length) throw new Error(`implementation campaign terminal node ${node.id} must be validation-only and read-only.`);
+    if (validation.mode !== "explicit" || !Array.isArray(validation.commands)) throw new Error(`implementation campaign terminal node ${node.id} requires explicit validation commands.`);
+    for (const command of validation.commands) if (typeof command === "string") commands.add(command);
+  }
+  for (const command of requiredCommands) if (!commands.has(command)) throw new Error(`campaign final validation sinks omit required command: ${command}`);
+  if (![...commands].some((command) => /^git diff --check (?:__CAMPAIGN_BASE__|[a-f0-9]{40,64})\.\.\.HEAD$/.test(command))) throw new Error("campaign final validation sinks require a meaningful campaign Git diff range.");
+}

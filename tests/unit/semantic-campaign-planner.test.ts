@@ -89,4 +89,26 @@ describe("semantic campaign planner", () => {
     expect(result.plan.estimatedTokens).toBe(16_000); expect(result.plan.estimatedCostUsd).toBeCloseTo(.8);
     expect(result.evidence.validationCodes).toEqual(["TOKEN_ESTIMATES_NORMALIZED", "COST_ESTIMATES_NORMALIZED"]);
   });
+
+  it("repairs missing node cost estimates when a hard campaign cost limit is set", async () => {
+    const missingCosts = structuredClone(valid); missingCosts.nodes.forEach((node) => { delete (node as { estimatedCostUsd?: number }).estimatedCostUsd; });
+    const chat = vi.fn().mockResolvedValueOnce(response(JSON.stringify(missingCosts))).mockResolvedValueOnce(response(JSON.stringify(valid)));
+    const result = await planSemanticCampaign("cmp_v1_723456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: {} });
+    expect(result.evidence.validationCodes).toContain("MISSING_COST_ESTIMATE");
+    expect(result.plan.nodes.every((node) => typeof node.estimatedCostUsd === "number" && typeof (node.taskSpec as any).providerRouting.costBudgetUsd === "number")).toBe(true);
+    expect(JSON.stringify(chat.mock.calls[1]![0])).toContain("Every node must include estimatedCostUsd");
+  });
+
+  it("does not start or retry planner calls when prompt plus minimum completion cannot fit", async () => {
+    const tooSmall = spec(); tooSmall.limits.maxTokens = 1_000;
+    const neverCalled = vi.fn(async () => response(JSON.stringify(valid)));
+    await expect(planSemanticCampaign("cmp_v1_823456789012345678901234", tooSmall, { chatCompletion: neverCalled, repositoryManifest: {} })).rejects.toThrow(/PLANNER_TOKEN_BUDGET_EXHAUSTED/);
+    expect(neverCalled).not.toHaveBeenCalled();
+
+    const exhausted = spec(); exhausted.limits.maxTokens = 8_000;
+    const once = vi.fn(async (_request: unknown) => response("not json", 7_300));
+    await expect(planSemanticCampaign("cmp_v1_923456789012345678901234", exhausted, { chatCompletion: once, repositoryManifest: {} })).rejects.toThrow(/PLANNER_TOKEN_BUDGET_EXHAUSTED/);
+    expect(once).toHaveBeenCalledTimes(1);
+    expect((once.mock.calls[0]![0] as { maxTokens: number }).maxTokens).toBeLessThanOrEqual(8_000);
+  });
 });

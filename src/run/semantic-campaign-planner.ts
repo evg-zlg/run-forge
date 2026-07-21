@@ -40,6 +40,7 @@ type Options = { chatCompletion?: Chat; repositoryManifest?: unknown };
 const draftKeys = new Set(["id", "goal", "acceptanceCriteria", "dependsOn", "explicitFiles", "writeScopes", "estimatedTokens", "estimatedCostUsd"]);
 const excludedPath = /(^|\/)(?:\.git|\.env(?:\..*)?|node_modules|dist|coverage|artifacts|validation\/runs|\.runforge|secrets?|credentials?)(\/|$)/i;
 const campaignBasePlaceholder = "__CAMPAIGN_BASE__";
+const minimumPlannerCompletionTokens = 1_000;
 
 export async function planSemanticCampaign(campaignId: string, spec: CampaignSpec, options: Options = {}): Promise<SemanticCampaignPlannerResult> {
   if (spec.providerRouting.provider === "local") return { plan: planCampaignFromGoal(campaignId, spec), evidence: emptyEvidence("deterministic-local", null) };
@@ -59,12 +60,19 @@ export async function planSemanticCampaign(campaignId: string, spec: CampaignSpe
 }
 
 async function invoke(chat: Chat, model: string, content: string, spec: CampaignSpec, usage: { tokens: number; costUsd: number }, attempts: number, repaired: boolean): Promise<OpenRouterExecutionResult> {
+  const remaining = spec.limits.maxTokens - usage.tokens;
+  const promptTokens = Math.ceil(content.length / 4);
+  const completionBudget = Math.min(12_000, Math.floor(spec.limits.maxTokens / 3), remaining - promptTokens);
+  if (completionBudget < minimumPlannerCompletionTokens) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: attempts - 1, repaired, usage, validationCodes: ["PLANNER_TOKEN_BUDGET_EXHAUSTED"] });
   try {
-    const result = await chat({ model, messages: [{ role: "system", content: "Return only strict JSON. Never emit TaskSpec, authority, credentials, prose, or markdown." }, { role: "user", content }], timeoutMs: 300_000, maxCalls: 1, temperature: 0, maxTokens: Math.min(12_000, Math.max(1_000, Math.floor(spec.limits.maxTokens / 3))), reasoning: { effort: "low", exclude: true } });
-    usage.tokens += result.usage.totalTokens ?? 0;
+    const result = await chat({ model, messages: [{ role: "system", content: "Return only strict JSON. Never emit TaskSpec, authority, credentials, prose, or markdown." }, { role: "user", content }], timeoutMs: 300_000, maxCalls: 1, temperature: 0, maxTokens: completionBudget, reasoning: { effort: "low", exclude: true } });
+    const consumed = result.usage.totalTokens ?? 0;
+    usage.tokens += consumed;
     usage.costUsd += result.usage.costUsd ?? 0;
+    if (consumed > remaining) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_TOKEN_BUDGET_EXCEEDED"] });
     return result;
-  } catch {
+  } catch (error) {
+    if (error instanceof SemanticCampaignPlannerError) throw error;
     throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["MODEL_CALL_FAILED"] });
   }
 }
@@ -91,6 +99,7 @@ function validateDraft(content: string, spec: CampaignSpec): { nodes?: DraftNode
     if (!strings(node.writeScopes)) { codes.add("INVALID_WRITE_SCOPES"); valid = false; }
     if (!Number.isInteger(node.estimatedTokens) || Number(node.estimatedTokens) < 1_000) { codes.add("INVALID_TOKEN_ESTIMATE"); valid = false; }
     if (node.estimatedCostUsd !== undefined && (!finite(node.estimatedCostUsd) || Number(node.estimatedCostUsd) < 0)) { codes.add("INVALID_COST_ESTIMATE"); valid = false; }
+    if (spec.limits.maxCostUsd !== undefined && node.estimatedCostUsd === undefined) codes.add("MISSING_COST_ESTIMATE");
     if (!valid) continue;
     const explicitFiles = node.explicitFiles as string[], writeScopes = node.writeScopes as string[];
     if ([...explicitFiles, ...writeScopes].some((file) => !safePath(file))) codes.add("UNSAFE_FILE_SCOPE");
@@ -160,7 +169,7 @@ async function buildRepositoryManifest(spec: CampaignSpec): Promise<Record<strin
 }
 
 function planningPrompt(spec: CampaignSpec, manifest: unknown): string { return JSON.stringify({ goal: spec.goal, limits: spec.limits, repositoryManifest: manifest, output: { nodes: [{ id: "bounded-id", goal: "bounded goal", acceptanceCriteria: ["observable result"], dependsOn: [], explicitFiles: ["existing/reference/file"], writeScopes: ["only/file/or/directory/this/node/may/change"], estimatedTokens: 4000, estimatedCostUsd: 0.01 }] }, rules: ["Return one JSON object and no prose.", "explicitFiles are read context: include every existing reference/source file needed to make the decision, plus intended new files.", "writeScopes are the narrow paths this node may modify; validation-only nodes use an empty array.", "Use only manifest paths or safe new relative paths.", "Independent nodes must not share writeScopes.", "Reserve at least 20% of campaign token and cost limits for planning and repairs; child estimates together must use at most 80%.", "Implementation plans must end in a dependent validation/test/check node for the integrated result.", ...(spec.authority.implementation ? ["Implementation campaigns must include at least one bounded implementation node with a non-empty writeScopes array."] : []), "Do not include authority, TaskSpec, merge, deploy, publication, credentials, or commands."] }).slice(0, 24_000); }
-function repairPrompt(codes: string[], previous: string, spec: CampaignSpec): string { return JSON.stringify({ validationCodes: codes.slice(0, 20), previousDraft: previous.slice(0, 8_000), requiredShape: { nodes: [{ id: "unique-id", goal: "non-empty goal", acceptanceCriteria: ["non-empty observable criterion"], dependsOn: ["existing-node-id"], explicitFiles: ["existing reference/read context and intended new files"], writeScopes: ["only paths this node may modify; empty for validation"], estimatedTokens: "integer 1000 or greater", estimatedCostUsd: "optional finite non-negative number; omit when unknown" }] }, limits: { maxTasks: spec.limits.maxTasks, childTokensAtMost: Math.floor(spec.limits.maxTokens * .8), childCostAtMost: spec.limits.maxCostUsd === undefined ? null : spec.limits.maxCostUsd * .8 }, rules: ["Every dependency must name another emitted node.", "No self-dependencies or cycles.", "Independent nodes cannot share writeScopes.", "Read context must be sufficient for each node to act without owner clarification.", "Include a final dependent test/validation/check node.", ...(codes.includes("MISSING_IMPLEMENTATION_NODE") ? ["The previous draft has no implementation node: include at least one bounded implementation node with a non-empty writeScopes array."] : []), "Use no unknown fields and return JSON only."], instruction: "Correct the draft without adding prose or markdown." }); }
+function repairPrompt(codes: string[], previous: string, spec: CampaignSpec): string { return JSON.stringify({ validationCodes: codes.slice(0, 20), previousDraft: previous.slice(0, 8_000), requiredShape: { nodes: [{ id: "unique-id", goal: "non-empty goal", acceptanceCriteria: ["non-empty observable criterion"], dependsOn: ["existing-node-id"], explicitFiles: ["existing reference/read context and intended new files"], writeScopes: ["only paths this node may modify; empty for validation"], estimatedTokens: "integer 1000 or greater", estimatedCostUsd: spec.limits.maxCostUsd === undefined ? "optional finite non-negative number; omit when unknown" : "required finite non-negative number for every node" }] }, limits: { maxTasks: spec.limits.maxTasks, childTokensAtMost: Math.floor(spec.limits.maxTokens * .8), childCostAtMost: spec.limits.maxCostUsd === undefined ? null : spec.limits.maxCostUsd * .8 }, rules: ["Every dependency must name another emitted node.", "No self-dependencies or cycles.", "Independent nodes cannot share writeScopes.", "Read context must be sufficient for each node to act without owner clarification.", "Include a final dependent test/validation/check node.", ...(codes.includes("MISSING_IMPLEMENTATION_NODE") ? ["The previous draft has no implementation node: include at least one bounded implementation node with a non-empty writeScopes array."] : []), ...(spec.limits.maxCostUsd === undefined ? [] : ["Every node must include estimatedCostUsd because this campaign has a hard cost limit."]), "Use no unknown fields and return JSON only."], instruction: "Correct the draft without adding prose or markdown." }); }
 function extractJson(text: string): string { const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i); return (fenced?.[1] ?? text).trim(); }
 function isValidationNode(node: Pick<DraftNode, "goal" | "acceptanceCriteria">): boolean { return /test|valid|verif|check/i.test(`${node.goal} ${node.acceptanceCriteria.join(" ")}`); }
 function hasConcurrentOverlap(nodes: DraftNode[]): boolean { const byId = new Map(nodes.map((node) => [node.id, node])); const reaches = (from: string, target: string, seen = new Set<string>()): boolean => from === target || (!seen.has(from) && (seen.add(from), (byId.get(from)?.dependsOn ?? []).some((dep) => reaches(dep, target, seen)))); for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) { const a = nodes[i]!, b = nodes[j]!; if (reaches(a.id, b.id) || reaches(b.id, a.id)) continue; if (a.writeScopes.some((left) => b.writeScopes.some((right) => scopeOverlap(left, right)))) return true; } return false; }
