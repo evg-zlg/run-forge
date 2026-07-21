@@ -27,15 +27,23 @@ async function waitFor(read: () => Promise<CampaignRecord>, predicate: (value: C
 
 describe("CampaignCoordinator reliability", () => {
   it("accepts a completed implementation result despite an external nested review, but keeps validation strict", () => {
-    const implementation = { status: "completed", workflow: { status: "awaiting_external_session", workflowCompleted: false }, implementation: { status: "implemented_and_validated" } };
+    const implementation = { status: "completed", workflow: { status: "awaiting_external_session" }, implementation: { status: "implemented_and_validated" }, validationAggregate: "passed" };
     expect(campaignChildCompletion(implementation, "implementation")).toEqual({ completed: true, reason: "" });
     expect(campaignChildCompletion({ ...implementation, workflow: { status: "failed" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
     expect(campaignChildCompletion({ ...implementation, workflow: { status: "awaiting_external_session", verdict: "rejected" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_verdict:rejected" });
-    expect(campaignChildCompletion({ status: "completed", implementation: { status: "failed_with_diagnostics" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_incomplete:failed_with_diagnostics" });
-    expect(campaignChildCompletion({ status: "completed", implementation: { status: "no_change_required" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_no_change_requires_explicit_noop_contract" });
+    expect(campaignChildCompletion({ ...implementation, workflow: undefined }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_workflow_unknown:missing" });
+    expect(campaignChildCompletion({ ...implementation, workflow: { status: "mystery" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_workflow_unknown:mystery" });
+    expect(campaignChildCompletion({ ...implementation, validationAggregate: "product_failed" }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_validation_incomplete:product_failed" });
+    expect(campaignChildCompletion({ ...implementation, implementation: { status: "failed_with_diagnostics" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_incomplete:failed_with_diagnostics" });
+    expect(campaignChildCompletion({ ...implementation, implementation: { status: "no_change_required" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_no_change_requires_explicit_noop_contract" });
     expect(campaignChildCompletion({ status: "completed", workflow: { status: "awaiting_external_session" } }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_incomplete:awaiting_external_session" });
     expect(campaignChildCompletion({ status: "completed", workflow: { status: "workflow_completed" }, validationAggregate: "completed_with_validation_gaps" }, "validation")).toEqual({ completed: true, reason: "" });
     expect(campaignChildCompletion({ status: "workflow_completed", workflow: { status: "failed" }, validationAggregate: "passed" }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ status: "workflow_completed", workflowCompleted: false, validationAggregate: "passed" }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_incomplete:workflowCompleted_false" });
+    expect(campaignChildCompletion({ status: "completed", workflow: { status: "workflow_completed", workflowCompleted: false }, validationAggregate: "passed" }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_incomplete:workflowCompleted_false" });
+    expect(campaignChildCompletion({ status: "workflow_completed", workflow: { status: "awaiting_external_session" }, validationAggregate: "passed" }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_incomplete:awaiting_external_session" });
+    expect(campaignChildCompletion({ status: "rejected", validationAggregate: "passed" }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:rejected" });
+    expect(campaignChildCompletion({ status: "workflow_completed", workflow: { status: "do_not_apply" }, validationAggregate: "passed" }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:do_not_apply" });
     expect(campaignChildCompletion({ status: "workflow_completed", validationAggregate: "blocked_by_capability" }, "validation")).toEqual({ completed: false, reason: "campaign_child_validation_incomplete:blocked_by_capability" });
   });
 

@@ -14,7 +14,7 @@ export function aggregateCampaignUsage(value: unknown): { tokens: number; costUs
  */
 export function campaignChildCompletion(value: unknown, executionMode?: string): { completed: boolean; reason: string } {
   const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), workflow = object(result.workflow), status = typeof result.status === "string" ? result.status : "unknown", workflowStatus = typeof workflow.status === "string" ? workflow.status : undefined, workflowCompleted = result.workflowCompleted === true || workflow.workflowCompleted === true, verdict = String(result.verdict ?? workflow.verdict ?? "").toLowerCase(), rootVerdict = String(result.verdict ?? "").toLowerCase(), workflowVerdict = String(workflow.verdict ?? "").toLowerCase(), validationAggregate = String(result.validationAggregate ?? workflow.validationAggregate ?? ""), next = object(result.next ?? result.nextAction ?? workflow.next ?? workflow.nextAction), nextParty = typeof next.party === "string" ? next.party : null;
-  const fatalStatus = (candidate: string | undefined): boolean => ["failed", "blocked", "blocked_by_capability", "blocked_by_policy", "cancelled", "timed_out"].includes(candidate ?? "");
+  const fatalStatus = (candidate: string | undefined): boolean => ["failed", "blocked", "blocked_by_capability", "blocked_by_policy", "cancelled", "timed_out", "rejected", "do_not_apply"].includes(candidate ?? "");
   const fatalVerdict = (candidate: string): boolean => ["failed", "blocked", "rejected", "do_not_apply"].includes(candidate);
   const fatal = (): { completed: false; reason: string } | null => {
     if (fatalStatus(status)) return { completed: false, reason: `campaign_child_workflow_fatal:${status}` };
@@ -28,13 +28,16 @@ export function campaignChildCompletion(value: unknown, executionMode?: string):
   if (executionMode === "implementation") {
     const implementation = object(result.implementation), implementationStatus = typeof implementation.status === "string" ? implementation.status : "unknown";
     if (status !== "completed") return { completed: false, reason: `campaign_child_implementation_incomplete:${status}` };
+    if (!["awaiting_external_session", "runforge_scope_completed", "workflow_completed"].includes(workflowStatus ?? "")) return { completed: false, reason: `campaign_child_implementation_workflow_unknown:${workflowStatus ?? "missing"}` };
+    if (!["passed", "completed_with_validation_gaps"].includes(validationAggregate)) return { completed: false, reason: `campaign_child_implementation_validation_incomplete:${validationAggregate || "unknown"}` };
     if (implementationStatus === "implemented_and_validated") return { completed: true, reason: "" };
     if (implementationStatus === "no_change_required") return { completed: false, reason: "campaign_child_implementation_no_change_requires_explicit_noop_contract" };
     return { completed: false, reason: `campaign_child_implementation_incomplete:${implementationStatus}` };
   }
   if (executionMode === "validation") {
     const incompleteStatus = workflowStatus ?? status;
-    const settled = status === "workflow_completed" || (status === "completed" && workflowStatus === "workflow_completed");
+    if (result.workflowCompleted === false || workflow.workflowCompleted === false) return { completed: false, reason: "campaign_child_workflow_incomplete:workflowCompleted_false" };
+    const settled = (status === "workflow_completed" && (!workflowStatus || workflowStatus === "workflow_completed")) || (status === "completed" && workflowStatus === "workflow_completed");
     if (!settled) return { completed: false, reason: `campaign_child_workflow_incomplete:${incompleteStatus}${nextParty ? `:${nextParty}` : ""}` };
     return ["passed", "completed_with_validation_gaps"].includes(validationAggregate)
       ? { completed: true, reason: "" }
