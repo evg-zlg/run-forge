@@ -121,4 +121,16 @@ describe("semantic campaign planner", () => {
     await expect(planSemanticCampaign("cmp_v1_a23456789012345678901234", capped, { chatCompletion: chat, repositoryManifest: {} })).rejects.toThrow(/PLANNER_COST_BUDGET_EXCEEDED/);
     expect(chat).toHaveBeenCalledTimes(1);
   });
+
+  it("fails closed without repair when provider token or cost accounting is unavailable", async () => {
+    const missingTokens = response("not json"); missingTokens.usage.totalTokens = null;
+    const tokenChat = vi.fn(async () => missingTokens);
+    await expect(planSemanticCampaign("cmp_v1_b23456789012345678901234", spec(), { chatCompletion: tokenChat, repositoryManifest: {} })).rejects.toThrow(/PLANNER_TOKEN_ACCOUNTING_UNAVAILABLE/);
+    expect(tokenChat).toHaveBeenCalledTimes(1);
+
+    const missingCost = response("not json"); missingCost.usage.costUsd = null;
+    const costChat = vi.fn(async () => missingCost);
+    await expect(planSemanticCampaign("cmp_v1_c23456789012345678901234", spec(), { chatCompletion: costChat, repositoryManifest: {} })).rejects.toThrow(/PLANNER_COST_ACCOUNTING_UNAVAILABLE/);
+    expect(costChat).toHaveBeenCalledTimes(1);
+  });
 });

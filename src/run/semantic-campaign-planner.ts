@@ -70,7 +70,9 @@ async function invoke(chat: Chat, model: string, content: string, spec: Campaign
   if (completionBudget < minimumPlannerCompletionTokens) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: attempts - 1, repaired, usage, validationCodes: ["PLANNER_TOKEN_BUDGET_EXHAUSTED"] });
   try {
     const result = await chat({ model, messages: [{ role: "system", content: plannerSystemPrompt }, { role: "user", content }], timeoutMs: 300_000, maxCalls: 1, temperature: 0, maxTokens: completionBudget, reasoning: { effort: "low", exclude: true } });
-    const consumed = result.usage.totalTokens ?? 0;
+    if (result.usage.totalTokens === null) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_TOKEN_ACCOUNTING_UNAVAILABLE"] });
+    if (spec.limits.maxCostUsd !== undefined && result.usage.costUsd === null) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_COST_ACCOUNTING_UNAVAILABLE"] });
+    const consumed = result.usage.totalTokens;
     usage.tokens += consumed;
     usage.costUsd += result.usage.costUsd ?? 0;
     if (consumed > remaining) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_TOKEN_BUDGET_EXCEEDED"] });
