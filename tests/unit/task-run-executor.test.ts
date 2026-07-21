@@ -40,6 +40,8 @@ describe("DockerShellExecutor policy", () => {
       "--pull", "never",
       "--network", "none",
       "--cap-drop", "ALL",
+      "--cpus", "4",
+      "--user", `${process.getuid?.() ?? 65_534}:${process.getgid?.() ?? 65_534}`,
       "--read-only",
       "--entrypoint", "/bin/sh",
       "runforge:local",
@@ -61,7 +63,7 @@ describe("DockerShellExecutor policy", () => {
 
     const args = dockerRunArgs(request, "runforge:local", "runforge-test", true);
 
-    expect(args).toEqual(expect.arrayContaining(["--network", "none", "--read-only", "--memory", "2g", "HOME=/tmp", "COREPACK_HOME=/workspace/.runforge-corepack", "TMPDIR=/runforge-tmp"]));
+    expect(args).toEqual(expect.arrayContaining(["--network", "none", "--cpus", "4", "--user", `${process.getuid?.() ?? 65_534}:${process.getgid?.() ?? 65_534}`, "--read-only", "--memory", "2g", "HOME=/tmp", "COREPACK_HOME=/workspace/.runforge-corepack", "TMPDIR=/runforge-tmp"]));
     expect(args).toContain(`type=bind,src=${root}/.runforge-tmp,dst=/runforge-tmp`);
     expect(args.join(" ")).not.toContain("noexec");
     expect(args.find((item) => item.startsWith("type=bind"))).not.toContain("readonly");
