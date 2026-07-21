@@ -100,4 +100,33 @@ describe("bounded implementation context", () => {
     const r2 = await buildContextPlan(request, root);
     expect(result.implementationPrompt).toBe(r2.implementationPrompt);
   });
+
+  it("compresses large README and docs text while retaining file boundaries, headings, and actionable lines", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-reference-context-"));
+    const filler = Array.from({ length: 900 }, (_, index) => `ordinary documentation paragraph ${index}: ${"x".repeat(52)}`).join("\n");
+    await writeFile(join(root, "README.md"), [
+      "# RunForge",
+      "Opening orientation.",
+      filler,
+      "## Recovery",
+      "The validation failed: retry only after restoring credentials.",
+      "Closing notes.",
+    ].join("\n"));
+    const request = { spec: { task: { text: "read README.md" }, discovery: { explicitFiles: ["README.md"], maxFiles: 1, maxBytes: 100_000, maxTokens: 100_000, profile: "small-scope", stopCondition: "bounded" } } } as any;
+
+    const result = await buildContextPlan(request, root);
+    expect(result.implementationPrompt).toContain("--- BEGIN FILE README.md ---");
+    expect(result.implementationPrompt).toContain("# RunForge");
+    expect(result.implementationPrompt).toContain("## Recovery");
+    expect(result.implementationPrompt).toContain("validation failed");
+    expect(result.implementationPrompt).not.toContain("ordinary documentation paragraph 500");
+    expect(Buffer.byteLength(result.implementationPrompt)).toBeLessThan(7_000);
+
+    const telemetry = (result.plan.compilerTelemetry as any);
+    const file = telemetry.perFile.find((entry: any) => entry.file === "README.md");
+    expect(file).toMatchObject({ classification: "reference-text", truncated: true });
+    expect(file.inputBytes).toBeGreaterThan(file.implementationBytes);
+    expect(telemetry.rawIncludedBytes).toBe(file.inputBytes);
+    expect(telemetry.reductionRatio.implementation).toBeLessThan(0.2);
+  });
 });
