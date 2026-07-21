@@ -15,7 +15,7 @@ describe("semantic campaign planner", () => {
     expect(result.plan.nodes).toHaveLength(2);
     expect(result.plan.nodes[1]!.taskSpec).toMatchObject({ target: { expectedSha: "abcdef1234567" }, providerRouting: { provider: "openrouter", fallbackPolicy: "none" }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" }, discovery: { explicitFiles: ["src/a.ts"] } });
     expect(result.plan.nodes[1]!.taskSpec).toMatchObject({ task: { goal: "Implement feature", text: expect.stringContaining("Allowed write scopes: src/a.ts") } });
-    expect(result.plan.nodes[1]!.taskSpec).toMatchObject({ validation: { mode: "explicit", commands: [], profile: { id: "campaign-intermediate", defaultAcceptance: "advisory" } } });
+    expect(result.plan.nodes[1]!.taskSpec).toMatchObject({ validation: { mode: "explicit", commands: ["git diff --check"], requirements: [{ acceptance: "advisory" }], profile: { id: "campaign-intermediate", defaultAcceptance: "advisory" } } });
     expect(result.plan.nodes[0]!.taskSpec).toMatchObject({ validation: { mode: "auto", profile: { id: "campaign-final", defaultAcceptance: "required" } } });
     expect(result.plan.nodes[0]!.taskSpec).toMatchObject({ execution: { mode: "inspection" }, authority: { allowProviderCalls: false, allowNetwork: false } });
     expect(JSON.stringify(result.evidence)).not.toMatch(/src\/a|Evidence recorded|request/);
