@@ -1,12 +1,10 @@
 import { randomUUID } from "node:crypto";
 import type { ExecutionAgreement, ExecutionAgreementConflict, ExecutionParty, ExecutionPhaseId, ExecutionProfile } from "../product/execution-agreement.js";
 import type { ValidationCapabilityNegotiation } from "./validation-negotiation.js";
-
 export const controlPlaneApiVersion = "v1";
 export const defaultControlPlaneHost = "127.0.0.1";
 export const defaultControlPlanePort = 7373;
 export const defaultMaxRequestBytes = 1_048_576;
-
 export type ControlAuthority = {
   inspect: boolean;
   implementation: boolean;
@@ -159,6 +157,103 @@ export type ControlTaskRecord = {
   };
 };
 
+export type CampaignStatus = "planning" | "queued" | "running" | "completed" | "failed" | "on_hold";
+export type CampaignProviderRouting = {
+  provider: "openrouter" | "local";
+  model?: string;
+  phaseModels?: Partial<Record<"planner" | "implementer" | "repair" | "reviewer", string>>;
+  fallbackPolicy?: "none" | "same_provider";
+};
+/**
+ * The campaign caller supplies these checks from an already-known project
+ * contract.  Campaign planning deliberately does not try to infer a complete
+ * test suite from arbitrary repository contents.
+ */
+export type CampaignValidationContract = {
+  source: "explicit" | "task_spec" | "doctor" | "project_profile";
+  requiredCommands: string[];
+};
+export type CampaignSpec = {
+  goal: string;
+  target: { projectId?: string; repository?: string; workingDirectory?: string; expectedSha?: string };
+  authority: ControlAuthority;
+  providerRouting: CampaignProviderRouting;
+  limits: { maxCostUsd?: number; maxTokens: number; maxTasks: number; maxConcurrency: number };
+  /** Optional for read-only campaigns. Required before an implementation campaign can run. */
+  validationContract?: CampaignValidationContract;
+};
+export type CampaignPlanNode = {
+  id: string;
+  taskSpec: Record<string, unknown>;
+  dependsOn: string[];
+  writeScopes?: string[];
+  estimatedTokens?: number;
+  estimatedCostUsd?: number;
+};
+export type CampaignPlan = {
+  schemaVersion: 1;
+  campaignId: string;
+  nodes: CampaignPlanNode[];
+  estimatedTokens: number;
+  estimatedCostUsd?: number;
+};
+export type CampaignRecord = {
+  schemaVersion: 1;
+  id: string;
+  status: CampaignStatus;
+  spec: CampaignSpec;
+  plan: CampaignPlan | null;
+  plannerEvidence: Record<string, unknown> | null;
+  integration: null | { status: "ready" | "failed"; worktreeRoot: string; branch: string; baseSha: string; headSha: string; appliedNodes: string[]; repairAttempts: number; lastError: string | null };
+  children: Record<string, {
+    nodeId: string;
+    dependsOn: string[];
+    taskId: string | null;
+    /** `dispatching` is durable: a restart reconciles its deterministic task id before re-dispatching. */
+    status: "pending" | "dispatching" | "queued" | "running" | "completed" | "failed" | "blocked";
+    startedAt: string | null;
+    finishedAt: string | null;
+    error: string | null;
+    accounted: boolean;
+    /** Persisted estimate held while a child can still consume provider budget. */
+    reservedTokens: number;
+    reservedCostUsd: number;
+    integrationRepairAttempts: number;
+    executionRetryAttempts: number;
+    evidence?: Record<string, unknown>;
+  }>;
+  usage: { tokens: number; costUsd: number; tasks: number };
+  /** Sum of child reservations that have not yet been converted to actual usage. */
+  reserved: { tokens: number; costUsd: number };
+  checkpoints: string[];
+  failures: Array<{ at: string; nodeId?: string; taskId?: string; reason: string }>;
+  result: Record<string, unknown> | null;
+  createdAt: string;
+  updatedAt: string;
+};
+export function parseCampaignRequest(value: unknown): CampaignSpec {
+  const input = asObject(value, "campaign request");
+  rejectUnknown(input, ["goal", "target", "authority", "providerRouting", "limits", "validationContract"], "campaign request");
+  const target = asObject(input.target, "target");
+  rejectUnknown(target, ["projectId", "repository", "workingDirectory", "expectedSha"], "target");
+  const routing = asObject(input.providerRouting, "providerRouting");
+  rejectUnknown(routing, ["provider", "model", "phaseModels", "fallbackPolicy"], "providerRouting");
+  const phaseModels = asObject(routing.phaseModels, "providerRouting.phaseModels", true);
+  rejectUnknown(phaseModels, ["planner", "implementer", "repair", "reviewer"], "providerRouting.phaseModels");
+  const limits = asObject(input.limits, "limits");
+  rejectUnknown(limits, ["maxCostUsd", "maxTokens", "maxTasks", "maxConcurrency"], "limits");
+  const validation = asObject(input.validationContract, "validationContract", true);
+  rejectUnknown(validation, ["source", "requiredCommands"], "validationContract");
+  const requiredCommands = stringArray(validation.requiredCommands, "validationContract.requiredCommands");
+  if (Object.keys(validation).length && !requiredCommands.length) throw new ControlPlaneError(400, "invalid_request", "validationContract.requiredCommands must contain at least one command.");
+  const validationContract = Object.keys(validation).length
+    ? { source: choice(validation.source, ["explicit", "task_spec", "doctor", "project_profile"] as const, "validationContract.source"), requiredCommands: [...new Set(requiredCommands)] }
+    : undefined;
+  const fallbackPolicy = routing.fallbackPolicy === undefined
+    ? undefined
+    : choice(routing.fallbackPolicy, ["none", "same_provider"] as const, "providerRouting.fallbackPolicy");
+  return { goal: string(input.goal, "goal"), target: { ...(target.projectId === undefined ? {} : { projectId: string(target.projectId, "target.projectId") }), ...(target.repository === undefined ? {} : { repository: string(target.repository, "target.repository") }), ...(target.workingDirectory === undefined ? {} : { workingDirectory: string(target.workingDirectory, "target.workingDirectory") }), ...(target.expectedSha === undefined ? {} : { expectedSha: string(target.expectedSha, "target.expectedSha") }) }, authority: defaultAuthority(input.authority), providerRouting: { provider: choice(routing.provider, ["openrouter", "local"] as const, "providerRouting.provider"), ...(routing.model === undefined ? {} : { model: string(routing.model, "providerRouting.model") }), ...(Object.keys(phaseModels).length ? { phaseModels: Object.fromEntries(Object.entries(phaseModels).map(([k, v]) => [k, string(v, `providerRouting.phaseModels.${k}`)])) as CampaignProviderRouting["phaseModels"] } : {}), ...(fallbackPolicy === undefined ? {} : { fallbackPolicy }) }, limits: { ...(limits.maxCostUsd === undefined ? {} : { maxCostUsd: decimal(limits.maxCostUsd, "limits.maxCostUsd", 0.000_001, 1_000_000) }), maxTokens: integer(limits.maxTokens, "limits.maxTokens", 1, 200_000), maxTasks: integer(limits.maxTasks, "limits.maxTasks", 1, 100), maxConcurrency: integer(limits.maxConcurrency, "limits.maxConcurrency", 1, 20) }, ...(validationContract ? { validationContract } : {}) };
+}
 export function defaultAuthority(value: unknown): ControlAuthority {
   const input = asObject(value, "authority", true);
   const allowed = ["inspect", "implementation", "providerCalls", "network", "localBranch", "localCommit", "remotePush", "draftPublication", "merge", "deploy"];
@@ -238,21 +333,17 @@ export function parseCheckpointRepairRequest(value: unknown): { taskId: string; 
   if (!/^[a-f0-9]{64}$/.test(checkpointDigest)) throw new ControlPlaneError(400, "invalid_request", "checkpointDigest must be a lowercase SHA-256 digest.");
   return { taskId: string(input.taskId, "taskId"), decisionId: string(input.decisionId, "decisionId"), checkpointId: string(input.checkpointId, "checkpointId"), checkpointDigest, choice: choiceValue, additionalProviderTokens, repairIntent };
 }
-
 export class ControlPlaneError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string, public readonly details?: unknown, public readonly retryable = false, public readonly taskId?: string) { super(message); }
 }
-
-function asObject(value: unknown, name: string, optional = false): Record<string, unknown> {
-  if (optional && value === undefined) return {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ControlPlaneError(400, "invalid_request", `${name} must be an object.`);
-  return value as Record<string, unknown>;
-}
+function asObject(value: unknown, name: string, optional = false): Record<string, unknown> { if (optional && value === undefined) return {}; if (!value || typeof value !== "object" || Array.isArray(value)) throw new ControlPlaneError(400, "invalid_request", `${name} must be an object.`); return value as Record<string, unknown>; }
 function rejectUnknown(value: Record<string, unknown>, allowed: string[], name: string): void { const keys = Object.keys(value).filter((key) => !allowed.includes(key)); if (keys.length) throw new ControlPlaneError(400, "unknown_fields", `${name} contains unknown field(s): ${keys.join(", ")}.`); }
 function string(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} must be a non-empty string.`); return value.trim(); }
 function optionalString(value: unknown, name: string): string | undefined { return value === undefined ? undefined : string(value, name); }
+function stringArray(value: unknown, name: string): string[] { if (value === undefined) return []; if (!Array.isArray(value)) throw new ControlPlaneError(400, "invalid_request", `${name} must be an array of non-empty strings.`); return value.map((item, index) => string(item, `${name}[${index}]`)); }
 function boolean(value: unknown, name: string): boolean { if (typeof value !== "boolean") throw new ControlPlaneError(400, "invalid_request", `${name} must be boolean.`); return value; }
 function optionalBoolean(value: unknown, name: string): boolean | undefined { return value === undefined ? undefined : boolean(value, name); }
 function choice<T extends string>(value: unknown, values: readonly T[], name: string): T { if (typeof value !== "string" || !values.includes(value as T)) throw new ControlPlaneError(400, "invalid_request", `${name} must be one of: ${values.join(", ")}.`); return value as T; }
 function optionalChoice<T extends string>(value: unknown, values: readonly T[], name: string): T | undefined { return value === undefined ? undefined : choice(value, values, name); }
 function integer(value: unknown, name: string, min: number, max: number): number { if (!Number.isInteger(value) || Number(value) < min || Number(value) > max) throw new ControlPlaneError(400, "invalid_request", `${name} must be an integer from ${min} to ${max}.`); return Number(value); }
+function decimal(value: unknown, name: string, minExclusive: number, max: number): number { if (typeof value !== "number" || !Number.isFinite(value) || value <= minExclusive || value > max) throw new ControlPlaneError(400, "invalid_request", `${name} must be a number > ${minExclusive} and <= ${max}.`); return value; }

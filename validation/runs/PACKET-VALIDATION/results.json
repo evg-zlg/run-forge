@@ -1,6 +1,6 @@
 {
   "schemaVersion": "alpha-7-packet-validation",
-  "generatedAt": "2026-07-08T17:28:12.927Z",
+  "generatedAt": "2026-07-21T17:37:47.965Z",
   "rawRoot": "/tmp/runforge-alpha7-packet-validation",
   "packets": {
     "external check": "/tmp/runforge-alpha7-packet-validation/external-check/packet",
@@ -16,16 +16,16 @@
       "name": "generate external check packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 657,
+      "durationMs": 534,
       "outDir": "/tmp/runforge-alpha7-packet-validation/external-check",
-      "stdout": "RunForge external check\n\nRun ID: packet-validation-check\nStatus: failed\nCLI exit policy: packet\nCLI exit code: 0\nRepo: /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-sample-repo-rsJb4D\nPacket: /tmp/runforge-alpha7-packet-validation/external-check/packet\n\nSetup:\nNo setup commands requested.\n\nCommands:\n1. node -e \"const fs=require('fs'); const text=fs.readFileSync('tests/calculator.test.ts','utf8'); if (text.includes('toBe(2)')) process.exit(0); console.error('AssertionError: expected add(1, 1) assertion to expect 2'); process.exit(1);\" - failed\n\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- setup-results.json\n- command-results.json\n- logs/\n- events.jsonl\n- metrics.json\n- packet-manifest.json\n",
-      "stderr": "$ tsx src/cli/index.ts external check --repo /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-sample-repo-rsJb4D --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); const text=fs.readFileSync('\"'\"'tests/calculator.test.ts'\"'\"','\"'\"'utf8'\"'\"'); if (text.includes('\"'\"'toBe(2)'\"'\"')) process.exit(0); console.error('\"'\"'AssertionError: expected add(1, 1) assertion to expect 2'\"'\"'); process.exit(1);\"' --out /tmp/runforge-alpha7-packet-validation/external-check --run-id packet-validation-check\n"
+      "stdout": "RunForge external check\n\nRun ID: packet-validation-check\nStatus: failed\nCLI exit policy: packet\nCLI exit code: 0\nRepo: /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-sample-repo-6fkUDc\nPacket: /tmp/runforge-alpha7-packet-validation/external-check/packet\n\nSetup:\nNo setup commands requested.\n\nCommands:\n1. node -e \"const fs=require('fs'); const text=fs.readFileSync('tests/calculator.test.ts','utf8'); if (text.includes('toBe(2)')) process.exit(0); console.error('AssertionError: expected add(1, 1) assertion to expect 2'); process.exit(1);\" - failed\n\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- setup-results.json\n- command-results.json\n- logs/\n- events.jsonl\n- metrics.json\n- packet-manifest.json\n",
+      "stderr": "$ tsx src/cli/index.ts external check --repo /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-sample-repo-6fkUDc --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); const text=fs.readFileSync('\"'\"'tests/calculator.test.ts'\"'\"','\"'\"'utf8'\"'\"'); if (text.includes('\"'\"'toBe(2)'\"'\"')) process.exit(0); console.error('\"'\"'AssertionError: expected add(1, 1) assertion to expect 2'\"'\"'); process.exit(1);\"' --out /tmp/runforge-alpha7-packet-validation/external-check --run-id packet-validation-check\n"
     },
     {
       "name": "generate failure triage packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 530,
+      "durationMs": 354,
       "outDir": "/tmp/runforge-alpha7-packet-validation/failure-triage",
       "stdout": "RunForge external failure triage\n\nRun ID: packet-validation-triage\nStatus: triaged\nCategory: test_assertion_failure\nConfidence: high\nSource check status: failed\nSource check packet: /tmp/runforge-alpha7-packet-validation/external-check/packet\nPacket: /tmp/runforge-alpha7-packet-validation/failure-triage/packet\n\nReady for code proposal: true\nRequires more context: false\nSafe next action: Inspect the failing assertion and affected test, then propose a minimal code or test fix if the expected behavior is clear.\n\nKey artifacts:\n- summary.md\n- failure-triage.md\n- root-cause.json\n- evidence-excerpts.md\n- safe-next-action.md\n",
       "stderr": "$ tsx src/cli/index.ts external failure-triage --from-check-packet /tmp/runforge-alpha7-packet-validation/external-check/packet --out /tmp/runforge-alpha7-packet-validation/failure-triage --run-id packet-validation-triage\n"
@@ -34,7 +34,7 @@
       "name": "generate proposal readiness packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 528,
+      "durationMs": 357,
       "outDir": "/tmp/runforge-alpha7-packet-validation/proposal-readiness",
       "stdout": "RunForge external proposal readiness\n\nRun ID: packet-validation-readiness\nOutcome: ready_for_code_proposal\nCan attempt code proposal: true\nCategory: test_assertion_failure\nConfidence: high\nSource triage packet: /tmp/runforge-alpha7-packet-validation/failure-triage/packet\nPacket: /tmp/runforge-alpha7-packet-validation/proposal-readiness/packet\n\nRecommended next action: Create a proposal patch in a disposable workspace and verify it there; human review remains required.\n\nKey artifacts:\n- summary.md\n- proposal-readiness.md\n- proposal-contract.json\n- missing-context.md\n- recommended-next-action.md\n",
       "stderr": "$ tsx src/cli/index.ts external proposal-readiness --from-triage-packet /tmp/runforge-alpha7-packet-validation/failure-triage/packet --out /tmp/runforge-alpha7-packet-validation/proposal-readiness --run-id packet-validation-readiness\n"
@@ -43,7 +43,7 @@
       "name": "generate code proposal packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 650,
+      "durationMs": 427,
       "outDir": "/tmp/runforge-alpha7-packet-validation/code-proposal",
       "stdout": "RunForge external code proposal\n\nRun ID: packet-validation-code\nOutcome: proposal_ready_verified\nVerification passed: true\nSource readiness packet: /tmp/runforge-alpha7-packet-validation/proposal-readiness/packet\nPacket: /tmp/runforge-alpha7-packet-validation/code-proposal/packet\nProposal patch bytes: 321\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
       "stderr": "$ tsx src/cli/index.ts external code-proposal --from-readiness-packet /tmp/runforge-alpha7-packet-validation/proposal-readiness/packet --out /tmp/runforge-alpha7-packet-validation/code-proposal --run-id packet-validation-code\n"
@@ -52,16 +52,16 @@
       "name": "generate provider proposal packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 827,
+      "durationMs": 515,
       "outDir": "/tmp/runforge-alpha7-packet-validation/provider-proposal",
       "stdout": "RunForge external code proposal\n\nRun ID: packet-validation-provider\nOutcome: proposal_ready_verified\nVerification passed: true\nSource readiness packet: /tmp/runforge-alpha7-packet-validation/provider-proposal/readiness-source/packet\nPacket: /tmp/runforge-alpha7-packet-validation/provider-proposal/packet\nProposal patch bytes: 90\nOriginal repo: unchanged\n\nKey artifacts:\n- summary.md\n- human-review.md\n- proposal.patch\n- patch-summary.md\n- proposal-status.json\n- verification-results.json\n- worker-notes/\n",
-      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-provider-repo-biiLh0 --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --enable-provider-proposal --provider cli --provider-command 'node -e '\"'\"'require(\"fs\").writeFileSync(\"provider-output.patch\", \"diff --git a/state.txt b/state.txt\\n--- a/state.txt\\n+++ b/state.txt\\n@@ -1 +1 @@\\n-bad\\n+good\\n\")'\"'\" --out /tmp/runforge-alpha7-packet-validation/provider-proposal --run-id packet-validation-provider\n"
+      "stderr": "$ tsx src/cli/index.ts external code-proposal --repo /var/folders/qp/bdzz2jbs5dnbyz1d1hj_r99r0000gn/T/runforge-alpha7-provider-repo-3Fgy9l --command 'node -e \"const fs=require('\"'\"'fs'\"'\"'); if (fs.readFileSync('\"'\"'state.txt'\"'\"','\"'\"'utf8'\"'\"').trim()==='\"'\"'good'\"'\"') process.exit(0); console.error('\"'\"'AssertionError: expected state to be good'\"'\"'); process.exit(1);\"' --enable-provider-proposal --provider cli --provider-command 'node -e '\"'\"'require(\"fs\").writeFileSync(\"provider-output.patch\", \"diff --git a/state.txt b/state.txt\\n--- a/state.txt\\n+++ b/state.txt\\n@@ -1 +1 @@\\n-bad\\n+good\\n\")'\"'\" --out /tmp/runforge-alpha7-packet-validation/provider-proposal --run-id packet-validation-provider\n"
     },
     {
       "name": "validate external check packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 528,
+      "durationMs": 357,
       "outDir": "/tmp/runforge-alpha7-packet-validation/external-check/packet",
       "stdout": "Run ID: packet-validation-check\nPacket type: command_check\nStatus: failed\nStrategy: none\nArtifact count: 10\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha7-packet-validation/external-check/packet --validate\n"
@@ -70,7 +70,7 @@
       "name": "validate failure triage packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 522,
+      "durationMs": 349,
       "outDir": "/tmp/runforge-alpha7-packet-validation/failure-triage/packet",
       "stdout": "Run ID: packet-validation-triage\nPacket type: failure_triage\nStatus: triaged\nStrategy: none\nArtifact count: 11\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- events.jsonl\n- evidence-excerpts.md\n- failure-triage.md\n- human-review.md\n- metrics.json\n- root-cause.json\n- run.json\n- safe-next-action.md\n- safety-report.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha7-packet-validation/failure-triage/packet --validate\n"
@@ -79,7 +79,7 @@
       "name": "validate proposal readiness packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 542,
+      "durationMs": 350,
       "outDir": "/tmp/runforge-alpha7-packet-validation/proposal-readiness/packet",
       "stdout": "Run ID: packet-validation-readiness\nPacket type: proposal_readiness\nStatus: ready_for_code_proposal\nStrategy: none\nArtifact count: 11\n\nValidation: passed\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- events.jsonl\n- human-review.md\n- metrics.json\n- missing-context.md\n- proposal-contract.json\n- proposal-readiness.md\n- recommended-next-action.md\n- run.json\n- safety-report.json\n- summary.md\n- trajectory.json\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha7-packet-validation/proposal-readiness/packet --validate\n"
@@ -88,7 +88,7 @@
       "name": "validate code proposal packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 526,
+      "durationMs": 353,
       "outDir": "/tmp/runforge-alpha7-packet-validation/code-proposal/packet",
       "stdout": "Run ID: packet-validation-code\nPacket type: code_proposal\nStatus: proposal_ready_verified\nStrategy: alpha3_calculator_assertion_fixture\nArtifact count: 23\n\nValidation: passed\n\nRoute:\ntask_received\n-> readiness_loader\n-> context_scout\n-> failure_analyst\n-> proposal_planner\n-> patch_writer\n-> verifier\n-> proposal_reviewer\n-> packet_writer\n-> run_finished\n\nArtifacts:\n- after-command-results.json\n- before-command-results.json\n- events.jsonl\n- human-review.md\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- metrics.json\n- patch-summary.md\n- proposal-status.json\n- proposal.patch\n- run.json\n- safety-report.json\n- summary.md\n- trajectory.json\n- verification-results.json\n- worker-notes/context-scout.md\n- worker-notes/failure-analyst.md\n- worker-notes/packet-writer.md\n- worker-notes/patch-writer.md\n- worker-notes/proposal-planner.md\n- worker-notes/proposal-reviewer.md\n- worker-notes/readiness-loader.md\n- worker-notes/verifier.md\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha7-packet-validation/code-proposal/packet --validate\n"
@@ -97,25 +97,25 @@
       "name": "validate provider proposal packet",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 529,
+      "durationMs": 352,
       "outDir": "/tmp/runforge-alpha7-packet-validation/provider-proposal/packet",
-      "stdout": "Run ID: packet-validation-provider\nPacket type: code_proposal\nStatus: proposal_ready_verified\nStrategy: provider_cli\nArtifact count: 30\n\nValidation: passed\n\nRoute:\ntask_received\n-> readiness_loader\n-> context_scout\n-> failure_analyst\n-> proposal_planner\n-> provider_input_builder\n-> provider_runner\n-> provider_patch_validator\n-> provider_safety_reviewer\n-> patch_writer\n-> verifier\n-> proposal_reviewer\n-> packet_writer\n-> run_finished\n\nArtifacts:\n- after-command-results.json\n- before-command-results.json\n- events.jsonl\n- human-review.md\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- metrics.json\n- patch-summary.md\n- proposal-status.json\n- proposal.patch\n- provider-input-summary.md\n- provider-output-summary.md\n- provider-safety-report.json\n- run.json\n- safety-report.json\n- summary.md\n- trajectory.json\n- verification-results.json\n- worker-notes/context-scout.md\n- worker-notes/failure-analyst.md\n- worker-notes/packet-writer.md\n- worker-notes/patch-writer.md\n- worker-notes/proposal-planner.md\n- worker-notes/proposal-reviewer.md\n- worker-notes/provider-input-builder.md\n- worker-notes/provider-patch-validator.md\n- worker-notes/provider-runner.md\n- worker-notes/provider-safety-reviewer.md\n- worker-notes/readiness-loader.md\n- worker-notes/verifier.md\n",
+      "stdout": "Run ID: packet-validation-provider\nPacket type: code_proposal\nStatus: proposal_ready_verified\nStrategy: provider_cli\nArtifact count: 35\n\nValidation: passed\n\nRoute:\ntask_received\n-> readiness_loader\n-> context_scout\n-> failure_analyst\n-> proposal_planner\n-> provider_input_builder\n-> provider_runner\n-> provider_patch_validator\n-> provider_safety_reviewer\n-> patch_writer\n-> verifier\n-> proposal_reviewer\n-> packet_writer\n-> run_finished\n\nArtifacts:\n- after-command-results.json\n- before-command-results.json\n- events.jsonl\n- human-review.md\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- metrics.json\n- patch-summary.md\n- proposal-status.json\n- proposal.patch\n- provider-input-summary.md\n- provider-input/evidence-excerpts.md\n- provider-input/instructions.md\n- provider-input/proposal-contract.json\n- provider-input/provider-output.patch\n- provider-input/task.md\n- provider-output-summary.md\n- provider-safety-report.json\n- run.json\n- safety-report.json\n- summary.md\n- trajectory.json\n- verification-results.json\n- worker-notes/context-scout.md\n- worker-notes/failure-analyst.md\n- worker-notes/packet-writer.md\n- worker-notes/patch-writer.md\n- worker-notes/proposal-planner.md\n- worker-notes/proposal-reviewer.md\n- worker-notes/provider-input-builder.md\n- worker-notes/provider-patch-validator.md\n- worker-notes/provider-runner.md\n- worker-notes/provider-safety-reviewer.md\n- worker-notes/readiness-loader.md\n- worker-notes/verifier.md\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha7-packet-validation/provider-proposal/packet --validate\n"
     },
     {
       "name": "broken packet validation fails",
       "ok": true,
       "exitCode": 1,
-      "durationMs": 554,
+      "durationMs": 370,
       "outDir": "/tmp/runforge-alpha7-packet-validation/broken-packet",
-      "stdout": "Run ID: unknown\nPacket type: command_check\nStatus: failed\nStrategy: none\nArtifact count: 10\n\nValidation: failed\n- run.json missing runId\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n[ELIFECYCLE] Command failed with exit code 1.\n",
+      "stdout": "Run ID: unknown\nPacket type: command_check\nStatus: failed\nStrategy: none\nArtifact count: 10\n\nValidation: failed\n- run.json missing runId\n- run.json size mismatch: manifest 2350, actual 2311\n- run.json hash mismatch\n\nRoute:\ntask_received\n-> run_finished\n\nArtifacts:\n- command-results.json\n- events.jsonl\n- logs/command-001.stderr.log\n- logs/command-001.stdout.log\n- metrics.json\n- run.json\n- safety-report.json\n- setup-results.json\n- summary.md\n- trajectory.json\n[ELIFECYCLE] Command failed with exit code 1.\n",
       "stderr": "$ tsx src/cli/index.ts packet inspect --packet /tmp/runforge-alpha7-packet-validation/broken-packet --validate\n"
     },
     {
       "name": "generate static packet viewer",
       "ok": true,
       "exitCode": 0,
-      "durationMs": 531,
+      "durationMs": 364,
       "outDir": "/tmp/runforge-alpha7-packet-validation/viewer-code-proposal",
       "stdout": "Packet viewer written: /tmp/runforge-alpha7-packet-validation/viewer-code-proposal/index.html\n",
       "stderr": "$ tsx src/cli/index.ts packet view --packet /tmp/runforge-alpha7-packet-validation/code-proposal/packet --out /tmp/runforge-alpha7-packet-validation/viewer-code-proposal\n"

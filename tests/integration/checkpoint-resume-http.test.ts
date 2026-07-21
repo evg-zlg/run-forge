@@ -8,7 +8,7 @@ describe("public checkpoint resume HTTP contract", () => {
   it("advertises and dispatches the task-scoped localhost resume operation", async () => {
     const stateRoot = await mkdtemp(join(tmpdir(), "runforge-resume-http-")); let received: unknown;
     const manager: any = {
-      store: { root: stateRoot, writeServiceInfo: async () => undefined }, initialize: async () => undefined, close: () => undefined,
+      store: { root: stateRoot, writeServiceInfo: async () => undefined }, initialize: async () => undefined, close: () => undefined, drain: async () => undefined,
       resumeCheckpoint: async (taskId: string, checkpointId: string, input: unknown) => { received = { taskId, checkpointId, input }; return { schemaVersion: 1, taskId, checkpointId, status: "validated", providerCalls: 0, providerRerun: false }; },
     };
     const server = await startControlPlaneServer({ port: 0, stateRoot, manager });

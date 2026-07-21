@@ -61,6 +61,7 @@ export const taskSpecV2Schema: Record<string, unknown> = {
       properties: {
         provider: { enum: ["local", "openrouter"] }, fallbackPolicy: { enum: ["none", "same_provider"] },
         models: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer"].map((phase) => [phase, { type: "string", minLength: 1 }])) },
+        reasoning: { type: "object", additionalProperties: false, properties: { planner: { type: "object", additionalProperties: false, properties: { effort: { type: "string", minLength: 1 }, maxTokens: { type: "integer", minimum: 1, maximum: 200000 }, exclude: { type: "boolean" } } }, reviewer: { type: "object", additionalProperties: false, properties: { effort: { type: "string", minLength: 1 }, maxTokens: { type: "integer", minimum: 1, maximum: 200000 }, exclude: { type: "boolean" } } } } },
         maxCalls: { type: "integer", minimum: 1, maximum: 32 },
         tokenBudget: { type: "object", additionalProperties: false, required: ["total", "perPhase"], properties: { total: { type: "integer", minimum: 1000, maximum: 200000 }, perPhase: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer"].map((phase) => [phase, { type: "integer", minimum: 0, maximum: 200000 }])) } } },
         costBudgetUsd: { type: "number", minimum: 0, maximum: 1000 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 1800000 },
@@ -80,9 +81,9 @@ export const taskSpecV2Schema: Record<string, unknown> = {
           properties: Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, { enum: EXECUTION_PARTIES }]))
         }
       },
-      allOf: [{ if: { properties: { profile: { const: "custom" } } }, then: { required: ["phaseOwnership"] }, else: { not: { required: ["phaseOwnership"] } } }]
+      allOf: [{ if: { type: "object", properties: { profile: { const: "custom" } }, required: ["profile"] }, then: { type: "object", required: ["phaseOwnership"] }, else: { type: "object", not: { required: ["phaseOwnership"] } } }]
     },
-    discovery: { type: "object", additionalProperties: false, properties: { policy: { enum: ["auto", "explicit"] }, profile: { enum: ["small-scope", "standard"] }, explicitFiles: { type: "array", items: { type: "string", minLength: 1 } }, maxFiles: { type: "integer", minimum: 1, maximum: 1000 }, maxBytes: { type: "integer", minimum: 1000, maximum: 10000000 }, maxTokens: { type: "integer", minimum: 100, maximum: 500000 }, stopCondition: { type: "string", minLength: 1 } } },
+    discovery: { type: "object", additionalProperties: false, properties: { policy: { enum: ["auto", "explicit"] }, profile: { enum: ["small-scope", "standard"] }, explicitFiles: { type: "array", items: { type: "string", minLength: 1 } }, writeScopes: { type: "array", items: { type: "string", minLength: 1 } }, maxFiles: { type: "integer", minimum: 1, maximum: 1000 }, maxBytes: { type: "integer", minimum: 1000, maximum: 10000000 }, maxTokens: { type: "integer", minimum: 100, maximum: 500000 }, stopCondition: { type: "string", minLength: 1 } } },
     runtime: { type: "object", additionalProperties: false, properties: { preference: { enum: taskRuntimeIds }, dockerImage: { type: "string", minLength: 1 }, prepareDependencies: { type: "boolean" }, dependencyPreparation: { enum: ["required", "if-needed", "disabled", "reuse-existing"] }, externalNetwork: { enum: ["denied", "dependency-preparation-only", "allowed"] } }, not: { required: ["prepareDependencies", "dependencyPreparation"] } },
     validation: { type: "object", additionalProperties: false, properties: {
       mode: { enum: ["auto", "explicit"] }, commands: { type: "array", items: { type: "string", minLength: 1 } },

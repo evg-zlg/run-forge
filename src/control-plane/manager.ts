@@ -1,36 +1,37 @@
-import { createHash, randomUUID } from "node:crypto"; import { cp, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises"; import { basename, join } from "node:path";
+import { createHash, randomUUID } from "node:crypto"; import { cp, mkdir, readFile, readdir, realpath, rename, rm, writeFile } from "node:fs/promises"; import { basename, join } from "node:path";
 import { buildDoctorReport } from "../product/doctor.js"; import { runTaskSpecFile } from "../product/task-spec-runner.js";
 import { loadTaskSpecV2 } from "../product/task-spec-v2.js"; import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor, taskRuntimeIds } from "../product/task-spec-contract.js";
 import { continueExternalExecution, recordOwnerDecision } from "../run/external-execution.js";
-import { ControlPlaneError, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
+import { ControlPlaneError, type CampaignPlanNode, type CampaignRecord, type CampaignSpec, type ControlAuthority, type ControlTaskRecord, type DecisionRecord, type ProjectRecord } from "./contracts.js";
 import { ControlPlaneStore } from "./state.js";
 import { discoverImplementationExecutors, selectImplementationExecutor } from "../implementation/executor.js";
 import type { ExecutionAgreement } from "../product/execution-agreement.js";
 import { inspectProject } from "../product/project-inspection.js";
 import { assertAgreementAccepted, assertAgreementMatchesTask, negotiateControlPlaneAgreement, negotiateTaskAgreement, technicalCapabilitiesForExecutor, type ExecutionAgreementNegotiationRequest } from "./execution-agreements.js";
 import { boundPublicResult, projectAgreementLifecycle, publicResultLimits, redactPublicValue, settleAcceptedAgreement } from "./manager-results.js";
+import { planSemanticCampaign } from "../run/semantic-campaign-planner.js";
 import { assertAgreementProjectBinding, buildExecutionAgreementContext } from "./manager-project-context.js";
+import { CampaignCoordinator } from "./campaign-coordinator.js";
 import { listDurableCheckpoints } from "../implementation/durable-checkpoint.js"; import { resumeDurableCheckpoint } from "../implementation/checkpoint-resume.js";
 import { acceptCompletedResult, discardCompletedResult } from "./completed-result-acceptance.js";
 import { exposeCheckpointRepairDigests, startCheckpointRepair, type CheckpointRepairRequest } from "./checkpoint-repair.js";
 import { buildTimeoutContract } from "./timeout-contract.js"; import { acceptValidationCapabilities } from "./validation-negotiation.js";
-import { openRouterReadiness, providerForExecutor, publicImplementationExecutors } from "./provider-routing-projection.js";
-export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
+import { openRouterReadiness, providerForExecutor, publicImplementationExecutors } from "./provider-routing-projection.js"; export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
 const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs, heartbeatIntervalMs = 1_000, staleHeartbeatMs = 15_000, cleanupGraceMs = 2_000;
 type ActiveWorker = { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController }; type ContinuationBinding = { taskId: string; projectId: string | null; repository: string; workingDirectory: string; sourceBranch: string; sourceSha: string };
 export class ControlPlaneManager {
-  private readonly active = new Map<string, ActiveWorker>();
-  private readonly settledExecutions = new Set<string>();
-  private readonly locks = new Map<string, Promise<void>>();
-  private readonly journalHeartbeats = new Map<string, number>();
-  private watchdog: NodeJS.Timeout | null = null;
-  constructor(
-    public readonly store: ControlPlaneStore,
-    private readonly operations: { runTaskSpec: typeof runTaskSpecFile; recordOwnerDecision: typeof recordOwnerDecision; continueExecution: typeof continueExternalExecution } = { runTaskSpec: runTaskSpecFile, recordOwnerDecision, continueExecution: continueExternalExecution },
-    private readonly timing: { heartbeatIntervalMs: number; staleHeartbeatMs: number; executionTimeoutMs: number; cleanupGraceMs?: number } = { heartbeatIntervalMs, staleHeartbeatMs, executionTimeoutMs, cleanupGraceMs }
-  ) {}
-  async initialize(): Promise<void> { await this.store.initialize(); this.watchdog ??= setInterval(() => void this.watchdogTick(), Math.min(this.timing.staleHeartbeatMs, 5_000)); this.watchdog.unref(); }
-  close(): void { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; for (const worker of this.active.values()) worker.controller.abort(); this.active.clear(); }
+  private readonly active = new Map<string, ActiveWorker>(); private readonly settledExecutions = new Set<string>();
+  private readonly locks = new Map<string, Promise<void>>(); private readonly journalHeartbeats = new Map<string, number>();
+  private readonly campaigns: CampaignCoordinator; private watchdog: NodeJS.Timeout | null = null;
+  constructor(public readonly store: ControlPlaneStore, private readonly operations: { runTaskSpec: typeof runTaskSpecFile; recordOwnerDecision: typeof recordOwnerDecision; continueExecution: typeof continueExternalExecution } = { runTaskSpec: runTaskSpecFile, recordOwnerDecision, continueExecution: continueExternalExecution }, private readonly timing: { heartbeatIntervalMs: number; staleHeartbeatMs: number; executionTimeoutMs: number; cleanupGraceMs?: number } = { heartbeatIntervalMs, staleHeartbeatMs, executionTimeoutMs, cleanupGraceMs }) {
+    this.campaigns = new CampaignCoordinator({ root: this.store.root, planCampaign: (record) => this.planCampaign(record), createTask: (input) => this.createTask(input), getTask: (id) => this.getTask(id), getResult: (id) => this.getResult(id) });
+  }
+  async initialize(): Promise<void> { await this.store.initialize(); await this.campaigns.initialize(); this.watchdog ??= setInterval(() => void this.watchdogTick(), Math.min(this.timing.staleHeartbeatMs, 5_000)); this.watchdog.unref(); }
+  async createCampaign(spec: CampaignSpec): Promise<CampaignRecord> { return this.campaigns.createCampaign(spec); }
+  async listCampaigns(): Promise<Array<Pick<CampaignRecord, "id" | "status" | "createdAt" | "updatedAt" | "usage">>> { return this.campaigns.listCampaigns(); } async getCampaign(id: string): Promise<CampaignRecord> { return this.campaigns.getCampaign(id); }
+  async getCampaignResult(id: string): Promise<Record<string, unknown>> { return this.campaigns.getCampaignResult(id); }
+  private async planCampaign(record: CampaignRecord) { return planSemanticCampaign(record.id, record.spec); }
+  close(): void { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; this.campaigns.close(); for (const worker of this.active.values()) worker.controller.abort(); this.active.clear(); } async drain(): Promise<void> { this.close(); await this.campaigns.drain(); }
   async inspectProject(input: { path: string; workingDirectory: string; register: boolean; runtime?: "local" | "docker"; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing" }): Promise<Record<string, unknown>> {
     const report = await buildDoctorReport({ repo: input.path, workingDirectory: input.workingDirectory, runtime: input.runtime, dependencyPreparation: input.dependencyPreparation, publication: "none" });
     let project: ProjectRecord | null = null;

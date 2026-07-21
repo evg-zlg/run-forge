@@ -21,8 +21,25 @@ describe("OpenRouter executor safety", () => {
     expect(() => validateOpenRouterDiff(diff("src/large.ts", "x".repeat(500)), { maxBytes: 100, maxChangedFiles: 2, forbiddenZones: [] })).toThrow("exceeds 100 bytes");
   });
 
+  it("rejects a campaign patch outside its explicit write scopes before mutating the workspace", async () => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    const artifactRoot = await mkdtemp(join(tmpdir(), "runforge-openrouter-scope-"));
+    await writeFile(join(artifactRoot, "outside.txt"), "old\n");
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(diff("outside.txt", "new"))));
+    const request = { artifactRoot, signal: undefined, forbiddenZones: [], spec: { discovery: { writeScopes: ["src"] }, execution: { maxPatchBytes: 10_000, maxChangedFiles: 2 }, providerRouting: { models: { implementer: "test/model" }, maxCalls: 1, retry: { maxAttempts: 1 }, timeoutMs: 100, tokenBudget: { total: 100, perPhase: { implementer: 100 } } } } } as any;
+    const result = await runOpenRouterAgent(request, artifactRoot, "implement", "implementer", [], 0);
+    expect(result).toMatchObject({ exitCode: 1, failureReason: expect.stringContaining("outside allowed write scopes") });
+    expect(await readFile(join(artifactRoot, "outside.txt"), "utf8")).toBe("old\n");
+  });
+
   it("normalizes a single fenced unified diff", () => {
     expect(normalizeOpenRouterDiff(`\`\`\`diff\n${diff("src/value.ts")}\`\`\``)).toBe(diff("src/value.ts"));
+  });
+
+  it("rejects prose and patch service markers instead of folding them into a repaired new file", () => {
+    const malformedNewFile = "diff --git a/guide.md b/guide.md\nnew file mode 100644\n--- /dev/null\n+++ b/guide.md\n@@ -0,0 +1,1 @@\nGuide\n";
+    expect(() => normalizeOpenRouterDiff(`Here is the patch:\n${diff("src/value.ts")}`)).toThrow("must contain only a unified git diff");
+    expect(() => normalizeOpenRouterDiff(`${malformedNewFile}*** End Patch\n`)).toThrow("patch service marker");
   });
 
   it("preserves provider usage when a successful response is rejected after receipt", async () => {
@@ -45,6 +62,17 @@ describe("OpenRouter executor safety", () => {
     const result = await runOpenRouterAgent(request, artifactRoot, "implement", "implementer", [], 0);
     expect(result.exitCode).toBe(0);
     expect(await readFile(join(artifactRoot, "value.txt"), "utf8")).toBe("new\n");
+  });
+
+  it("repairs missing addition markers only inside a declared new-file hunk", async () => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    const artifactRoot = await mkdtemp(join(tmpdir(), "runforge-openrouter-new-file-"));
+    const patch = "diff --git a/guide.md b/guide.md\nnew file mode 100644\n--- /dev/null\n+++ b/guide.md\n@@ -0,0 +1,9 @@\n+# Guide\n\n## Topic\n\n- item\n";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(patch)));
+    const request = { artifactRoot, signal: undefined, forbiddenZones: [], spec: { execution: { maxPatchBytes: 10_000, maxChangedFiles: 2 }, providerRouting: { models: { implementer: "test/model" }, maxCalls: 1, retry: { maxAttempts: 1 }, timeoutMs: 100, tokenBudget: { total: 100, perPhase: { implementer: 100 } } } } } as any;
+    const result = await runOpenRouterAgent(request, artifactRoot, "implement", "implementer", [], 0);
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(join(artifactRoot, "guide.md"), "utf8")).toBe("# Guide\n\n## Topic\n\n- item\n");
   });
 
   it("accounts maxCalls as global HTTP attempts across phase invocations", async () => {

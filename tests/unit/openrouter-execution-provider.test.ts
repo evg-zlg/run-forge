@@ -38,11 +38,59 @@ describe("OpenRouter execution provider", () => {
     expect(fetchMock.mock.calls[0]![1].headers.authorization).toBe("Bearer top-secret");
   });
 
+  it("sends optional reasoning config and parses text-part final content", async () => {
+    process.env.OPENROUTER_API_KEY = "top-secret";
+    const body = {
+      id: "glm-request",
+      choices: [{
+        message: {
+          reasoning: { effort: "medium", exclude: true, max_tokens: 64 },
+          reasoning_details: [{ type: "summary", text: "hidden" }],
+          content: [{ type: "text", text: "final " }, { type: "text", text: "answer" }]
+        },
+        finish_reason: "stop"
+      }],
+      usage: { prompt_tokens: 21, completion_tokens: 12, total_tokens: 33, total_cost: 0.0009, completion_tokens_details: { reasoning_tokens: 8 } }
+    };
+    const fetchMock = vi.fn().mockResolvedValue(response(body, 200)); vi.stubGlobal("fetch", fetchMock);
+    await expect(executeOpenRouterChatCompletion({ ...request(), reasoning: { effort: "medium", maxTokens: 64, exclude: true } })).resolves.toMatchObject({
+      content: "final answer",
+      finishReason: "stop",
+      usage: { outputTokens: 12, reasoningTokens: 8, totalTokens: 33, costUsd: 0.0009 }
+    });
+    const parsed = JSON.parse(fetchMock.mock.calls[0]![1].body as string) as Record<string, unknown>;
+    expect(parsed.reasoning).toEqual({ effort: "medium", max_tokens: 64, exclude: true });
+  });
+
   it("classifies malformed and authentication responses", async () => {
     process.env.OPENROUTER_API_KEY = "secret";
     vi.stubGlobal("fetch", vi.fn().mockResolvedValueOnce(response({ choices: [] })).mockResolvedValueOnce(response({ error: "no" }, 401)));
     await expect(executeOpenRouterChatCompletion(request())).rejects.toMatchObject({ code: "malformed_response" });
     await expect(executeOpenRouterChatCompletion(request())).rejects.toMatchObject({ code: "authentication", options: { status: 401 } });
+  });
+
+  it("preserves telemetry when response has reasoning but no final content", async () => {
+    process.env.OPENROUTER_API_KEY = "secret";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(response({
+      id: "kimi-request",
+      choices: [{ message: { reasoning: "private trace", reasoning_details: [{ type: "text", text: "private trace detail" }] }, finish_reason: "stop" }],
+      usage: {
+        prompt_tokens: 32,
+        completion_tokens: 20,
+        total_tokens: 52,
+        cost: 0.00123,
+        completion_tokens_details: { reasoning_tokens: 19 }
+      }
+    }, 200, { "x-request-id": "req-kimi-1" })));
+    await expect(executeOpenRouterChatCompletion(request())).rejects.toMatchObject({
+      code: "malformed_response",
+      message: "openrouter_malformed_response:missing_final_content",
+      options: {
+        requestId: "req-kimi-1",
+        finishReason: "stop",
+        usage: { outputTokens: 20, reasoningTokens: 19, totalTokens: 52, costUsd: 0.00123 }
+      }
+    });
   });
 
   it("retries rate limits only within the caller's max calls", async () => {
