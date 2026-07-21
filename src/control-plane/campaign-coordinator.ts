@@ -21,15 +21,15 @@ type Deps = {
 
 export class CampaignCoordinator {
   private readonly activeCampaignLoops = new Map<string, Promise<void>>();
+  private readonly activeCampaignCreates = new Set<Promise<CampaignRecord>>();
   private readonly integration: CampaignIntegration; private readonly lease: CampaignCoordinatorLease; private readonly records: CampaignRecordStore;
-  private generation = 0; private closing: Promise<void> | null = null;
+  private generation = 0; private closing: Promise<void> | null = null; private stopped = false;
   constructor(private readonly deps: Deps) { this.integration = deps.integration ?? new CampaignIntegration(); this.lease = new CampaignCoordinatorLease(deps.root); this.records = new CampaignRecordStore(deps.root); }
   async initialize(): Promise<void> { this.activate(); try { for (const campaign of await this.readCampaigns()) if (["planning", "queued", "running"].includes(campaign.status)) this.ensureCampaignLoop(campaign.id); } catch (error) { this.close(); throw error; } }
-  close(): void { if (this.closing) return; this.generation += 1; const loops = [...this.activeCampaignLoops.values()]; const closing = Promise.allSettled(loops).then(() => { this.activeCampaignLoops.clear(); this.lease.release(); }); this.closing = closing.finally(() => { this.closing = null; }); }
+  close(): void { if (this.stopped) return; this.stopped = true; this.generation += 1; const work = [...this.activeCampaignCreates, ...this.activeCampaignLoops.values()]; const closing = Promise.allSettled(work).then(() => { this.activeCampaignLoops.clear(); this.lease.release(); }); this.closing = closing.finally(() => { this.closing = null; }); }
   async drain(): Promise<void> { this.close(); await this.closing; }
-  async createCampaign(spec: CampaignSpec): Promise<CampaignRecord> {
-    this.activate();
-    const generation = this.generation;
+  createCampaign(spec: CampaignSpec): Promise<CampaignRecord> { this.activate(); const generation = this.generation; let operation: Promise<CampaignRecord>; operation = this.createCampaignActive(spec, generation).finally(() => this.activeCampaignCreates.delete(operation)); this.activeCampaignCreates.add(operation); return operation; }
+  private async createCampaignActive(spec: CampaignSpec, generation: number): Promise<CampaignRecord> {
     if (!spec.authority.inspect) throw new ControlPlaneError(403, "authority_denied", "inspect authority is required to create a campaign.");
     if (spec.providerRouting.provider === "openrouter" && (!spec.authority.providerCalls || !spec.authority.network)) throw new ControlPlaneError(403, "authority_denied", "OpenRouter campaigns require providerCalls and network authority before semantic planning.");
     if (spec.authority.implementation && !spec.authority.providerCalls) throw new ControlPlaneError(403, "authority_denied", "Campaign authority expansion rejected: implementation requires providerCalls authority.");
@@ -100,12 +100,8 @@ export class CampaignCoordinator {
   }
   async listCampaigns(): Promise<Array<Pick<CampaignRecord, "id" | "status" | "createdAt" | "updatedAt" | "usage">>> { return (await this.readCampaigns()).map((item) => ({ id: item.id, status: item.status, createdAt: item.createdAt, updatedAt: item.updatedAt, usage: item.usage })); }
   async getCampaign(id: string): Promise<CampaignRecord> { const campaign = await this.readCampaign(id); if (!campaign) throw new ControlPlaneError(404, "campaign_not_found", `Campaign not found: ${id}`); return campaign; }
-  async getCampaignResult(id: string): Promise<Record<string, unknown>> {
-    const campaign = await this.getCampaign(id);
-    if (!["completed", "failed", "on_hold"].includes(campaign.status) || !campaign.result) throw new ControlPlaneError(404, "campaign_result_not_ready", `Campaign result is not ready: ${id}`);
-    return campaign.result;
-  }
-  private activate(): void { if (this.closing) throw new ControlPlaneError(409, "campaign_coordinator_closing", "Campaign coordinator shutdown is still draining active loops."); if (!this.lease.active) { this.lease.acquire(); this.generation += 1; } } private current(generation: number): boolean { return this.lease.active && this.generation === generation; }
+  async getCampaignResult(id: string): Promise<Record<string, unknown>> { const campaign = await this.getCampaign(id); if (!["completed", "failed", "on_hold"].includes(campaign.status) || !campaign.result) throw new ControlPlaneError(404, "campaign_result_not_ready", `Campaign result is not ready: ${id}`); return campaign.result; }
+  private activate(): void { if (this.stopped) throw new ControlPlaneError(409, "campaign_coordinator_closed", "Campaign coordinator shutdown has started and cannot be reactivated."); if (!this.lease.active) { this.lease.acquire(); this.generation += 1; } } private current(generation: number): boolean { return this.lease.active && this.generation === generation; }
   private assertCurrent(generation: number): void { if (!this.current(generation)) throw new ControlPlaneError(409, "campaign_generation_fenced", "A stale campaign coordinator generation cannot persist state."); }
   private ensureCampaignLoop(id: string): void {
     if (this.activeCampaignLoops.has(id)) return;

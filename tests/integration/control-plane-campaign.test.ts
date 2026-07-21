@@ -182,6 +182,24 @@ describe("control plane campaign integration", () => {
     await managerB.drain();
   });
 
+  test("server shutdown rejects reactivation and holds the lease through in-flight planning", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-campaign-http-drain-")); cleanup.push(async () => { await rm(root, { recursive: true, force: true }); });
+    const managerA = new ControlPlaneManager(new ControlPlaneStore(root)); await managerA.initialize();
+    const instance = await startControlPlaneServer({ host: "127.0.0.1", port: 0, manager: managerA });
+    let releasePlanning!: () => void, planningStarted!: () => void;
+    const started = new Promise<void>((resolve) => { planningStarted = resolve; });
+    (managerA as any).planCampaign = async (record: any) => { planningStarted(); await new Promise<void>((resolve) => { releasePlanning = resolve; }); return planCampaignFromGoal(record.id, record.spec); };
+    const input = { goal: "Inspect during shutdown", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: false, network: false, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "local" as const }, limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 } };
+    const request = fetch(`${instance.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(input) });
+    await started; const closing = instance.close();
+    await expect(managerA.createCampaign(input)).rejects.toMatchObject({ code: "campaign_coordinator_closed" });
+    const managerB = new ControlPlaneManager(new ControlPlaneStore(root));
+    await expect(managerB.initialize()).rejects.toMatchObject({ code: "campaign_coordinator_already_active" });
+    await expect(fetch(`${instance.url}/readyz`)).rejects.toThrow();
+    releasePlanning(); expect((await request).status).toBe(409); await closing;
+    await managerB.initialize(); await managerB.drain();
+  });
+
   test("holds implementation campaigns when the project validation contract is unknown", async () => {
     const { manager } = await createHarness();
     const campaign = await manager.createCampaign({

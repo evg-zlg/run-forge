@@ -34,7 +34,7 @@ export async function startControlPlaneServer(options: ControlPlaneServerOptions
   await new Promise<void>((ok, fail) => { server.once("error", fail); server.listen(options.port ?? defaultControlPlanePort, host, () => { server.off("error", fail); ok(); }); });
   const address = server.address(); const port = typeof address === "object" && address ? address.port : options.port ?? defaultControlPlanePort; const url = `http://${host}:${port}`;
   await store.writeServiceInfo({ pid: process.pid, url, host, port, stateRoot, startedAt: new Date().toISOString(), apiVersion: controlPlaneApiVersion });
-  return { server, url, manager, stateRoot, close: async () => { await manager.drain(); await new Promise<void>((ok, fail) => server.close((error) => error ? fail(error) : ok())); } };
+  return { server, url, manager, stateRoot, close: async () => { manager.close(); await new Promise<void>((ok, fail) => server.close((error) => error ? fail(error) : ok())); await manager.drain(); } };
 }
 
 export async function handleControlPlaneRequest(request: IncomingMessage, response: ServerResponse, context: { host: string; manager: ControlPlaneManager; maxRequestBytes: number }): Promise<void> {
