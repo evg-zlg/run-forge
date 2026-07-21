@@ -47,6 +47,17 @@ describe("CampaignCoordinator reliability", () => {
     expect(campaignChildCompletion({ status: "workflow_completed", validationAggregate: "blocked_by_capability" }, "validation")).toEqual({ completed: false, reason: "campaign_child_validation_incomplete:blocked_by_capability" });
   });
 
+  it("accepts only the authenticated max-calls delegated-review failure shape", () => {
+    const reason = "Semantic reviewer invocation was unavailable: openrouter_max_calls_exceeded";
+    const semanticReview = { kind: "semantic", status: "unavailable", performed: false, limitations: [reason], findings: [], delegation: { party: "external_session", reason, exactAction: "Perform an independent semantic review in the delegated session and attach structured findings to this handoff." } };
+    const settlement = { status: "completed", workflow: { status: "failed", validationAggregate: "completed_with_validation_gaps", handoff: { semanticReview } }, implementation: { status: "implemented_and_validated" }, validationAggregate: "completed_with_validation_gaps", review: { semantic: semanticReview } };
+    expect(campaignChildCompletion(settlement, "implementation")).toEqual({ completed: true, reason: "" });
+    expect(campaignChildCompletion({ ...settlement, review: { semantic: { ...semanticReview, limitations: [] } } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, workflow: { ...settlement.workflow, handoff: { semanticReview: { ...semanticReview, delegation: { ...semanticReview.delegation, party: "owner" } } } } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, review: { semantic: { ...semanticReview, performed: true } } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...settlement, workflow: { ...settlement.workflow, validationAggregate: "passed" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+  });
+
   it("persists aggregate reservations and refuses to overschedule after actual usage replaces one reservation", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-reservations-")); roots.push(root);
     const tasks = new Map<string, ControlTaskRecord>();

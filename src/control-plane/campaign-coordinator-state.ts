@@ -14,11 +14,13 @@ export function aggregateCampaignUsage(value: unknown): { tokens: number; costUs
  */
 export function campaignChildCompletion(value: unknown, executionMode?: string): { completed: boolean; reason: string } {
   const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), workflow = object(result.workflow), status = typeof result.status === "string" ? result.status : "unknown", workflowStatus = typeof workflow.status === "string" ? workflow.status : undefined, workflowCompleted = result.workflowCompleted === true || workflow.workflowCompleted === true, verdict = String(result.verdict ?? workflow.verdict ?? "").toLowerCase(), rootVerdict = String(result.verdict ?? "").toLowerCase(), workflowVerdict = String(workflow.verdict ?? "").toLowerCase(), validationAggregate = String(result.validationAggregate ?? workflow.validationAggregate ?? ""), next = object(result.next ?? result.nextAction ?? workflow.next ?? workflow.nextAction), nextParty = typeof next.party === "string" ? next.party : null;
+  const implementation = object(result.implementation), implementationStatus = typeof implementation.status === "string" ? implementation.status : "unknown";
+  const delegatedReviewFailure = executionMode === "implementation" && authenticatedDelegatedReviewFailure(result, workflow, status, workflowStatus, implementationStatus, validationAggregate);
   const fatalStatus = (candidate: string | undefined): boolean => ["failed", "blocked", "blocked_by_capability", "blocked_by_policy", "cancelled", "timed_out", "rejected", "do_not_apply"].includes(candidate ?? "");
   const fatalVerdict = (candidate: string): boolean => ["failed", "blocked", "rejected", "do_not_apply"].includes(candidate);
   const fatal = (): { completed: false; reason: string } | null => {
     if (fatalStatus(status)) return { completed: false, reason: `campaign_child_workflow_fatal:${status}` };
-    if (fatalStatus(workflowStatus)) return { completed: false, reason: `campaign_child_workflow_fatal:${workflowStatus}` };
+    if (fatalStatus(workflowStatus) && !delegatedReviewFailure) return { completed: false, reason: `campaign_child_workflow_fatal:${workflowStatus}` };
     if (fatalVerdict(rootVerdict)) return { completed: false, reason: `campaign_child_verdict:${rootVerdict}` };
     if (fatalVerdict(workflowVerdict)) return { completed: false, reason: `campaign_child_verdict:${workflowVerdict}` };
     return null;
@@ -26,9 +28,8 @@ export function campaignChildCompletion(value: unknown, executionMode?: string):
   const fatalCompletion = fatal();
   if (fatalCompletion) return fatalCompletion;
   if (executionMode === "implementation") {
-    const implementation = object(result.implementation), implementationStatus = typeof implementation.status === "string" ? implementation.status : "unknown";
     if (status !== "completed") return { completed: false, reason: `campaign_child_implementation_incomplete:${status}` };
-    if (!["awaiting_external_session", "runforge_scope_completed", "workflow_completed"].includes(workflowStatus ?? "")) return { completed: false, reason: `campaign_child_implementation_workflow_unknown:${workflowStatus ?? "missing"}` };
+    if (!["awaiting_external_session", "runforge_scope_completed", "workflow_completed"].includes(workflowStatus ?? "") && !delegatedReviewFailure) return { completed: false, reason: `campaign_child_implementation_workflow_unknown:${workflowStatus ?? "missing"}` };
     if (!["passed", "completed_with_validation_gaps"].includes(validationAggregate)) return { completed: false, reason: `campaign_child_implementation_validation_incomplete:${validationAggregate || "unknown"}` };
     if (implementationStatus === "implemented_and_validated") return { completed: true, reason: "" };
     if (implementationStatus === "no_change_required") return { completed: false, reason: "campaign_child_implementation_no_change_requires_explicit_noop_contract" };
@@ -48,6 +49,19 @@ export function campaignChildCompletion(value: unknown, executionMode?: string):
   if (fatalVerdict(verdict)) return { completed: false, reason: `campaign_child_verdict:${verdict}` };
   if (status === "workflow_completed" || (status === "completed" && workflowStatus === "workflow_completed") || (workflowCompleted && status === "completed")) return { completed: true, reason: "" };
   return { completed: false, reason: `campaign_child_workflow_incomplete:${status}${nextParty ? `:${nextParty}` : ""}` };
+}
+function authenticatedDelegatedReviewFailure(result: Record<string, any>, workflow: Record<string, any>, status: string, workflowStatus: string | undefined, implementationStatus: string, validationAggregate: string): boolean {
+  const reason = "Semantic reviewer invocation was unavailable: openrouter_max_calls_exceeded";
+  const exactAction = "Perform an independent semantic review in the delegated session and attach structured findings to this handoff.";
+  const matches = (value: unknown): boolean => {
+    const review = object(value), delegation = object(review.delegation);
+    return review.status === "unavailable" && review.performed === false && delegation.party === "external_session" && delegation.reason === reason && delegation.exactAction === exactAction
+      && Array.isArray(review.limitations) && review.limitations.includes(reason) && Array.isArray(review.findings) && review.findings.length === 0;
+  };
+  const rootReview = object(result.review).semantic, handoffReview = object(object(workflow.handoff).semanticReview);
+  return status === "completed" && workflowStatus === "failed" && implementationStatus === "implemented_and_validated"
+    && ["passed", "completed_with_validation_gaps"].includes(validationAggregate) && workflow.validationAggregate === validationAggregate
+    && matches(rootReview) && matches(handoffReview);
 }
 export function usageFromEvidence(value: Record<string, unknown> | CampaignPlannerEvidence | null): { tokens: number; costUsd: number } { const usage = value && typeof value.usage === "object" && value.usage !== null ? value.usage as Record<string, unknown> : {}; return { tokens: typeof usage.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : 0, costUsd: typeof usage.costUsd === "number" && Number.isFinite(usage.costUsd) ? usage.costUsd : 0 }; }
 export function reservedUsage(campaign: CampaignRecord): { tokens: number; costUsd: number } { const persisted = object(campaign.reserved), tokens = finiteNumber(persisted.tokens), costUsd = finiteNumber(persisted.costUsd); if (tokens !== null && costUsd !== null) return { tokens: Math.max(0, tokens), costUsd: Math.max(0, costUsd) }; return Object.values(campaign.children).reduce((total, child) => ({ tokens: total.tokens + Math.max(0, finiteNumber(child.reservedTokens) ?? 0), costUsd: total.costUsd + Math.max(0, finiteNumber(child.reservedCostUsd) ?? 0) }), { tokens: 0, costUsd: 0 }); }

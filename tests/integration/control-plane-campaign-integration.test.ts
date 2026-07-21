@@ -10,6 +10,12 @@ import { planCampaignFromGoal } from "../../src/run/task-run-planner.js";
 
 const exec = promisify(execFile);
 
+function delegatedReviewFailure(): Record<string, unknown> {
+  const reason = "Semantic reviewer invocation was unavailable: openrouter_max_calls_exceeded";
+  const semanticReview = { kind: "semantic", status: "unavailable", performed: false, limitations: [reason], findings: [], delegation: { party: "external_session", reason, exactAction: "Perform an independent semantic review in the delegated session and attach structured findings to this handoff." } };
+  return { status: "completed", workflow: { status: "failed", validationAggregate: "completed_with_validation_gaps", handoff: { semanticReview } }, implementation: { status: "implemented_and_validated" }, validationAggregate: "completed_with_validation_gaps", review: { semantic: semanticReview }, usage: { totalTokens: 200, costUsd: .01 } };
+}
+
 function addRequiredValidationSink(plan: ReturnType<typeof planCampaignFromGoal>, implementationId = "implementation"): void {
   const implementation = plan.nodes[0]!;
   const validation = structuredClone(implementation);
@@ -62,7 +68,7 @@ describe("control plane campaign branch integration", () => {
       };
       (manager as any).getTask = async (id: string) => tasks.get(id);
       (manager as any).getResult = async (id: string) => taskModes.get(id) === "implementation"
-        ? { status: "completed", workflow: { status: "awaiting_external_session", validationAggregate: "passed" }, implementation: { status: "implemented_and_validated" }, validationAggregate: "passed", usage: { totalTokens: 200, costUsd: .01 } }
+        ? delegatedReviewFailure()
         : { status: "completed", workflow: { status: "workflow_completed" }, validationAggregate: "passed", usage: { totalTokens: 200, costUsd: .01 } };
       const campaign = await manager.createCampaign({ goal: "Add a small source file and verify it", target: { repository: repo, workingDirectory: ".", expectedSha: baseSha }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" }, limits: { maxTokens: 10_000, maxCostUsd: 1, maxTasks: 2, maxConcurrency: 1 }, validationContract: { source: "explicit", requiredCommands: ["node --version"] } });
       const deadline = Date.now() + 5_000; let final: any = campaign;
