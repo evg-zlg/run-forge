@@ -78,10 +78,11 @@ export function normalizeOpenRouterDiff(value: string): string {
   const candidate = (fenced?.[1] ?? trimmed).trim();
   const diffStart = candidate.search(/^diff --git /m);
   const diff = (diffStart > 0 ? candidate.slice(diffStart) : candidate).trimEnd();
-  return diff
+  const normalized = diff
     .replace(/^diff --git (?!a\/)(\S+) (?!b\/)(\S+)$/gm, "diff --git a/$1 b/$2")
     .replace(/^--- (?!a\/|\/dev\/null)(\S+)$/gm, "--- a/$1")
-    .replace(/^\+\+\+ (?!b\/|\/dev\/null)(\S+)$/gm, "+++ b/$1") + "\n";
+    .replace(/^\+\+\+ (?!b\/|\/dev\/null)(\S+)$/gm, "+++ b/$1");
+  return normalizeNewFileBody(normalized) + "\n";
 }
 
 export function validateOpenRouterDiff(diff: string, limits: { maxBytes: number; maxChangedFiles: number; forbiddenZones: string[] }): string[] {
@@ -106,3 +107,4 @@ function redact(value: string): string { return value.replace(/\b(?:gh[pousr]_|g
 function safeProviderExcerpt(value: string): string { if (scanSecrets(value).status === "failed") return "[redacted: provider output contained secret-like content]"; const redacted = redact(value); return Buffer.byteLength(redacted) <= safeExcerptBytes ? redacted : `${Buffer.from(redacted).subarray(0, safeExcerptBytes).toString("utf8")}\n[truncated provider output]`; }
 function normalizePatchPath(value: string): string { return value.replace(/^\.\//, "").replace(/\\/g, "/").replace(/\/+/g, "/").replace(/\/$/, ""); }
 function addedPatchLines(diff: string): string { return diff.split(/\r?\n/).filter((line) => line.startsWith("+") && !line.startsWith("+++")).map((line) => line.slice(1)).join("\n"); }
+function normalizeNewFileBody(diff: string): string { const lines = diff.split(/\r?\n/); let newFile = false, hunk = false; return lines.map((line) => { if (line.startsWith("diff --git ")) { newFile = false; hunk = false; return line; } if (line === "--- /dev/null") { newFile = true; return line; } if (line.startsWith("@@ ")) { hunk = true; return line; } if (newFile && hunk && !line.startsWith("+") && !line.startsWith("\\ No newline")) return `+${line}`; return line; }).join("\n"); }

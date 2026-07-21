@@ -47,6 +47,17 @@ describe("OpenRouter executor safety", () => {
     expect(await readFile(join(artifactRoot, "value.txt"), "utf8")).toBe("new\n");
   });
 
+  it("repairs missing addition markers only inside a declared new-file hunk", async () => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    const artifactRoot = await mkdtemp(join(tmpdir(), "runforge-openrouter-new-file-"));
+    const patch = "diff --git a/guide.md b/guide.md\nnew file mode 100644\n--- /dev/null\n+++ b/guide.md\n@@ -0,0 +1,9 @@\n+# Guide\n\n## Topic\n\n- item\n";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(ok(patch)));
+    const request = { artifactRoot, signal: undefined, forbiddenZones: [], spec: { execution: { maxPatchBytes: 10_000, maxChangedFiles: 2 }, providerRouting: { models: { implementer: "test/model" }, maxCalls: 1, retry: { maxAttempts: 1 }, timeoutMs: 100, tokenBudget: { total: 100, perPhase: { implementer: 100 } } } } } as any;
+    const result = await runOpenRouterAgent(request, artifactRoot, "implement", "implementer", [], 0);
+    expect(result.exitCode).toBe(0);
+    expect(await readFile(join(artifactRoot, "guide.md"), "utf8")).toBe("# Guide\n\n## Topic\n\n- item\n");
+  });
+
   it("accounts maxCalls as global HTTP attempts across phase invocations", async () => {
     process.env.OPENROUTER_API_KEY = "test-key";
     const fetchMock = vi.fn()
