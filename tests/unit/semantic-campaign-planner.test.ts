@@ -72,6 +72,8 @@ describe("semantic campaign planner", () => {
     expect(chat).toHaveBeenCalledTimes(2);
     expect(result.evidence.validationCodes).toContain("MISSING_IMPLEMENTATION_NODE");
     expect(result.plan.nodes[1]!.writeScopes).toEqual(["src/a.ts"]);
+    expect(JSON.stringify(chat.mock.calls[0]![0])).toContain("Implementation campaigns must include at least one bounded implementation node with a non-empty writeScopes array.");
+    expect(JSON.stringify(chat.mock.calls[1]![0])).toContain("The previous draft has no implementation node: include at least one bounded implementation node with a non-empty writeScopes array.");
   });
 
   it("keeps local campaigns deterministic without a provider call", async () => {
