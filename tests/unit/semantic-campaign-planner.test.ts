@@ -23,6 +23,7 @@ describe("semantic campaign planner", () => {
     const result = await planSemanticCampaign("cmp_v1_223456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: {} });
     expect(chat).toHaveBeenCalledTimes(2);
     expect(result.evidence).toMatchObject({ attempts: 2, repaired: true, validationCodes: ["INVALID_JSON"], usage: { tokens: 30, costUsd: .03 } });
+    expect(JSON.stringify(chat.mock.calls[1]![0])).toContain("integer 1000 or greater");
   });
 
   it("fails closed after the second invalid draft", async () => {
