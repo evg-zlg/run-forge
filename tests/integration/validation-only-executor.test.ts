@@ -5,11 +5,30 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { negotiateExecutionAgreement, type ExecutionParty } from "../../src/product/execution-agreement.js";
 import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
+import { createSyntheticValidationGitContext } from "../../src/validation/validation-only-executor.js";
 
 const roots: string[] = [];
 afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("validation-only multi-lane execution", () => {
+  it("creates clean non-main synthetic Git context without touching the source repository", async () => {
+    const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-synthetic-validation-git-"))) - 1]!, source = join(root, "source"), workspace = join(root, "campaign-worktrees", "cmp_v1_fixture");
+    await mkdir(source); await mkdir(join(workspace, "node_modules"), { recursive: true }); await mkdir(join(workspace, ".runforge-corepack")); await mkdir(join(workspace, ".runforge-tmp"));
+    execFileSync("git", ["init", "-q", "-b", "main"], { cwd: source }); execFileSync("git", ["config", "user.name", "Source"], { cwd: source }); execFileSync("git", ["config", "user.email", "source@example.invalid"], { cwd: source });
+    await writeFile(join(source, "README.md"), "source\n"); execFileSync("git", ["add", "README.md"], { cwd: source }); execFileSync("git", ["commit", "-qm", "source"], { cwd: source });
+    const sourceHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: source, encoding: "utf8" }).trim();
+    await writeFile(join(workspace, "package.json"), "{}\n"); await writeFile(join(workspace, "node_modules", "dependency.js"), "module.exports = true;\n"); await writeFile(join(workspace, ".runforge-corepack", "cache"), "offline\n");
+    await createSyntheticValidationGitContext(workspace);
+    expect(execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: workspace, encoding: "utf8" }).trim()).toBe("true");
+    expect(execFileSync("git", ["branch", "--show-current"], { cwd: workspace, encoding: "utf8" }).trim()).toBe("runforge-validation-snapshot");
+    expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: workspace, encoding: "utf8" }).trim()).toBe("");
+    expect(execFileSync("git", ["config", "--get", "core.hooksPath"], { cwd: workspace, encoding: "utf8" }).trim()).toBe("/dev/null");
+    expect(execFileSync("git", ["ls-files"], { cwd: workspace, encoding: "utf8" })).toContain("package.json");
+    expect(execFileSync("git", ["ls-files"], { cwd: workspace, encoding: "utf8" })).not.toContain("node_modules");
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: source, encoding: "utf8" }).trim()).toBe(sourceHead);
+    expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: source, encoding: "utf8" }).trim()).toBe("");
+  });
+
   it("executes package validation when if-needed can reuse source dependencies", async () => {
     const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-dependencies-"))) - 1]!;
     const repository = join(root, "source"); const artifacts = join(root, "artifacts"); const bin = join(root, "bin");
