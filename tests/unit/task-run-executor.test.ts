@@ -164,6 +164,83 @@ describe("LocalShellExecutor", () => {
     expect(result.exitCode).toBe(7);
     expect(result.stderr).toContain("bad path");
   });
+
+  it("uses artifact-owned runtime directories without forwarding hostile host HOME or TMPDIR", async () => {
+    const root = await tempRoot();
+    const originalHome = process.env.HOME;
+    const originalTmpdir = process.env.TMPDIR;
+    const hostHome = join(root, "host-home-must-not-leak");
+    const hostileTmpdir = join(hostHome, "host-tmp-must-not-leak");
+    const artifactDir = join(root, "subtasks", "03-controlled-home");
+    process.env.HOME = hostHome;
+    process.env.TMPDIR = hostileTmpdir;
+    await mkdir(hostileTmpdir, { recursive: true });
+
+    try {
+      const executor = new LocalShellExecutor(root, true);
+      const result = await executor.execute(
+        createExecutorRequest({
+          runId: "AGENT-OS-3-TEST",
+          subtaskId: "03-controlled-home",
+          command: "node -e 'process.stdout.write(JSON.stringify({ home: process.env.HOME, tmp: process.env.TMPDIR, cache: process.env.npm_config_cache }))'",
+          cwd: root,
+          artifactDir
+        })
+      );
+
+      expect(result.status).toBe("passed");
+      expect(JSON.parse(result.stdout)).toEqual({
+        home: join(artifactDir, "runtime", "home"),
+        tmp: join(artifactDir, "runtime", "tmp"),
+        cache: join(artifactDir, "runtime", "npm-cache")
+      });
+      expect(result.stdout).not.toContain(hostHome);
+      expect(result.stdout).not.toContain(hostileTmpdir);
+      await expect(access(join(artifactDir, "runtime", "home"))).resolves.toBeUndefined();
+      await expect(access(join(artifactDir, "runtime", "tmp"))).resolves.toBeUndefined();
+      await expect(access(join(artifactDir, "runtime", "npm-cache"))).resolves.toBeUndefined();
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+      if (originalTmpdir === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = originalTmpdir;
+    }
+  });
+
+  it("isolates controlled runtime directories between executions", async () => {
+    const root = await tempRoot();
+    const executor = new LocalShellExecutor(root, true);
+    const firstArtifactDir = join(root, "subtasks", "04-first");
+    const secondArtifactDir = join(root, "subtasks", "05-second");
+
+    const first = await executor.execute(createExecutorRequest({
+      runId: "AGENT-OS-3-TEST",
+      subtaskId: "04-first",
+      command: "printf first > \"$HOME/marker\"; node -e 'process.stdout.write(JSON.stringify({ home: process.env.HOME, tmp: process.env.TMPDIR, cache: process.env.npm_config_cache }))'",
+      cwd: root,
+      artifactDir: firstArtifactDir
+    }));
+    const second = await executor.execute(createExecutorRequest({
+      runId: "AGENT-OS-3-TEST",
+      subtaskId: "05-second",
+      command: "test ! -e \"$HOME/marker\"; node -e 'process.stdout.write(JSON.stringify({ home: process.env.HOME, tmp: process.env.TMPDIR, cache: process.env.npm_config_cache }))'",
+      cwd: root,
+      artifactDir: secondArtifactDir
+    }));
+
+    expect(first.status).toBe("passed");
+    expect(second.status).toBe("passed");
+    expect(JSON.parse(first.stdout)).toEqual({
+      home: join(firstArtifactDir, "runtime", "home"),
+      tmp: join(firstArtifactDir, "runtime", "tmp"),
+      cache: join(firstArtifactDir, "runtime", "npm-cache")
+    });
+    expect(JSON.parse(second.stdout)).toEqual({
+      home: join(secondArtifactDir, "runtime", "home"),
+      tmp: join(secondArtifactDir, "runtime", "tmp"),
+      cache: join(secondArtifactDir, "runtime", "npm-cache")
+    });
+    await expect(readFile(join(firstArtifactDir, "runtime", "home", "marker"), "utf8")).resolves.toBe("first");
+    await expect(access(join(secondArtifactDir, "runtime", "home", "marker"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
 });
 
 async function tempRoot(): Promise<string> {
