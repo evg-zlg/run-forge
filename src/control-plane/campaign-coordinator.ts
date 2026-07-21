@@ -138,7 +138,8 @@ export class CampaignCoordinator {
         if (task.status === "completed") {
           progressed = true;
           const result = await this.deps.getResult(child.taskId).catch(() => ({}));
-          const completion = campaignChildCompletion(result);
+          const node = campaign.plan.nodes.find((item) => item.id === child.nodeId);
+          const completion = campaignChildCompletion(result, typeof object(node?.taskSpec.execution).mode === "string" ? object(node?.taskSpec.execution).mode : undefined);
           if (!completion.completed) {
             const at = new Date().toISOString();
             child.status = "blocked"; child.finishedAt = at; child.error = completion.reason;
