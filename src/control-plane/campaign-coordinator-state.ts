@@ -3,7 +3,34 @@ import { ControlPlaneError, type CampaignPlan, type CampaignRecord } from "./con
 import { boundPublicResult } from "./manager-results.js";
 
 export function aggregateCampaignUsage(value: unknown): { tokens: number; costUsd: number } { const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), usage = object(result.usage), calls = Array.isArray(result.providerCalls) ? result.providerCalls.map(object) : []; return { tokens: finiteNumber(usage.totalTokens) ?? calls.reduce((sum, call) => sum + (finiteNumber(call.tokenUsage) ?? 0), 0), costUsd: finiteNumber(usage.costUsd) ?? calls.reduce((sum, call) => sum + (finiteNumber(call.costUsd) ?? 0), 0) }; }
-export function campaignChildCompletion(value: unknown): { completed: boolean; reason: string } { const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), workflow = object(result.workflow), status = typeof result.status === "string" ? result.status : "unknown", workflowStatus = typeof workflow.status === "string" ? workflow.status : undefined, workflowCompleted = result.workflowCompleted === true || workflow.workflowCompleted === true, verdict = String(result.verdict ?? workflow.verdict ?? "").toLowerCase(), next = object(result.next ?? result.nextAction ?? workflow.next ?? workflow.nextAction), nextParty = typeof next.party === "string" ? next.party : null; if (["awaiting_external_session", "runforge_scope_completed", "awaiting_owner", "awaiting_owner_decision", "blocked"].includes(status) || ["awaiting_external_session", "runforge_scope_completed", "awaiting_owner", "blocked"].includes(workflowStatus ?? "")) return { completed: false, reason: `campaign_child_workflow_incomplete:${workflowStatus ?? status}` }; if (result.workflowCompleted === false || workflow.workflowCompleted === false) return { completed: false, reason: "campaign_child_workflow_incomplete:workflowCompleted_false" }; if (["failed", "blocked", "rejected", "do_not_apply"].includes(verdict)) return { completed: false, reason: `campaign_child_verdict:${verdict}` }; if (status === "workflow_completed" || (status === "completed" && workflowStatus === "workflow_completed") || (workflowCompleted && status === "completed")) return { completed: true, reason: "" }; return { completed: false, reason: `campaign_child_workflow_incomplete:${status}${nextParty ? `:${nextParty}` : ""}` }; }
+/**
+ * Child completion is deliberately mode-aware. An implementation executor can
+ * finish its bounded patch while a nested task workflow remains open for an
+ * independent external review. The campaign owns that follow-up by applying
+ * the patch and running its terminal validation sink, so it must not discard a
+ * proven implementation merely because the nested workflow is awaiting that
+ * review. Validation nodes, on the other hand, may only advance on a complete
+ * workflow result.
+ */
+export function campaignChildCompletion(value: unknown, executionMode?: string): { completed: boolean; reason: string } {
+  const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), workflow = object(result.workflow), status = typeof result.status === "string" ? result.status : "unknown", workflowStatus = typeof workflow.status === "string" ? workflow.status : undefined, workflowCompleted = result.workflowCompleted === true || workflow.workflowCompleted === true, verdict = String(result.verdict ?? workflow.verdict ?? "").toLowerCase(), next = object(result.next ?? result.nextAction ?? workflow.next ?? workflow.nextAction), nextParty = typeof next.party === "string" ? next.party : null;
+  if (executionMode === "implementation") {
+    const implementation = object(result.implementation), implementationStatus = typeof implementation.status === "string" ? implementation.status : "unknown", rootVerdict = String(result.verdict ?? "").toLowerCase();
+    if (status !== "completed") return { completed: false, reason: `campaign_child_implementation_incomplete:${status}` };
+    if (["failed", "blocked", "rejected", "do_not_apply"].includes(rootVerdict)) return { completed: false, reason: `campaign_child_verdict:${rootVerdict}` };
+    if (["implemented_and_validated", "no_change_required"].includes(implementationStatus)) return { completed: true, reason: "" };
+    return { completed: false, reason: `campaign_child_implementation_incomplete:${implementationStatus}` };
+  }
+  if (executionMode === "validation") {
+    const incompleteStatus = workflowStatus ?? status;
+    return status === "workflow_completed" ? { completed: true, reason: "" } : { completed: false, reason: `campaign_child_workflow_incomplete:${incompleteStatus}${nextParty ? `:${nextParty}` : ""}` };
+  }
+  if (["awaiting_external_session", "runforge_scope_completed", "awaiting_owner", "awaiting_owner_decision", "blocked"].includes(status) || ["awaiting_external_session", "runforge_scope_completed", "awaiting_owner", "blocked"].includes(workflowStatus ?? "")) return { completed: false, reason: `campaign_child_workflow_incomplete:${workflowStatus ?? status}` };
+  if (result.workflowCompleted === false || workflow.workflowCompleted === false) return { completed: false, reason: "campaign_child_workflow_incomplete:workflowCompleted_false" };
+  if (["failed", "blocked", "rejected", "do_not_apply"].includes(verdict)) return { completed: false, reason: `campaign_child_verdict:${verdict}` };
+  if (status === "workflow_completed" || (status === "completed" && workflowStatus === "workflow_completed") || (workflowCompleted && status === "completed")) return { completed: true, reason: "" };
+  return { completed: false, reason: `campaign_child_workflow_incomplete:${status}${nextParty ? `:${nextParty}` : ""}` };
+}
 export function usageFromEvidence(value: Record<string, unknown> | CampaignPlannerEvidence | null): { tokens: number; costUsd: number } { const usage = value && typeof value.usage === "object" && value.usage !== null ? value.usage as Record<string, unknown> : {}; return { tokens: typeof usage.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : 0, costUsd: typeof usage.costUsd === "number" && Number.isFinite(usage.costUsd) ? usage.costUsd : 0 }; }
 export function reservedUsage(campaign: CampaignRecord): { tokens: number; costUsd: number } { const persisted = object(campaign.reserved), tokens = finiteNumber(persisted.tokens), costUsd = finiteNumber(persisted.costUsd); if (tokens !== null && costUsd !== null) return { tokens: Math.max(0, tokens), costUsd: Math.max(0, costUsd) }; return Object.values(campaign.children).reduce((total, child) => ({ tokens: total.tokens + Math.max(0, finiteNumber(child.reservedTokens) ?? 0), costUsd: total.costUsd + Math.max(0, finiteNumber(child.reservedCostUsd) ?? 0) }), { tokens: 0, costUsd: 0 }); }
 export function childReservationTokens(campaign: CampaignRecord, nodeId: string): number { return Math.max(0, finiteNumber(campaign.children[nodeId]?.reservedTokens) ?? 0); }

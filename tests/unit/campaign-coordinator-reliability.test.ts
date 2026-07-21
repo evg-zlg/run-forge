@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CampaignCoordinator } from "../../src/control-plane/campaign-coordinator.js";
 import { CampaignCoordinatorLease } from "../../src/control-plane/campaign-coordinator-lease.js";
+import { campaignChildCompletion } from "../../src/control-plane/campaign-coordinator-state.js";
 import type { CampaignPlan, CampaignRecord, CampaignSpec, ControlTaskRecord } from "../../src/control-plane/contracts.js";
 
 const roots: string[] = [];
@@ -25,6 +26,14 @@ async function waitFor(read: () => Promise<CampaignRecord>, predicate: (value: C
 }
 
 describe("CampaignCoordinator reliability", () => {
+  it("accepts a completed implementation result despite an external nested review, but keeps validation strict", () => {
+    const implementation = { status: "completed", workflow: { status: "awaiting_external_session", workflowCompleted: false }, implementation: { status: "implemented_and_validated" } };
+    expect(campaignChildCompletion(implementation, "implementation")).toEqual({ completed: true, reason: "" });
+    expect(campaignChildCompletion({ status: "completed", implementation: { status: "failed_with_diagnostics" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_incomplete:failed_with_diagnostics" });
+    expect(campaignChildCompletion({ status: "completed", workflow: { status: "awaiting_external_session" } }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_incomplete:awaiting_external_session" });
+    expect(campaignChildCompletion({ status: "workflow_completed" }, "validation")).toEqual({ completed: true, reason: "" });
+  });
+
   it("persists aggregate reservations and refuses to overschedule after actual usage replaces one reservation", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-reservations-")); roots.push(root);
     const tasks = new Map<string, ControlTaskRecord>();
