@@ -26,7 +26,7 @@ function addRequiredValidationSink(plan: ReturnType<typeof planCampaignFromGoal>
   (validation.taskSpec as any).execution.mode = "validation";
   (validation.taskSpec as any).authority = { ...(validation.taskSpec as any).authority, profile: "read-only", allowProviderCalls: false, allowNetwork: false };
   (validation.taskSpec as any).discovery = { ...(validation.taskSpec as any).discovery, writeScopes: [] };
-  (validation.taskSpec as any).validation = { mode: "explicit", commands: ["node --version", "git diff --check __CAMPAIGN_BASE__...HEAD"], requirements: [], profile: { id: "test-final", defaultAcceptance: "required", defaultEvidenceRole: "test", additionalCapabilities: [] } };
+  (validation.taskSpec as any).validation = { mode: "explicit", commands: ["node --version", "git diff --check __CAMPAIGN_BASE__...HEAD"], requirements: [{ command: "node --version", acceptance: "required" }, { command: "git diff --check __CAMPAIGN_BASE__...HEAD", acceptance: "required" }], profile: { id: "test-final", defaultAcceptance: "required", defaultEvidenceRole: "test", additionalCapabilities: [] } };
   (validation.taskSpec as any).providerRouting.costBudgetUsd = .1;
   plan.nodes = [implementation, validation];
   plan.estimatedTokens = (implementation.estimatedTokens ?? 0) + 1_000;
@@ -86,7 +86,7 @@ describe("control plane campaign branch integration", () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
-  it("accepts a validation child without an implementation patch", async () => {
+  it("rejects a validation-only custom plan for an implementation campaign", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-campaign-validation-no-patch-")), repo = join(root, "repo"), state = join(root, "state"), artifacts = join(root, "child-artifacts");
     await mkdir(repo); await mkdir(state); await mkdir(artifacts);
     try {
@@ -95,9 +95,7 @@ describe("control plane campaign branch integration", () => {
       const manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize(); const tasks = new Map<string, any>();
       (manager as any).planCampaign = async (record: any) => { const plan = planCampaignFromGoal(record.id, record.spec); addRequiredValidationSink(plan); plan.nodes = [plan.nodes[1]!]; plan.nodes[0]!.dependsOn = []; plan.estimatedTokens = 1_000; plan.estimatedCostUsd = .1; return { plan, evidence: { mode: "semantic-openrouter", model: "test", attempts: 1, repaired: false, usage: { tokens: 100, costUsd: .001 }, validationCodes: [] } }; };
       (manager as any).createTask = async (input: any) => { const task = { id: input.taskSpec.taskId, status: "completed", error: null, artifactRoot: artifacts }; tasks.set(task.id, task); return task; }; (manager as any).getTask = async (id: string) => tasks.get(id); (manager as any).getResult = async () => ({ status: "workflow_completed", usage: { totalTokens: 100, costUsd: .01 } });
-      const campaign = await manager.createCampaign({ goal: "Validate the bounded change", target: { repository: repo, workingDirectory: ".", expectedSha: baseSha }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" }, limits: { maxTokens: 10_000, maxCostUsd: 1, maxTasks: 2, maxConcurrency: 1 }, validationContract: { source: "explicit", requiredCommands: ["node --version"] } });
-      const deadline = Date.now() + 5_000; let final: any = campaign; while (Date.now() < deadline && !["completed", "failed", "on_hold"].includes(final.status)) { await new Promise((resolve) => setTimeout(resolve, 25)); final = await manager.getCampaign(campaign.id); }
-      expect(final.status, JSON.stringify(final.failures)).toBe("completed"); manager.close();
+      await expect(manager.createCampaign({ goal: "Validate the bounded change", target: { repository: repo, workingDirectory: ".", expectedSha: baseSha }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" }, limits: { maxTokens: 10_000, maxCostUsd: 1, maxTasks: 2, maxConcurrency: 1 }, validationContract: { source: "explicit", requiredCommands: ["node --version"] } })).rejects.toThrow(/at least one implementation node/i); manager.close();
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

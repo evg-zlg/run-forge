@@ -156,7 +156,7 @@ describe("control plane campaign integration", () => {
     (managerA as any).getTask = async (id: string) => { const task = statuses.get(id); if (!task) throw new Error("task not found"); return task; };
     (managerA as any).getResult = async () => ({ status: "workflow_completed", usage: { totalTokens: 5, costUsd: 0.1 } });
     const created = await managerA.createCampaign({ goal: "OpenRouter-only run", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "openrouter/auto", fallbackPolicy: "none" }, limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 } });
-    managerA.close();
+    await managerA.drain();
     const managerB = new ControlPlaneManager(new ControlPlaneStore(root));
     await managerB.initialize();
     (managerB as any).createTask = (managerA as any).createTask;
@@ -167,7 +167,7 @@ describe("control plane campaign integration", () => {
     while (Date.now() < deadline) { final = await managerB.getCampaign(created.id); if (["completed", "failed", "on_hold"].includes(final.status)) break; await new Promise((resolve) => setTimeout(resolve, 50)); }
     expect(final.status).toBe("completed");
     await expect(managerB.createCampaign({ goal: "Reject authority expansion", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: true, providerCalls: false, network: false, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "local" }, limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 } })).rejects.toThrow(/authority expansion/i);
-    managerB.close();
+    await managerB.drain();
   });
 
   test("enforces one active campaign coordinator per state root and releases ownership on close", async () => {
@@ -177,9 +177,9 @@ describe("control plane campaign integration", () => {
     const managerB = new ControlPlaneManager(new ControlPlaneStore(root));
     await managerA.initialize();
     await expect(managerB.initialize()).rejects.toMatchObject({ status: 409, code: "campaign_coordinator_already_active" });
-    managerA.close();
+    await managerA.drain();
     await managerB.initialize();
-    managerB.close();
+    await managerB.drain();
   });
 
   test("holds implementation campaigns when the project validation contract is unknown", async () => {
@@ -239,7 +239,7 @@ describe("control plane campaign integration", () => {
 
   test("rejects an invalid custom implementation sink before creating its worktree", async () => {
     const { manager } = await createHarness();
-    (manager as any).planCampaign = async (record: any) => ({ schemaVersion: 1, campaignId: record.id, estimatedTokens: 1_000, estimatedCostUsd: .1, nodes: [{ id: "unsafe-sink", dependsOn: [], writeScopes: [], estimatedTokens: 1_000, estimatedCostUsd: .1, taskSpec: { execution: { mode: "inspection" }, authority: { profile: "read-only", allowProviderCalls: false, allowNetwork: false }, discovery: { writeScopes: [] }, validation: { mode: "explicit", commands: ["node --version", "git diff --check __CAMPAIGN_BASE__...HEAD"] }, providerRouting: { provider: "openrouter", fallbackPolicy: "none", costBudgetUsd: .1 }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } } }] });
-    await expect(manager.createCampaign({ goal: "Invalid custom plan", target: { repository: "/definitely/missing/runforge-campaign-repo" }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", fallbackPolicy: "none" }, limits: { maxTokens: 2_000, maxCostUsd: 1, maxTasks: 1, maxConcurrency: 1 }, validationContract: { source: "explicit", requiredCommands: ["node --version"] } })).rejects.toThrow(/terminal node.*validation-only/i);
+    (manager as any).planCampaign = async (record: any) => ({ schemaVersion: 1, campaignId: record.id, estimatedTokens: 1_000, estimatedCostUsd: .1, nodes: [{ id: "unsafe-sink", dependsOn: [], writeScopes: ["src/a.ts"], estimatedTokens: 1_000, estimatedCostUsd: .1, taskSpec: { execution: { mode: "implementation" }, authority: { profile: "bounded-implementation", allowProviderCalls: false, allowNetwork: false }, discovery: { writeScopes: ["src/a.ts"] }, validation: { mode: "explicit", commands: ["node --version", "git diff --check __CAMPAIGN_BASE__...HEAD"] }, providerRouting: { provider: "openrouter", fallbackPolicy: "none", costBudgetUsd: .1 }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } } }] });
+    await expect(manager.createCampaign({ goal: "Invalid custom plan", target: { repository: "/definitely/missing/runforge-campaign-repo" }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", fallbackPolicy: "none" }, limits: { maxTokens: 2_000, maxCostUsd: 1, maxTasks: 1, maxConcurrency: 1 }, validationContract: { source: "explicit", requiredCommands: ["node --version"] } })).rejects.toThrow(/implementation campaign plan requires|terminal node.*validation-only/i);
   });
 });
