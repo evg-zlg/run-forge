@@ -101,6 +101,7 @@ function validateDraft(content: string, spec: CampaignSpec): { nodes?: DraftNode
   if (!codes.has("INVALID_DEPENDENCY") && detectCycle(nodes).length) codes.add("CYCLE");
   if (hasConcurrentOverlap(nodes)) codes.add("OVERLAPPING_SCOPE");
   if (spec.authority.implementation) {
+    if (!nodes.some((node) => node.writeScopes.length)) codes.add("MISSING_IMPLEMENTATION_NODE");
     const dependedOn = new Set(nodes.flatMap((node) => node.dependsOn));
     const sinks = nodes.filter((node) => !dependedOn.has(node.id));
     const finalValidationSinks = sinks.filter(isValidationNode);

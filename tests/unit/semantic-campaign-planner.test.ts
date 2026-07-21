@@ -64,6 +64,16 @@ describe("semantic campaign planner", () => {
     expect(result.plan.nodes.map((node) => node.id)).not.toContain("independent-implement");
   });
 
+  it("repairs an implementation campaign with validation-only nodes", async () => {
+    const invalid = structuredClone(valid);
+    invalid.nodes[1]!.writeScopes = [];
+    const chat = vi.fn().mockResolvedValueOnce(response(JSON.stringify(invalid))).mockResolvedValueOnce(response(JSON.stringify(valid)));
+    const result = await planSemanticCampaign("cmp_v1_453456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: {} });
+    expect(chat).toHaveBeenCalledTimes(2);
+    expect(result.evidence.validationCodes).toContain("MISSING_IMPLEMENTATION_NODE");
+    expect(result.plan.nodes[1]!.writeScopes).toEqual(["src/a.ts"]);
+  });
+
   it("keeps local campaigns deterministic without a provider call", async () => {
     const chat = vi.fn();
     const result = await planSemanticCampaign("cmp_v1_523456789012345678901234", spec("local"), { chatCompletion: chat });
