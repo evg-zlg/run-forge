@@ -1,5 +1,7 @@
+import { execFile } from "node:child_process";
 import { access, mkdir, rm, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
+import { promisify } from "node:util";
 import { detectPackageValidationCapabilities } from "../implementation/validation-runtime-capabilities.js";
 import { runValidation, type CommandDiagnostic } from "../implementation/validation-command-runner.js";
 import type { SemanticReviewResult } from "../implementation/semantic-review.js";
@@ -13,6 +15,8 @@ import {
   type ValidationAggregateStatus, type ValidationPreflightPlan,
 } from "./capability-contract.js";
 import { createGitEvidenceBinding, parseGitEvidenceCommand, type GitEvidenceBinding } from "./git-evidence-lane.js";
+
+const execFileAsync = promisify(execFile);
 
 export type ValidationOnlyExecutorResult = {
   status: "completed" | "failed";
@@ -48,9 +52,14 @@ export async function runValidationOnlyExecutor(input: {
   await mkdir(spec.artifacts.root, { recursive: true });
 
   let preparation: RuntimePreparationResult | null = null;
+  let syntheticGitContext = false;
   if (spec.runtime.preference === "docker" && spec.runtime.dependencyPreparation === "required") {
     preparation = await prepareExternalRuntime({ repo: spec.target.repository, workingDirectory: spec.target.workingDirectory, workspace, outDir: spec.artifacts.root, image: spec.runtime.dockerImage });
     await rm(join(workspace, ".git"), { recursive: true, force: true });
+    if (spec.validation.profile.id.startsWith("campaign-final-") && /[\\/]campaign-worktrees[\\/]cmp_v1_[^\\/]+(?:[\\/]|$)/.test(spec.target.repository)) {
+      await createSyntheticValidationGitContext(resolve(workspace, spec.target.workingDirectory));
+      syntheticGitContext = true;
+    }
   } else {
     await copyTaskRunWorkspace(spec.target.repository, workspace, "");
     await prepareUnpreparedExternalWorkspace(spec.target.repository, workspace, spec.target.workingDirectory);
@@ -65,7 +74,7 @@ export async function runValidationOnlyExecutor(input: {
   });
   const productRuntime = runtimeCapabilities({
     runtime: spec.runtime.preference,
-    hasGitMetadata: false,
+    hasGitMetadata: syntheticGitContext,
     packageManager: packageCapabilities.packageManager,
     dependencies: preparation !== null || sourceDependencies || packageCapabilities.dependencies,
     docker: spec.runtime.preference === "docker",
@@ -133,6 +142,21 @@ export async function runValidationOnlyExecutor(input: {
   const review = { structural: { kind: "structural" as const, status: validationAggregate, evidence: validationResults.flatMap((item) => item.artifactPaths) }, semantic };
   const completed = ["passed", "completed_with_validation_gaps"].includes(validationAggregate);
   return { status: completed ? "completed" : "failed", validationPlan, validationAggregate, validationResults, source: { before: sourceBefore, after: sourceAfter, unchanged }, productWorkspace: workspace, preparation, review, executionAgreement: input.executionAgreement };
+}
+
+/** Creates non-authoritative Git context inside a disposable validation snapshot. */
+export async function createSyntheticValidationGitContext(workspace: string): Promise<void> {
+  const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C", LC_ALL: "C", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/usr/bin/false", GIT_OPTIONAL_LOCKS: "0" };
+  const git = (args: string[]) => execFileAsync("git", args, { cwd: workspace, env, maxBuffer: 2_000_000 });
+  await git(["init", "--quiet", "--initial-branch=runforge-validation-snapshot"]);
+  await git(["config", "user.name", "RunForge Validation Snapshot"]);
+  await git(["config", "user.email", "validation-snapshot@runforge.invalid"]);
+  await git(["config", "core.hooksPath", "/dev/null"]);
+  await git(["config", "credential.helper", ""]);
+  await git(["config", "protocol.file.allow", "never"]);
+  await writeFile(join(workspace, ".git", "info", "exclude"), ["**/node_modules/", "**/.runforge-corepack/", "**/.runforge-tmp/", ""].join("\n"), "utf8");
+  await git(["add", "--all"]);
+  await git(["commit", "--quiet", "--no-verify", "--message", "RunForge disposable validation snapshot"]);
 }
 
 function semanticReviewDelegation(phase: ExecutionPhaseAgreement): NonNullable<SemanticReviewResult["delegation"]> {
