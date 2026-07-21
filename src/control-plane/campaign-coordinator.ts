@@ -85,8 +85,15 @@ export class CampaignCoordinator {
   }
   private ensureCampaignLoop(id: string): void {
     if (this.activeCampaignLoops.has(id)) return;
-    const loop = this.runCampaign(id).finally(() => this.activeCampaignLoops.delete(id));
+    const loop = this.runCampaign(id).catch((error) => this.handleCampaignLoopFailure(id, error)).finally(() => this.activeCampaignLoops.delete(id));
     this.activeCampaignLoops.set(id, loop);
+  }
+  private async handleCampaignLoopFailure(id: string, error: unknown): Promise<void> {
+    const campaign = await this.readCampaign(id);
+    if (!campaign || ["completed", "failed", "on_hold"].includes(campaign.status)) return;
+    const reason = error instanceof ControlPlaneError ? `campaign_task_rejected:${error.code}` : "campaign_internal_error";
+    campaign.failures.push({ at: new Date().toISOString(), reason });
+    await this.finishCampaign(campaign, "failed");
   }
   private async runCampaign(id: string): Promise<void> {
     while (true) {

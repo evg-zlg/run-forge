@@ -120,6 +120,23 @@ describe("control plane campaign integration", () => {
     expect(final.failures.some((item: any) => item.reason === "campaign_budget_exceeded")).toBe(true);
   });
 
+  test("task scheduling rejection fails only the campaign", async () => {
+    const { server, manager } = await createHarness();
+    (manager as any).planCampaign = async (record: any) => {
+      const plan = planCampaignFromGoal(record.id, record.spec);
+      plan.nodes.forEach((node) => { node.estimatedTokens = 10; });
+      plan.estimatedTokens = plan.nodes.length * 10;
+      return plan;
+    };
+    (manager as any).createTask = async () => { throw new Error("invalid generated child spec"); };
+    const response = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal: "Inspect one bounded concern", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: false, network: false, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "local" }, limits: { maxTokens: 1000, maxTasks: 3, maxConcurrency: 1 } }) });
+    const campaign = await response.json();
+    const final = await waitForCampaign(server, campaign.id);
+    expect(final.status).toBe("failed");
+    expect(final.failures).toContainEqual(expect.objectContaining({ reason: "campaign_internal_error" }));
+    expect((await fetch(`${server.url}/readyz`)).status).toBe(200);
+  });
+
   test("restart recovery, authority non-expansion and openrouter no-local-fallback", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-campaign-restart-"));
     cleanup.push(async () => { await rm(root, { recursive: true, force: true }); });
