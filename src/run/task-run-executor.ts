@@ -126,7 +126,8 @@ export class DockerShellExecutor implements TaskRunExecutor {
     private readonly repoRoot: string,
     private readonly image: string,
     private readonly writableWorkspace = false,
-    private readonly readonlySource?: string
+    private readonly readonlySource?: string,
+    private readonly tempVolume?: string
   ) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
@@ -140,7 +141,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
     let timedOut = false;
 
     try {
-      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace, this.readonlySource), {
+      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace, this.readonlySource, this.tempVolume), {
         maxBuffer: 1024 * 1024 * 8,
         timeout: request.timeoutMs
       });
@@ -194,7 +195,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
   }
 }
 
-export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false, readonlySource?: string): string[] {
+export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false, readonlySource?: string, tempVolume?: string): string[] {
   const hostUser = dockerHostUser();
   return [
     "run",
@@ -220,6 +221,7 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "--read-only",
     "--tmpfs",
     "/tmp:rw,nosuid,size=256m",
+    ...(tempVolume ? ["--mount", `type=volume,src=${tempVolume},dst=/runforge-tmp`] : ["--tmpfs", "/runforge-tmp:rw,nosuid,nodev,size=512m,mode=1777"]),
     "--env",
     "HOME=/tmp",
     "--env",
@@ -230,7 +232,6 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "TMPDIR=/runforge-tmp",
     "--mount",
     `type=bind,src=${request.cwd},dst=/workspace${writableWorkspace ? "" : ",readonly"}`,
-    ...(writableWorkspace ? ["--mount", `type=bind,src=${request.cwd}/.runforge-tmp,dst=/runforge-tmp`] : []),
     ...(readonlySource ? ["--mount", `type=bind,src=${readonlySource},dst=/source/node_modules,readonly`] : []),
     "--workdir",
     "/workspace",

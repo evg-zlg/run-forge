@@ -13,6 +13,7 @@ import {
 import { inspectProject, type ProjectInspection } from "./project-inspection.js";
 import { runImplementationExecutor, type ImplementationExecutorResult } from "../implementation/executor.js";
 import { runValidationOnlyExecutor, type ValidationOnlyExecutorResult } from "../validation/validation-only-executor.js";
+import { withDockerValidationTempVolume } from "../run/docker-validation-temp-volume.js";
 import { completeExecutionPhase, EXECUTION_PHASE_IDS, negotiateExecutionAgreement, type ExecutionAgreement } from "./execution-agreement.js";
 import { buildAgreementAwareTaskResult, completionStatusForAgreement, type NormalizedHandoffInput, type ResultNextAction } from "./task-result-contract.js";
 import {
@@ -52,12 +53,16 @@ export async function runTaskSpecFile(path: string, context: { signal?: AbortSig
   if (spec.repair.mode === "none") {
     if (spec.execution.mode === "validation") {
       const agreement = context.executionAgreement ?? validationExecutionAgreement(spec);
-      const result = await preserveSpecOnFailure(spec, initialTarget, () => runValidationOnlyExecutor({
-        spec, executionAgreement: agreement, ...(context.signal ? { signal: context.signal } : {}), ...(context.onProgress ? { onProgress: context.onProgress } : {}),
-      }));
-      await writeNormalizedSpec(spec);
-      await finalizeCapabilityAwareValidationArtifacts(spec, result, context.executionId !== undefined);
-      return { kind: "validation", spec, result, summary: `TaskSpec ${spec.taskId}: ${result.status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: result.status === "completed" };
+      const execute = async (tempVolume?: string): Promise<TaskSpecExecution> => {
+        const result = await preserveSpecOnFailure(spec, initialTarget, () => runValidationOnlyExecutor({
+          spec, executionAgreement: agreement, ...(tempVolume ? { tempVolume } : {}), ...(context.signal ? { signal: context.signal } : {}), ...(context.onProgress ? { onProgress: context.onProgress } : {}),
+        }));
+        await writeNormalizedSpec(spec);
+        await finalizeCapabilityAwareValidationArtifacts(spec, result, context.executionId !== undefined);
+        return { kind: "validation", spec, result, summary: `TaskSpec ${spec.taskId}: ${result.status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: result.status === "completed" };
+      };
+      const volumeScope = context.executionId ? `${spec.taskId}-${context.executionId}` : spec.taskId;
+      return spec.runtime.preference === "docker" ? withDockerValidationTempVolume(volumeScope, execute) : execute();
     }
     const result = await preserveSpecOnFailure(spec, initialTarget, () => runTaskRunHarness({
       taskId: spec.taskId,

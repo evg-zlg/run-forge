@@ -44,6 +44,10 @@ describe("validation-only multi-lane execution", () => {
     const dockerLog = join(root, "docker.log"); const docker = join(bin, "docker");
     await writeFile(docker, `#!/bin/sh
 printf '%s\\n' "$*" >> "${dockerLog}"
+if test "$1" = "volume"; then
+  test "$2" != "rm" || test -f "${artifacts}/results.json" || exit 93
+  exit 0
+fi
 workspace=""; dependencies=""; last=""
 for argument in "$@"; do
   case "$argument" in
@@ -69,7 +73,11 @@ printf 'package validation executed\\n'
     const previousPath = process.env.PATH; process.env.PATH = `${bin}:${previousPath ?? ""}`;
     try {
       const execution = await runTaskSpecFile(specPath);
-      expect(await readFile(dockerLog, "utf8")).toContain("/source/node_modules,dst=/source/node_modules,readonly");
+      const dockerLifecycle = await readFile(dockerLog, "utf8");
+      expect(dockerLifecycle).toContain("volume create --driver local --opt type=tmpfs");
+      expect(dockerLifecycle).toContain("type=volume,src=runforge-validation-tmp-validation-dependency-capability-1-");
+      expect(dockerLifecycle.trim().split("\n").at(-1)).toMatch(/^volume rm -f runforge-validation-tmp-validation-dependency-capability-1-[a-f0-9]{16}$/);
+      expect(dockerLifecycle).toContain("/source/node_modules,dst=/source/node_modules,readonly");
       expect(execution).toMatchObject({ kind: "validation", success: true, result: { validationAggregate: "passed", source: { unchanged: true } } });
       const result = JSON.parse(await readFile(join(artifacts, "results.json"), "utf8"));
       expect(result.validationPlan.commands).toEqual([
@@ -80,7 +88,7 @@ printf 'package validation executed\\n'
       ]);
       if (!("productWorkspace" in execution.result)) throw new Error("Expected the capability-aware validation-only executor result.");
       expect(await readlink(join(execution.result.productWorkspace, "node_modules"))).toBe("/source/node_modules");
-      expect(await readFile(dockerLog, "utf8")).toContain("corepack pnpm test");
+      expect(dockerLifecycle).toContain("corepack pnpm test");
       expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim()).toBe(head);
       expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim()).toBe("");
     } finally { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; }
@@ -98,6 +106,7 @@ printf 'package validation executed\\n'
     const dockerLog = join(root, "docker.log"); const docker = join(bin, "docker");
     await writeFile(docker, `#!/bin/sh
 printf '%s\\n' "$*" >> "${dockerLog}"
+test "$1" = "volume" && exit 0
 workspace=""; last=""
 for argument in "$@"; do case "$argument" in type=bind,src=*,dst=/workspace*) workspace="\${argument#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace*}" ;; esac; last="$argument"; done
 (cd "$workspace" && /bin/sh -lc "$last")
