@@ -1,7 +1,8 @@
-import { access, mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it } from "vitest";
+import { withDockerValidationTempVolume } from "../../src/run/docker-validation-temp-volume.js";
 import { createExecutorRequest, dockerRunArgs, LocalShellExecutor } from "../../src/run/task-run-executor.js";
 import { prepareUnpreparedExternalWorkspace } from "../../src/run/task-run-workspace.js";
 
@@ -62,13 +63,41 @@ describe("DockerShellExecutor policy", () => {
     });
 
     const args = dockerRunArgs(request, "runforge:local", "runforge-test", true);
-    const validationTmpfs = "/runforge-tmp:rw,nosuid,nodev,noexec,size=512m,mode=1777";
+    const validationTmpfs = "/runforge-tmp:rw,nosuid,nodev,size=512m,mode=1777";
 
     expect(args).toEqual(expect.arrayContaining(["--network", "none", "--cpus", "4", "--user", `${process.getuid?.() ?? 65_534}:${process.getgid?.() ?? 65_534}`, "--read-only", "--memory", "2g", "HOME=/tmp", "COREPACK_HOME=/workspace/.runforge-corepack", "TMPDIR=/runforge-tmp"]));
     expect(args[args.indexOf(validationTmpfs) - 1]).toBe("--tmpfs");
     expect(args).not.toContain(`type=bind,src=${root}/.runforge-tmp,dst=/runforge-tmp`);
     expect(args.filter((item) => item.startsWith("type=bind"))).not.toEqual(expect.arrayContaining([expect.stringContaining("dst=/runforge-tmp")]));
     expect(args.find((item) => item.startsWith("type=bind"))).not.toContain("readonly");
+  });
+
+  it("shares a bounded validation volume and removes it when evidence finalization fails", async () => {
+    const root = await tempRoot();
+    const bin = join(root, "bin");
+    const log = join(root, "docker.log");
+    await mkdir(bin);
+    await writeFile(join(bin, "docker"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\n`);
+    await chmod(join(bin, "docker"), 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${bin}:${previousPath ?? ""}`;
+    try {
+      await expect(withDockerValidationTempVolume("VALIDATION Run/1", async (volume) => {
+        expect(volume).toMatch(/^runforge-validation-tmp-validation-run-1-[a-f0-9]{16}$/);
+        const request = createExecutorRequest({ runId: "RUN", subtaskId: "one", command: "true", cwd: root, artifactDir: join(root, "artifacts") });
+        const first = dockerRunArgs(request, "runforge:test", "one", true, undefined, volume);
+        const second = dockerRunArgs(request, "runforge:test", "two", true, undefined, volume);
+        expect(first).toContain(`type=volume,src=${volume},dst=/runforge-tmp`);
+        expect(second).toContain(`type=volume,src=${volume},dst=/runforge-tmp`);
+        expect(first.join(" ")).not.toContain("noexec");
+        throw new Error("evidence finalization failed");
+      })).rejects.toThrow("evidence finalization failed");
+      const lifecycle = await readFile(log, "utf8");
+      expect(lifecycle).toContain(`volume create --driver local --opt type=tmpfs --opt device=tmpfs --opt o=size=536870912,mode=1777,uid=${process.getuid?.() ?? 65_534},gid=${process.getgid?.() ?? 65_534},nosuid,nodev runforge-validation-tmp-validation-run-1-`);
+      expect(lifecycle).toMatch(/volume rm -f runforge-validation-tmp-validation-run-1-[a-f0-9]{16}/);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+    }
   });
 
   it("preserves no-preparation triage with a node_modules-only read-only mount", async () => {

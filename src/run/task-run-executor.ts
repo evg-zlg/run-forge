@@ -126,7 +126,8 @@ export class DockerShellExecutor implements TaskRunExecutor {
     private readonly repoRoot: string,
     private readonly image: string,
     private readonly writableWorkspace = false,
-    private readonly readonlySource?: string
+    private readonly readonlySource?: string,
+    private readonly tempVolume?: string
   ) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
@@ -140,7 +141,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
     let timedOut = false;
 
     try {
-      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace, this.readonlySource), {
+      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace, this.readonlySource, this.tempVolume), {
         maxBuffer: 1024 * 1024 * 8,
         timeout: request.timeoutMs
       });
@@ -194,7 +195,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
   }
 }
 
-export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false, readonlySource?: string): string[] {
+export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false, readonlySource?: string, tempVolume?: string): string[] {
   const hostUser = dockerHostUser();
   return [
     "run",
@@ -220,8 +221,7 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "--read-only",
     "--tmpfs",
     "/tmp:rw,nosuid,size=256m",
-    "--tmpfs",
-    "/runforge-tmp:rw,nosuid,nodev,noexec,size=512m,mode=1777",
+    ...(tempVolume ? ["--mount", `type=volume,src=${tempVolume},dst=/runforge-tmp`] : ["--tmpfs", "/runforge-tmp:rw,nosuid,nodev,size=512m,mode=1777"]),
     "--env",
     "HOME=/tmp",
     "--env",

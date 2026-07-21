@@ -38,6 +38,7 @@ export async function runValidationOnlyExecutor(input: {
   spec: TaskSpecV2;
   executionAgreement: ExecutionAgreement;
   signal?: AbortSignal;
+  tempVolume?: string;
   onProgress?: (phase: string, detail: string) => void | Promise<void>;
 }): Promise<ValidationOnlyExecutorResult> {
   const { spec } = input;
@@ -108,7 +109,7 @@ export async function runValidationOnlyExecutor(input: {
   await input.onProgress?.("validate", `Executing ${validationPlan.commands.filter((entry) => entry.disposition === "execute").length} supported validation command(s) across negotiated lanes.`);
 
   const docker = spec.runtime.preference === "docker"
-    ? new DockerShellExecutor(process.cwd(), spec.runtime.dockerImage, true, preparation === null && sourceDependencies ? join(spec.target.repository, spec.target.workingDirectory, "node_modules") : undefined)
+    ? new DockerShellExecutor(process.cwd(), spec.runtime.dockerImage, true, preparation === null && sourceDependencies ? join(spec.target.repository, spec.target.workingDirectory, "node_modules") : undefined, input.tempVolume)
     : null;
   const validationResults: CommandDiagnostic[] = [];
   for (const [index, entry] of validationPlan.commands.entries()) {
