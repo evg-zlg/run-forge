@@ -12,8 +12,8 @@ const exec = promisify(execFile);
 
 function delegatedReviewFailure(): Record<string, unknown> {
   const reason = "Semantic reviewer invocation was unavailable: openrouter_max_calls_exceeded";
-  const semanticReview = { kind: "semantic", status: "unavailable", performed: false, limitations: [reason], findings: [], delegation: { party: "external_session", reason, exactAction: "Perform an independent semantic review in the delegated session and attach structured findings to this handoff." } };
-  return { status: "completed", workflow: { status: "failed", validationAggregate: "completed_with_validation_gaps", handoff: { semanticReview } }, implementation: { status: "implemented_and_validated" }, validationAggregate: "completed_with_validation_gaps", review: { semantic: semanticReview }, usage: { totalTokens: 200, costUsd: .01 } };
+  const semanticReview = { kind: "semantic", status: "unavailable", performed: false, selectedReviewer: { provider: "openrouter", model: "qwen/qwen3-coder-next" }, reviewer: { provider: null, model: null, invocationId: null }, confidence: "unknown", limitations: [reason], findings: [], evidence: [], delegation: { party: "external_session", reason, exactAction: "Perform an independent semantic review in the delegated session and attach structured findings to this handoff." } };
+  return { status: "completed", actualExecutorMode: "implementation", workflow: { status: "failed", implementationCompleted: true, validationCompleted: true, validationAggregate: "completed_with_validation_gaps", budgetExceeded: false, publicationBlocked: true, ownerDecisionRequired: false, handoff: { semanticReview } }, implementation: { status: "implemented_and_validated" }, validationAggregate: "completed_with_validation_gaps", review: { semantic: structuredClone(semanticReview) }, ownerGate: { required: false, status: "not_required" }, publication: { status: "on_hold", performed: false }, usage: { totalTokens: 200, costUsd: .01 } };
 }
 
 function addRequiredValidationSink(plan: ReturnType<typeof planCampaignFromGoal>, implementationId = "implementation"): void {

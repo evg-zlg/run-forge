@@ -1,3 +1,4 @@
+import { isDeepStrictEqual } from "node:util";
 import type { CampaignPlannerEvidence } from "../run/semantic-campaign-planner.js";
 import { ControlPlaneError, type CampaignPlan, type CampaignRecord } from "./contracts.js";
 import { boundPublicResult } from "./manager-results.js";
@@ -54,14 +55,22 @@ function authenticatedDelegatedReviewFailure(result: Record<string, any>, workfl
   const reason = "Semantic reviewer invocation was unavailable: openrouter_max_calls_exceeded";
   const exactAction = "Perform an independent semantic review in the delegated session and attach structured findings to this handoff.";
   const matches = (value: unknown): boolean => {
-    const review = object(value), delegation = object(review.delegation);
-    return review.status === "unavailable" && review.performed === false && delegation.party === "external_session" && delegation.reason === reason && delegation.exactAction === exactAction
-      && Array.isArray(review.limitations) && review.limitations.includes(reason) && Array.isArray(review.findings) && review.findings.length === 0;
+    const review = object(value), delegation = object(review.delegation), selectedReviewer = object(review.selectedReviewer), reviewer = object(review.reviewer);
+    return Object.keys(review).sort().join(",") === "confidence,delegation,evidence,findings,kind,limitations,performed,reviewer,selectedReviewer,status"
+      && review.kind === "semantic" && review.status === "unavailable" && review.performed === false && review.confidence === "unknown"
+      && selectedReviewer.provider === "openrouter" && typeof selectedReviewer.model === "string" && selectedReviewer.model.trim().length > 0
+      && reviewer.provider === null && reviewer.model === null && reviewer.invocationId === null
+      && delegation.party === "external_session" && delegation.reason === reason && delegation.exactAction === exactAction
+      && Array.isArray(review.limitations) && review.limitations.length === 1 && review.limitations[0] === reason
+      && Array.isArray(review.findings) && review.findings.length === 0 && Array.isArray(review.evidence) && review.evidence.length === 0;
   };
   const rootReview = object(result.review).semantic, handoffReview = object(object(workflow.handoff).semanticReview);
   return status === "completed" && workflowStatus === "failed" && implementationStatus === "implemented_and_validated"
     && ["passed", "completed_with_validation_gaps"].includes(validationAggregate) && workflow.validationAggregate === validationAggregate
-    && matches(rootReview) && matches(handoffReview);
+    && result.actualExecutorMode === "implementation" && workflow.implementationCompleted === true && workflow.validationCompleted === true
+    && workflow.ownerDecisionRequired === false && object(workflow.ownerGate).required !== true && workflow.budgetExceeded === false && object(result.budget).exceeded !== true && result.workflowCompleted !== false && workflow.workflowCompleted !== false
+    && object(result.ownerGate).required === false && object(result.publication).status === "on_hold" && object(result.publication).performed === false && workflow.publicationBlocked === true
+    && matches(rootReview) && matches(handoffReview) && isDeepStrictEqual(rootReview, handoffReview);
 }
 export function usageFromEvidence(value: Record<string, unknown> | CampaignPlannerEvidence | null): { tokens: number; costUsd: number } { const usage = value && typeof value.usage === "object" && value.usage !== null ? value.usage as Record<string, unknown> : {}; return { tokens: typeof usage.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : 0, costUsd: typeof usage.costUsd === "number" && Number.isFinite(usage.costUsd) ? usage.costUsd : 0 }; }
 export function reservedUsage(campaign: CampaignRecord): { tokens: number; costUsd: number } { const persisted = object(campaign.reserved), tokens = finiteNumber(persisted.tokens), costUsd = finiteNumber(persisted.costUsd); if (tokens !== null && costUsd !== null) return { tokens: Math.max(0, tokens), costUsd: Math.max(0, costUsd) }; return Object.values(campaign.children).reduce((total, child) => ({ tokens: total.tokens + Math.max(0, finiteNumber(child.reservedTokens) ?? 0), costUsd: total.costUsd + Math.max(0, finiteNumber(child.reservedCostUsd) ?? 0) }), { tokens: 0, costUsd: 0 }); }
