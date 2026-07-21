@@ -185,8 +185,11 @@ export class CampaignCoordinator {
     const taskSpec = structuredClone(source), target = object(taskSpec.target), task = object(taskSpec.task);
     if (campaign.integration) {
       taskSpec.target = { ...target, repository: campaign.integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: campaign.integration.headSha };
-      const routing = object(taskSpec.providerRouting), tokenBudget = object(routing.tokenBudget), total = finiteNumber(tokenBudget.total) ?? finiteNumber(object(taskSpec.execution).maxProviderTokens) ?? 1_000, implementer = Math.max(1_000, Math.floor(total * .9));
-      taskSpec.providerRouting = { ...routing, maxCalls: 2, tokenBudget: { ...tokenBudget, total, perPhase: { planner: 0, implementer, repair: Math.max(0, total - implementer), reviewer: 0 } } };
+      const routing = object(taskSpec.providerRouting), tokenBudget = object(routing.tokenBudget), execution = object(taskSpec.execution), implementation = execution.mode === "implementation";
+      const configuredTotal = finiteNumber(tokenBudget.total) ?? finiteNumber(execution.maxProviderTokens) ?? 1_000;
+      const total = implementation ? Math.max(30_000, configuredTotal) : configuredTotal;
+      taskSpec.execution = implementation ? { ...execution, maxRepairIterations: 0, maxProviderTokens: total } : execution;
+      taskSpec.providerRouting = { ...routing, maxCalls: implementation ? 1 : routing.maxCalls, tokenBudget: { ...tokenBudget, total, perPhase: implementation ? { planner: 0, implementer: total, repair: 0, reviewer: 0 } : object(tokenBudget.perPhase) } };
     }
     if (repair) { taskSpec.taskId = `${campaign.id.slice(0, 48)}_${repair.nodeId.slice(0, 18)}_${repair.kind}${repair.attempt}`; taskSpec.task = { ...task, text: `Re-implement this bounded node against the current integrated campaign head after ${repair.code}. ${String(task.text ?? "")}` }; }
     return taskSpec;

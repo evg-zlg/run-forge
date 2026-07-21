@@ -21,7 +21,14 @@ describe("control plane campaign branch integration", () => {
       const manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize();
       const tasks = new Map<string, any>();
       (manager as any).planCampaign = async (record: any) => { const plan = planCampaignFromGoal(record.id, record.spec); plan.nodes = [plan.nodes[0]!]; plan.nodes[0]!.id = "implementation"; plan.nodes[0]!.dependsOn = []; plan.nodes[0]!.estimatedTokens = 2_000; plan.nodes[0]!.estimatedCostUsd = .1; (plan.nodes[0]!.taskSpec as any).discovery.explicitFiles = ["src/new.ts"]; plan.estimatedTokens = 2_000; plan.estimatedCostUsd = .1; return { plan, evidence: { mode: "semantic-openrouter", model: "test", attempts: 1, repaired: false, usage: { tokens: 100, costUsd: .001 }, validationCodes: [] } }; };
-      (manager as any).createTask = async (input: any) => { expect(input.taskSpec.providerRouting.tokenBudget.perPhase.planner).toBe(0); const task = { id: input.taskSpec.taskId, status: "completed", error: null, artifactRoot: artifacts }; tasks.set(task.id, task); return task; };
+      (manager as any).createTask = async (input: any) => {
+        expect(input.taskSpec.providerRouting.tokenBudget.perPhase).toMatchObject({ planner: 0, repair: 0, reviewer: 0 });
+        expect(input.taskSpec.providerRouting.tokenBudget.perPhase.implementer).toBeGreaterThanOrEqual(30_000);
+        expect(input.taskSpec.execution.maxRepairIterations).toBe(0);
+        const task = { id: input.taskSpec.taskId, status: "completed", error: null, artifactRoot: artifacts };
+        tasks.set(task.id, task);
+        return task;
+      };
       (manager as any).getTask = async (id: string) => tasks.get(id);
       (manager as any).getResult = async () => ({ usage: { totalTokens: 200, costUsd: .01 }, implementation: { status: "completed" } });
       const campaign = await manager.createCampaign({ goal: "Add a small source file and verify it", target: { repository: repo, workingDirectory: ".", expectedSha: baseSha }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" }, limits: { maxTokens: 10_000, maxCostUsd: 1, maxTasks: 2, maxConcurrency: 1 } });
