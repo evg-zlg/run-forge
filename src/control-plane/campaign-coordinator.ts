@@ -6,6 +6,7 @@ import { SemanticCampaignPlannerError, type CampaignPlannerEvidence, type Semant
 import { boundPublicResult } from "./manager-results.js";
 import { ControlPlaneError, type CampaignPlan, type CampaignRecord, type CampaignSpec, type ControlTaskRecord } from "./contracts.js";
 import { CampaignIntegration, CampaignIntegrationError } from "./campaign-integration.js";
+import { accountCampaignChildUsage, aggregateCampaignUsage as aggregateUsageFromValue, campaignChildCompletion, childReservationTokens, deterministicPlannerEvidence, failedPlannerEvidence, finiteNumber, object, reconcileCampaignResult, releaseCampaignReservation, reserveCampaignChild, reservedUsage, taskIdFromSpec, usageFromEvidence } from "./campaign-coordinator-state.js";
 
 type Deps = {
   root: string;
@@ -33,9 +34,7 @@ export class CampaignCoordinator {
     const now = new Date().toISOString();
     const id = `cmp_v1_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
     const record: CampaignRecord = { schemaVersion: 1, id, status: "planning", spec, plan: null, plannerEvidence: null, integration: null, children: {}, usage: { tokens: 0, costUsd: 0, tasks: 0 }, reserved: { tokens: 0, costUsd: 0 }, checkpoints: [], failures: [], result: null, createdAt: now, updatedAt: now };
-    // Do not treat a generic Git integrity check as full product validation.
-    // Contract discovery belongs to the caller/doctor/profile layer, not this
-    // semantic planner, so an implementation campaign waits for that evidence.
+    // Generic Git integrity is not a complete project validation contract.
     if (spec.authority.implementation && !spec.validationContract?.requiredCommands.length) {
       record.status = "on_hold";
       record.failures.push({ at: now, reason: "campaign_validation_contract_unknown" });
@@ -138,7 +137,7 @@ export class CampaignCoordinator {
             return this.finishCampaign(campaign, "on_hold");
           }
           if (!child.accounted) {
-            this.accountChildUsage(campaign, child, result);
+            accountCampaignChildUsage(campaign, child, result);
             const integrationStatus = await this.integrateCompletedChild(campaign, child, task);
             if (integrationStatus === "repair_started") continue;
             if (integrationStatus === "failed") { campaign.status = "failed"; continue; }
@@ -147,7 +146,7 @@ export class CampaignCoordinator {
           child.finishedAt = new Date().toISOString();
         } else if (["failed", "interrupted", "awaiting_owner_decision"].includes(task.status)) {
           progressed = true;
-          if (!child.accounted) { const result = await this.deps.getResult(child.taskId).catch(() => ({})); this.accountChildUsage(campaign, child, result); }
+          if (!child.accounted) { const result = await this.deps.getResult(child.taskId).catch(() => ({})); accountCampaignChildUsage(campaign, child, result); }
           if (await this.retryFailedChild(campaign, child, task.error ?? "CHILD_EXECUTION_FAILED")) continue;
           child.status = "failed"; child.finishedAt = new Date().toISOString(); child.error = task.error ?? "child_failed"; campaign.status = "failed"; campaign.failures.push({ at: child.finishedAt, nodeId: child.nodeId, taskId: child.taskId, reason: child.error });
         } else child.status = "running";
@@ -173,10 +172,8 @@ export class CampaignCoordinator {
             return this.finishCampaign(campaign, "failed");
           }
           const child = campaign.children[node.id]!;
-          this.reserveChild(campaign, child, node);
-          // A reservation is intentionally on disk before dispatch.  If the
-          // process dies after this write, initialize() reconciles taskId
-          // rather than spending the same budget on another node.
+          reserveCampaignChild(campaign, child, node, taskIdFromSpec(this.taskSpecForNode(campaign, node)));
+          // Persist before dispatch so restart reconciliation cannot spend this budget twice.
           await this.saveCampaign(campaign);
           await this.dispatchReservedChild(campaign, child, node, this.taskSpecForNode(campaign, node));
           progressed = true;
@@ -208,49 +205,7 @@ export class CampaignCoordinator {
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
   }
-  private reserveChild(campaign: CampaignRecord, child: CampaignRecord["children"][string], node: CampaignPlan["nodes"][number], taskSpec?: Record<string, unknown>): void {
-    const tokens = Math.max(0, finiteNumber(node.estimatedTokens) ?? 0);
-    const costUsd = Math.max(0, finiteNumber(node.estimatedCostUsd) ?? 0);
-    const id = taskIdFromSpec(taskSpec ?? this.taskSpecForNode(campaign, node));
-    if (!id) throw new ControlPlaneError(422, "invalid_campaign", `Campaign node '${node.id}' has no deterministic taskSpec.taskId.`);
-    // The caller only reserves a pending child.  Keeping this assertion local
-    // makes duplicate scheduling a correctness error instead of a silent
-    // second provider invocation.
-    if (child.status !== "pending") throw new ControlPlaneError(409, "campaign_child_not_pending", `Campaign child '${node.id}' is already ${child.status}.`);
-    child.taskId = id;
-    child.status = "dispatching";
-    child.startedAt = new Date().toISOString();
-    child.finishedAt = null;
-    child.error = null;
-    child.reservedTokens = tokens;
-    child.reservedCostUsd = costUsd;
-    campaign.reserved = reservedUsage(campaign);
-    campaign.reserved.tokens += tokens;
-    campaign.reserved.costUsd += costUsd;
-  }
-  private releaseReservation(campaign: CampaignRecord, child: CampaignRecord["children"][string]): void {
-    const tokens = Math.max(0, finiteNumber(child.reservedTokens) ?? 0);
-    const costUsd = Math.max(0, finiteNumber(child.reservedCostUsd) ?? 0);
-    campaign.reserved = reservedUsage(campaign);
-    campaign.reserved.tokens = Math.max(0, campaign.reserved.tokens - tokens);
-    campaign.reserved.costUsd = Math.max(0, campaign.reserved.costUsd - costUsd);
-    child.reservedTokens = 0;
-    child.reservedCostUsd = 0;
-  }
-  private accountChildUsage(campaign: CampaignRecord, child: CampaignRecord["children"][string], result: Record<string, unknown>): void {
-    const usage = aggregateUsageFromValue(result);
-    campaign.usage.tokens += usage.tokens;
-    campaign.usage.costUsd += usage.costUsd;
-    campaign.usage.tasks += 1;
-    child.evidence = boundPublicResult(result).result;
-    child.accounted = true;
-    this.releaseReservation(campaign, child);
-  }
-  /**
-   * Reconcile before creation because ControlPlaneManager's TaskSpec taskId is
-   * durable.  This makes the persisted `dispatching` state crash-safe: an
-   * already-created child is adopted, not recreated.
-   */
+  /** Adopt a durable TaskSpec taskId before creating a replacement after restart. */
   private async dispatchReservedChild(campaign: CampaignRecord, child: CampaignRecord["children"][string], node: CampaignPlan["nodes"][number], taskSpec: Record<string, unknown>): Promise<void> {
     const expectedId = child.taskId ?? taskIdFromSpec(taskSpec);
     if (!expectedId) throw new ControlPlaneError(422, "invalid_campaign", `Campaign node '${node.id}' has no deterministic task id.`);
@@ -259,8 +214,7 @@ export class CampaignCoordinator {
       child.status = task.status === "queued" ? "queued" : "running";
       child.startedAt ??= new Date().toISOString();
       campaign.updatedAt = new Date().toISOString();
-      // Persist immediately after the external side effect.  A crash after
-      // createTask but before the ordinary loop save is therefore harmless.
+      // Persist immediately after the external createTask side effect.
       await this.saveCampaign(campaign);
     };
     const existing = await this.deps.getTask(expectedId).catch(() => null);
@@ -269,11 +223,10 @@ export class CampaignCoordinator {
     try {
       created = await this.deps.createTask({ ...this.taskProjectBinding(campaign), taskSpec, authority: campaign.spec.authority, publicationRequested: "none" });
     } catch (error) {
-      // A competing/resumed coordinator may have created the deterministic id
-      // between the reconciliation read and createTask's uniqueness check.
+      // Reconcile a deterministic id created concurrently after our first read.
       const raced = await this.deps.getTask(expectedId).catch(() => null);
       if (raced) return bind(raced);
-      this.releaseReservation(campaign, child);
+      releaseCampaignReservation(campaign, child);
       child.taskId = null;
       child.status = "pending";
       child.startedAt = null;
@@ -284,7 +237,7 @@ export class CampaignCoordinator {
     await bind(created);
   }
   private async failReservedChild(campaign: CampaignRecord, child: CampaignRecord["children"][string], reason: string): Promise<void> {
-    this.releaseReservation(campaign, child);
+    releaseCampaignReservation(campaign, child);
     child.status = "failed";
     child.finishedAt = new Date().toISOString();
     child.error = reason;
@@ -300,9 +253,7 @@ export class CampaignCoordinator {
   private taskSpecForNode(campaign: CampaignRecord, node: CampaignPlan["nodes"][number], repair?: { nodeId: string; attempt: number; code: string; kind: "ir" | "er" }): Record<string, unknown> {
     const source = node.taskSpec;
     const taskSpec = structuredClone(source), target = object(taskSpec.target), task = object(taskSpec.task);
-    // Keep the planner's write boundary as executable data, distinct from read
-    // context.  The OpenRouter executor checks it before applying a provider
-    // patch even to its disposable child worktree.
+    // Keep the planner write boundary executable and distinct from read context.
     const discovery = object(taskSpec.discovery);
     taskSpec.discovery = { ...discovery, writeScopes: [...(node.writeScopes ?? [])] };
     const integration = campaign.integration;
@@ -310,20 +261,14 @@ export class CampaignCoordinator {
       taskSpec.target = { ...target, repository: integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: integration.headSha };
       const routing = object(taskSpec.providerRouting), tokenBudget = object(routing.tokenBudget), execution = object(taskSpec.execution), implementation = execution.mode === "implementation";
       const configuredTotal = finiteNumber(tokenBudget.total) ?? finiteNumber(execution.maxProviderTokens) ?? 1_000;
-      // A node estimate is a reservation, not a hint: never turn a small
-      // campaign node into an unbounded provider request.  The live campaign
-      // remainder also protects resumed/repaired children after prior usage.
+      // A node estimate is a hard reservation bounded by the live campaign remainder.
       const nodeReservation = finiteNumber(node.estimatedTokens) ?? configuredTotal;
-      // Include this node's own durable reservation.  A reservation protects
-      // peers, but must not reduce the already-authorized child to zero.
+      // Protect peers without subtracting this child's own authorized reservation.
       const campaignRemaining = Math.max(0, campaign.spec.limits.maxTokens - campaign.usage.tokens - reservedUsage(campaign).tokens + childReservationTokens(campaign, node.id));
       const total = Math.min(configuredTotal, nodeReservation, campaignRemaining);
       taskSpec.execution = implementation ? { ...execution, maxRepairIterations: 0, maxProviderTokens: total } : execution;
       taskSpec.providerRouting = { ...routing, maxCalls: implementation ? 1 : routing.maxCalls, tokenBudget: { ...tokenBudget, total, perPhase: implementation ? { planner: 0, implementer: total, repair: 0, reviewer: 0 } : object(tokenBudget.perPhase) } };
-      // The final TaskSpec must be SHA-bound to the current integrated head,
-      // while its Git integrity evidence must cover the whole campaign delta.
-      // The semantic planner emits a non-executable marker because only the
-      // coordinator knows the isolated worktree's immutable base SHA.
+      // Bind final validation to the integrated head and immutable campaign base.
       const validation = object(taskSpec.validation);
       if (typeof validation.mode === "string" && Array.isArray(validation.commands)) {
         const replaceBase = (value: unknown): unknown => typeof value === "string" ? value.replaceAll("__CAMPAIGN_BASE__", integration.baseSha) : value;
@@ -347,9 +292,7 @@ export class CampaignCoordinator {
     const patchPath = join(task.artifactRoot, "implementation.patch");
     const execution = object(node.taskSpec.execution);
     if (!await lstat(patchPath).catch(() => null)) {
-      // Inspection/validation nodes legitimately have no patch.  An
-      // implementation child, however, must produce the integration artifact;
-      // accepting it would falsely report a successful campaign change.
+      // Only implementation children must produce an integration patch.
       return execution.mode === "implementation" ? this.integrationFailure(campaign, child, "IMPLEMENTATION_PATCH_MISSING") : "complete";
     }
     const discovery = object(node.taskSpec.discovery), allowedScopes = node.writeScopes ?? (Array.isArray(discovery.explicitFiles) ? discovery.explicitFiles.filter((item): item is string => typeof item === "string") : []);
@@ -369,7 +312,7 @@ export class CampaignCoordinator {
       const repairSpec = this.taskSpecForNode(campaign, node, { nodeId: node.id, attempt, code, kind: "ir" });
       child.status = "pending"; child.taskId = null; child.accounted = false; child.integrationRepairAttempts = attempt; child.finishedAt = null; child.error = null;
       try {
-        this.reserveChild(campaign, child, node, repairSpec);
+        reserveCampaignChild(campaign, child, node, taskIdFromSpec(repairSpec));
         await this.saveCampaign(campaign);
         await this.dispatchReservedChild(campaign, child, node, repairSpec);
       } catch {
@@ -386,13 +329,13 @@ export class CampaignCoordinator {
     const retrySpec = this.taskSpecForNode(campaign, node, { nodeId: node.id, attempt, code, kind: "er" });
     child.status = "pending"; child.taskId = null; child.accounted = false; child.executionRetryAttempts = attempt; child.finishedAt = null; child.error = null;
     try {
-      this.reserveChild(campaign, child, node, retrySpec);
+      reserveCampaignChild(campaign, child, node, taskIdFromSpec(retrySpec));
       await this.saveCampaign(campaign);
       await this.dispatchReservedChild(campaign, child, node, retrySpec);
       return true;
     } catch { return false; }
   }
-  private integrationFailure(campaign: CampaignRecord, child: CampaignRecord["children"][string], code: string): "failed" { const at = new Date().toISOString(); this.releaseReservation(campaign, child); child.status = "failed"; child.finishedAt = at; child.error = code; if (campaign.integration) { campaign.integration.status = "failed"; campaign.integration.lastError = code; } campaign.failures.push({ at, nodeId: child.nodeId, ...(child.taskId ? { taskId: child.taskId } : {}), reason: code }); return "failed"; }
+  private integrationFailure(campaign: CampaignRecord, child: CampaignRecord["children"][string], code: string): "failed" { const at = new Date().toISOString(); releaseCampaignReservation(campaign, child); child.status = "failed"; child.finishedAt = at; child.error = code; if (campaign.integration) { campaign.integration.status = "failed"; campaign.integration.lastError = code; } campaign.failures.push({ at, nodeId: child.nodeId, ...(child.taskId ? { taskId: child.taskId } : {}), reason: code }); return "failed"; }
   private campaignsDir(): string { return join(this.deps.root, "campaigns"); }
   private campaignPath(id: string): string { return join(this.campaignsDir(), `${id}.json`); }
   private async saveCampaign(campaign: CampaignRecord): Promise<void> { await mkdir(this.campaignsDir(), { recursive: true }); const destination = this.campaignPath(campaign.id); const temp = `${destination}.${process.pid}.${randomUUID()}.tmp`; await writeFile(temp, JSON.stringify(campaign, null, 2) + "\n", "utf8"); await rename(temp, destination); }
@@ -403,48 +346,4 @@ export class CampaignCoordinator {
     const entries = await Promise.all(names.map(async (name) => JSON.parse(await readFile(join(this.campaignsDir(), name), "utf8")) as CampaignRecord));
     return entries.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
   }
-}
-
-function aggregateUsageFromValue(value: unknown): { tokens: number; costUsd: number } { const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), usage = object(result.usage), calls = Array.isArray(result.providerCalls) ? result.providerCalls.map(object) : []; const totalTokens = finiteNumber(usage.totalTokens) ?? calls.reduce((sum, call) => sum + (finiteNumber(call.tokenUsage) ?? 0), 0); const costUsd = finiteNumber(usage.costUsd) ?? calls.reduce((sum, call) => sum + (finiteNumber(call.costUsd) ?? 0), 0); return { tokens: totalTokens, costUsd }; }
-function campaignChildCompletion(value: unknown): { completed: boolean; reason: string } {
-  const root = object(value), result = object(root.result && typeof root.result === "object" ? root.result : root), workflow = object(result.workflow);
-  const status = typeof result.status === "string" ? result.status : "unknown";
-  const workflowStatus = typeof workflow.status === "string" ? workflow.status : undefined;
-  const workflowCompleted = result.workflowCompleted === true || workflow.workflowCompleted === true;
-  const verdict = String(result.verdict ?? workflow.verdict ?? "").toLowerCase();
-  const next = object(result.next ?? result.nextAction ?? workflow.next ?? workflow.nextAction);
-  const nextParty = typeof next.party === "string" ? next.party : null;
-  if (["awaiting_external_session", "runforge_scope_completed", "awaiting_owner", "awaiting_owner_decision", "blocked"].includes(status) || ["awaiting_external_session", "runforge_scope_completed", "awaiting_owner", "blocked"].includes(workflowStatus ?? "")) return { completed: false, reason: `campaign_child_workflow_incomplete:${workflowStatus ?? status}` };
-  if (result.workflowCompleted === false || workflow.workflowCompleted === false) return { completed: false, reason: "campaign_child_workflow_incomplete:workflowCompleted_false" };
-  if (["failed", "blocked", "rejected", "do_not_apply"].includes(verdict)) return { completed: false, reason: `campaign_child_verdict:${verdict}` };
-  if (status === "workflow_completed" || (status === "completed" && workflowStatus === "workflow_completed") || (workflowCompleted && status === "completed")) return { completed: true, reason: "" };
-  return { completed: false, reason: `campaign_child_workflow_incomplete:${status}${nextParty ? `:${nextParty}` : ""}` };
-}
-function usageFromEvidence(value: Record<string, unknown> | CampaignPlannerEvidence | null): { tokens: number; costUsd: number } { const usage = value && typeof value.usage === "object" && value.usage !== null ? value.usage as Record<string, unknown> : {}; return { tokens: typeof usage.tokens === "number" && Number.isFinite(usage.tokens) ? usage.tokens : 0, costUsd: typeof usage.costUsd === "number" && Number.isFinite(usage.costUsd) ? usage.costUsd : 0 }; }
-function reservedUsage(campaign: CampaignRecord): { tokens: number; costUsd: number } {
-  const persisted = object(campaign.reserved);
-  const tokens = finiteNumber(persisted.tokens);
-  const costUsd = finiteNumber(persisted.costUsd);
-  // Schema-v1 campaign files predate reservations. Reconstructing their sum
-  // on read keeps a restart conservative without mutating historical usage.
-  if (tokens !== null && costUsd !== null) return { tokens: Math.max(0, tokens), costUsd: Math.max(0, costUsd) };
-  return Object.values(campaign.children).reduce((total, child) => ({ tokens: total.tokens + Math.max(0, finiteNumber(child.reservedTokens) ?? 0), costUsd: total.costUsd + Math.max(0, finiteNumber(child.reservedCostUsd) ?? 0) }), { tokens: 0, costUsd: 0 });
-}
-function childReservationTokens(campaign: CampaignRecord, nodeId: string): number { return Math.max(0, finiteNumber(campaign.children[nodeId]?.reservedTokens) ?? 0); }
-function taskIdFromSpec(taskSpec: Record<string, unknown>): string | null { const id = taskSpec.taskId; return typeof id === "string" && id.trim() ? id : null; }
-function deterministicPlannerEvidence(): CampaignPlannerEvidence { return { mode: "deterministic-local", model: null, attempts: 0, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: [] }; }
-function failedPlannerEvidence(): CampaignPlannerEvidence { return { mode: "semantic-openrouter", model: null, attempts: 0, repaired: false, usage: { tokens: 0, costUsd: 0 }, validationCodes: ["PLANNER_FAILED"] }; }
-function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
-function finiteNumber(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) ? value : null; }
-function reconcileCampaignResult(campaign: CampaignRecord): Record<string, unknown> {
-  const contract = campaign.spec.validationContract;
-  const contractKnown = Boolean(contract?.requiredCommands.length);
-  return {
-    schemaVersion: 1, campaignId: campaign.id, status: campaign.status, usage: campaign.usage, reserved: reservedUsage(campaign), failures: campaign.failures, integration: campaign.integration,
-    validation: {
-      contract: contractKnown ? { status: "known", source: contract!.source, requiredCommands: contract!.requiredCommands } : { status: "unknown", requiredCommands: [] },
-      completion: campaign.status === "completed" ? "satisfied" : !contractKnown && campaign.spec.authority.implementation ? "blocked" : "not_completed",
-    },
-    children: Object.values(campaign.children).map((child) => ({ nodeId: child.nodeId, taskId: child.taskId, status: child.status, startedAt: child.startedAt, finishedAt: child.finishedAt, error: child.error, integrationRepairAttempts: child.integrationRepairAttempts ?? 0, executionRetryAttempts: child.executionRetryAttempts ?? 0 })), evidence: Object.values(campaign.children).filter((child) => child.evidence).map((child) => ({ nodeId: child.nodeId, evidence: child.evidence }))
-  };
 }

@@ -333,16 +333,10 @@ export function parseCheckpointRepairRequest(value: unknown): { taskId: string; 
   if (!/^[a-f0-9]{64}$/.test(checkpointDigest)) throw new ControlPlaneError(400, "invalid_request", "checkpointDigest must be a lowercase SHA-256 digest.");
   return { taskId: string(input.taskId, "taskId"), decisionId: string(input.decisionId, "decisionId"), checkpointId: string(input.checkpointId, "checkpointId"), checkpointDigest, choice: choiceValue, additionalProviderTokens, repairIntent };
 }
-
 export class ControlPlaneError extends Error {
   constructor(public readonly status: number, public readonly code: string, message: string, public readonly details?: unknown, public readonly retryable = false, public readonly taskId?: string) { super(message); }
 }
-
-function asObject(value: unknown, name: string, optional = false): Record<string, unknown> {
-  if (optional && value === undefined) return {};
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new ControlPlaneError(400, "invalid_request", `${name} must be an object.`);
-  return value as Record<string, unknown>;
-}
+function asObject(value: unknown, name: string, optional = false): Record<string, unknown> { if (optional && value === undefined) return {}; if (!value || typeof value !== "object" || Array.isArray(value)) throw new ControlPlaneError(400, "invalid_request", `${name} must be an object.`); return value as Record<string, unknown>; }
 function rejectUnknown(value: Record<string, unknown>, allowed: string[], name: string): void { const keys = Object.keys(value).filter((key) => !allowed.includes(key)); if (keys.length) throw new ControlPlaneError(400, "unknown_fields", `${name} contains unknown field(s): ${keys.join(", ")}.`); }
 function string(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} must be a non-empty string.`); return value.trim(); }
 function optionalString(value: unknown, name: string): string | undefined { return value === undefined ? undefined : string(value, name); }
