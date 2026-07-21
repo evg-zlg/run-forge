@@ -29,9 +29,14 @@ describe("CampaignCoordinator reliability", () => {
   it("accepts a completed implementation result despite an external nested review, but keeps validation strict", () => {
     const implementation = { status: "completed", workflow: { status: "awaiting_external_session", workflowCompleted: false }, implementation: { status: "implemented_and_validated" } };
     expect(campaignChildCompletion(implementation, "implementation")).toEqual({ completed: true, reason: "" });
+    expect(campaignChildCompletion({ ...implementation, workflow: { status: "failed" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ ...implementation, workflow: { status: "awaiting_external_session", verdict: "rejected" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_verdict:rejected" });
     expect(campaignChildCompletion({ status: "completed", implementation: { status: "failed_with_diagnostics" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_incomplete:failed_with_diagnostics" });
+    expect(campaignChildCompletion({ status: "completed", implementation: { status: "no_change_required" } }, "implementation")).toEqual({ completed: false, reason: "campaign_child_implementation_no_change_requires_explicit_noop_contract" });
     expect(campaignChildCompletion({ status: "completed", workflow: { status: "awaiting_external_session" } }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_incomplete:awaiting_external_session" });
-    expect(campaignChildCompletion({ status: "workflow_completed" }, "validation")).toEqual({ completed: true, reason: "" });
+    expect(campaignChildCompletion({ status: "completed", workflow: { status: "workflow_completed" }, validationAggregate: "completed_with_validation_gaps" }, "validation")).toEqual({ completed: true, reason: "" });
+    expect(campaignChildCompletion({ status: "workflow_completed", workflow: { status: "failed" }, validationAggregate: "passed" }, "validation")).toEqual({ completed: false, reason: "campaign_child_workflow_fatal:failed" });
+    expect(campaignChildCompletion({ status: "workflow_completed", validationAggregate: "blocked_by_capability" }, "validation")).toEqual({ completed: false, reason: "campaign_child_validation_incomplete:blocked_by_capability" });
   });
 
   it("persists aggregate reservations and refuses to overschedule after actual usage replaces one reservation", async () => {
