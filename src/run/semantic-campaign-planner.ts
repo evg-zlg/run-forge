@@ -41,6 +41,7 @@ const draftKeys = new Set(["id", "goal", "acceptanceCriteria", "dependsOn", "exp
 const excludedPath = /(^|\/)(?:\.git|\.env(?:\..*)?|node_modules|dist|coverage|artifacts|validation\/runs|\.runforge|secrets?|credentials?)(\/|$)/i;
 const campaignBasePlaceholder = "__CAMPAIGN_BASE__";
 const minimumPlannerCompletionTokens = 1_000;
+const plannerSystemPrompt = "Return only strict JSON. Never emit TaskSpec, authority, credentials, prose, or markdown.";
 
 export async function planSemanticCampaign(campaignId: string, spec: CampaignSpec, options: Options = {}): Promise<SemanticCampaignPlannerResult> {
   if (spec.providerRouting.provider === "local") return { plan: planCampaignFromGoal(campaignId, spec), evidence: emptyEvidence("deterministic-local", null) };
@@ -61,11 +62,11 @@ export async function planSemanticCampaign(campaignId: string, spec: CampaignSpe
 
 async function invoke(chat: Chat, model: string, content: string, spec: CampaignSpec, usage: { tokens: number; costUsd: number }, attempts: number, repaired: boolean): Promise<OpenRouterExecutionResult> {
   const remaining = spec.limits.maxTokens - usage.tokens;
-  const promptTokens = Math.ceil(content.length / 4);
+  const promptTokens = Math.ceil((plannerSystemPrompt.length + content.length) / 4);
   const completionBudget = Math.min(12_000, Math.floor(spec.limits.maxTokens / 3), remaining - promptTokens);
   if (completionBudget < minimumPlannerCompletionTokens) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: attempts - 1, repaired, usage, validationCodes: ["PLANNER_TOKEN_BUDGET_EXHAUSTED"] });
   try {
-    const result = await chat({ model, messages: [{ role: "system", content: "Return only strict JSON. Never emit TaskSpec, authority, credentials, prose, or markdown." }, { role: "user", content }], timeoutMs: 300_000, maxCalls: 1, temperature: 0, maxTokens: completionBudget, reasoning: { effort: "low", exclude: true } });
+    const result = await chat({ model, messages: [{ role: "system", content: plannerSystemPrompt }, { role: "user", content }], timeoutMs: 300_000, maxCalls: 1, temperature: 0, maxTokens: completionBudget, reasoning: { effort: "low", exclude: true } });
     const consumed = result.usage.totalTokens ?? 0;
     usage.tokens += consumed;
     usage.costUsd += result.usage.costUsd ?? 0;
