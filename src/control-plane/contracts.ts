@@ -194,6 +194,7 @@ export type CampaignRecord = {
   spec: CampaignSpec;
   plan: CampaignPlan | null;
   plannerEvidence: Record<string, unknown> | null;
+  integration: null | { status: "ready" | "failed"; worktreeRoot: string; branch: string; baseSha: string; headSha: string; appliedNodes: string[]; repairAttempts: number; lastError: string | null };
   children: Record<string, {
     nodeId: string;
     dependsOn: string[];
@@ -203,6 +204,7 @@ export type CampaignRecord = {
     finishedAt: string | null;
     error: string | null;
     accounted: boolean;
+    integrationRepairAttempts: number;
     evidence?: Record<string, unknown>;
   }>;
   usage: { tokens: number; costUsd: number; tasks: number };

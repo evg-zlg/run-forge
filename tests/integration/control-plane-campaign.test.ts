@@ -138,7 +138,7 @@ describe("control plane campaign integration", () => {
     };
     (managerA as any).getTask = async (id: string) => statuses.get(id) ?? fakeTask(id, "failed");
     (managerA as any).getResult = async () => ({ usage: { totalTokens: 5, costUsd: 0.1 } });
-    const created = await managerA.createCampaign({ goal: "OpenRouter-only run", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "openrouter/auto", fallbackPolicy: "none" }, limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 } });
+    const created = await managerA.createCampaign({ goal: "OpenRouter-only run", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "openrouter/auto", fallbackPolicy: "none" }, limits: { maxTokens: 1000, maxTasks: 2, maxConcurrency: 1 } });
     const managerB = new ControlPlaneManager(new ControlPlaneStore(root));
     await managerB.initialize();
     (managerB as any).createTask = (managerA as any).createTask;

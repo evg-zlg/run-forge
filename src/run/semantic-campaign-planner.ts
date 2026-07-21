@@ -90,10 +90,11 @@ function validateDraft(content: string, spec: CampaignSpec): { nodes?: DraftNode
   if (nodes.some((node) => node.dependsOn.some((id) => !ids.has(id) || id === node.id))) codes.add("INVALID_DEPENDENCY");
   if (!codes.has("INVALID_DEPENDENCY") && detectCycle(nodes).length) codes.add("CYCLE");
   if (hasConcurrentOverlap(nodes)) codes.add("OVERLAPPING_SCOPE");
+  if (spec.authority.implementation) { const dependedOn = new Set(nodes.flatMap((node) => node.dependsOn)); const sinks = nodes.filter((node) => !dependedOn.has(node.id)); if (!sinks.some((node) => /test|valid|verif|check/i.test(`${node.goal} ${node.acceptanceCriteria.join(" ")}`))) codes.add("MISSING_FINAL_VALIDATION"); }
   const tokens = nodes.reduce((sum, node) => sum + node.estimatedTokens, 0);
   const cost = nodes.reduce((sum, node) => sum + (node.estimatedCostUsd ?? 0), 0);
-  if (tokens > spec.limits.maxTokens) codes.add("TOKEN_BUDGET_EXCEEDED");
-  if (spec.limits.maxCostUsd !== undefined && cost > spec.limits.maxCostUsd) codes.add("COST_BUDGET_EXCEEDED");
+  if (tokens > Math.floor(spec.limits.maxTokens * .8)) codes.add("CHILD_TOKEN_RESERVE_EXCEEDED");
+  if (spec.limits.maxCostUsd !== undefined && cost > spec.limits.maxCostUsd * .8) codes.add("CHILD_COST_RESERVE_EXCEEDED");
   return codes.size ? { codes: [...codes].sort() } : { nodes, codes: [] };
 }
 
@@ -125,7 +126,7 @@ async function buildRepositoryManifest(spec: CampaignSpec): Promise<Record<strin
   return { files: paths.sort(), scripts };
 }
 
-function planningPrompt(spec: CampaignSpec, manifest: unknown): string { return JSON.stringify({ goal: spec.goal, limits: spec.limits, repositoryManifest: manifest, output: { nodes: [{ id: "bounded-id", goal: "bounded goal", acceptanceCriteria: ["observable result"], dependsOn: [], explicitFiles: ["relative/path"], estimatedTokens: 4000, estimatedCostUsd: 0.01 }] }, rules: ["Return one JSON object and no prose.", "Use only manifest paths.", "Independent nodes must not share files.", "Do not include authority, TaskSpec, merge, deploy, publication, credentials, or commands."] }).slice(0, 24_000); }
+function planningPrompt(spec: CampaignSpec, manifest: unknown): string { return JSON.stringify({ goal: spec.goal, limits: spec.limits, repositoryManifest: manifest, output: { nodes: [{ id: "bounded-id", goal: "bounded goal", acceptanceCriteria: ["observable result"], dependsOn: [], explicitFiles: ["relative/path"], estimatedTokens: 4000, estimatedCostUsd: 0.01 }] }, rules: ["Return one JSON object and no prose.", "Use only manifest paths or safe new relative paths.", "Independent nodes must not share file scopes.", "Reserve at least 20% of campaign token and cost limits for planning and repairs; child estimates together must use at most 80%.", "Implementation plans must end in a dependent validation/test/check node for the integrated result.", "Do not include authority, TaskSpec, merge, deploy, publication, credentials, or commands."] }).slice(0, 24_000); }
 function repairPrompt(codes: string[], previous: string): string { return JSON.stringify({ validationCodes: codes.slice(0, 20), previousDraft: previous.slice(0, 8_000), instruction: "Return one corrected strict JSON object with nodes only; no prose." }); }
 function extractJson(text: string): string { const fenced = text.match(/```(?:json)?\s*([\s\S]*?)```/i); return (fenced?.[1] ?? text).trim(); }
 function hasConcurrentOverlap(nodes: DraftNode[]): boolean { const byId = new Map(nodes.map((node) => [node.id, node])); const reaches = (from: string, target: string, seen = new Set<string>()): boolean => from === target || (!seen.has(from) && (seen.add(from), (byId.get(from)?.dependsOn ?? []).some((dep) => reaches(dep, target, seen)))); for (let i = 0; i < nodes.length; i++) for (let j = i + 1; j < nodes.length; j++) { const a = nodes[i]!, b = nodes[j]!; if (reaches(a.id, b.id) || reaches(b.id, a.id)) continue; if (a.explicitFiles.some((left) => b.explicitFiles.some((right) => scopeOverlap(left, right)))) return true; } return false; }
