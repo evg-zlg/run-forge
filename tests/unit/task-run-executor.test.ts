@@ -164,6 +164,40 @@ describe("LocalShellExecutor", () => {
     expect(result.exitCode).toBe(7);
     expect(result.stderr).toContain("bad path");
   });
+
+  it("uses a temporary HOME and npm cache for controlled execution without forwarding the host HOME", async () => {
+    const root = await tempRoot();
+    const originalHome = process.env.HOME;
+    const originalTmpdir = process.env.TMPDIR;
+    const hostHome = "/private/runforge-host-home-must-not-leak";
+    const controlledTmpdir = join(root, "controlled-tmp");
+    process.env.HOME = hostHome;
+    process.env.TMPDIR = controlledTmpdir;
+    await mkdir(controlledTmpdir, { recursive: true });
+
+    try {
+      const executor = new LocalShellExecutor(root, true);
+      const result = await executor.execute(
+        createExecutorRequest({
+          runId: "AGENT-OS-3-TEST",
+          subtaskId: "03-controlled-home",
+          command: "node -e 'process.stdout.write(JSON.stringify({ home: process.env.HOME, cache: process.env.npm_config_cache }))'",
+          cwd: root,
+          artifactDir: join(root, "subtasks", "03-controlled-home")
+        })
+      );
+
+      expect(result.status).toBe("passed");
+      expect(JSON.parse(result.stdout)).toEqual({
+        home: controlledTmpdir,
+        cache: join(controlledTmpdir, "npm-cache")
+      });
+      expect(result.stdout).not.toContain(hostHome);
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME; else process.env.HOME = originalHome;
+      if (originalTmpdir === undefined) delete process.env.TMPDIR; else process.env.TMPDIR = originalTmpdir;
+    }
+  });
 });
 
 async function tempRoot(): Promise<string> {

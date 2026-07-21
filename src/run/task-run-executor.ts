@@ -116,7 +116,18 @@ export class LocalShellExecutor implements TaskRunExecutor {
 
 function controlledLocalEnvironment(): NodeJS.ProcessEnv {
   const allowed = ["PATH", "LANG", "LC_ALL", "TMPDIR", "SHELL", "TERM"];
-  return { ...Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]])), CI: "1", RUNFORGE_RUNTIME_NETWORK: "denied" };
+  const temporaryHome = process.env.TMPDIR || "/tmp";
+  return {
+    ...Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]])),
+    // Docker validation runs as the host UID, which is not necessarily present
+    // in the image's passwd database. npm falls back to os.homedir() when HOME
+    // is absent, so keep HOME inside the controlled temporary filesystem rather
+    // than inheriting the host home directory.
+    HOME: temporaryHome,
+    npm_config_cache: join(temporaryHome, "npm-cache"),
+    CI: "1",
+    RUNFORGE_RUNTIME_NETWORK: "denied"
+  };
 }
 
 export class DockerShellExecutor implements TaskRunExecutor {

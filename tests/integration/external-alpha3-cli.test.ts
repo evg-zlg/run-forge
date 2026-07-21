@@ -45,13 +45,47 @@ describe("external proposal-readiness CLI", () => {
     expect(await gitStatus(repo)).toEqual(before);
   });
 
-  it("maps deterministic non-ready categories conservatively", async () => {
+  it.each([
+    {
+      name: "a missing dependency as needs_more_context",
+      command: "node -e \"console.error('Local package.json exists, but node_modules missing.'); console.error('Cannot find module lodash'); process.exit(1)\"",
+      outcome: "needs_more_context",
+      category: "dependency_missing",
+      recommendedIncludes: "Install or prepare dependencies"
+    },
+    {
+      name: "a TypeScript environment error as needs_more_context",
+      // The command is evaluated by a shell; keep synthetic stderr free of
+      // backticks so the fixture cannot accidentally execute npm.
+      command: "node -e \"console.error(\\\"error TS2688: Cannot find type definition file for 'node'.\\\"); console.error(\\\"error TS2591: Cannot find name 'process'. Try npm i --save-dev @types/node.\\\"); process.exit(1)\"",
+      outcome: "needs_more_context",
+      category: "environment_error",
+      recommendedIncludes: "Install or prepare dependencies"
+    },
+    {
+      name: "a missing command as needs_more_context",
+      command: "node -e \"console.error('command not found: definitely-not-a-real-command'); process.exit(127)\"",
+      outcome: "needs_more_context",
+      category: "command_not_found"
+    },
+    {
+      name: "a timeout as research_only",
+      command: "node -e \"setTimeout(() => {}, 2000)\"",
+      outcome: "research_only",
+      category: "timeout",
+      extraArgs: ["--timeout-ms", "100"]
+    },
+    {
+      name: "a successful command as no_failure_observed",
+      command: "node -e \"console.log('ok')\"",
+      outcome: "no_failure_observed",
+      category: "no_failure_observed"
+    }
+  ])("maps deterministic non-ready category: $name", async ({ command, outcome, category, extraArgs, recommendedIncludes }) => {
     const repo = await createSampleGitRepo();
-    await expectReadiness(repo, "node -e \"console.error('Local package.json exists, but node_modules missing.'); console.error('Cannot find module lodash'); process.exit(1)\"", "needs_more_context", "dependency_missing", [], "Install or prepare dependencies");
-    await expectReadiness(repo, "node -e \"console.error(\\\"error TS2688: Cannot find type definition file for 'node'.\\\"); console.error(\\\"error TS2591: Cannot find name 'process'. Try `npm i --save-dev @types/node`.\\\"); process.exit(1)\"", "needs_more_context", "environment_error", [], "Install or prepare dependencies");
-    await expectReadiness(repo, "node -e \"console.error('command not found: definitely-not-a-real-command'); process.exit(127)\"", "needs_more_context", "command_not_found");
-    await expectReadiness(repo, "node -e \"setTimeout(() => {}, 2000)\"", "research_only", "timeout", ["--timeout-ms", "100"]);
-    await expectReadiness(repo, "node -e \"console.log('ok')\"", "no_failure_observed", "no_failure_observed");
+    const before = await gitStatus(repo);
+    await expectReadiness(repo, command, outcome, category, extraArgs, recommendedIncludes);
+    expect(await gitStatus(repo)).toEqual(before);
   }, 30_000);
 
   it("reports blocked_by_safety from a synthetic triage safety blocker", async () => {
