@@ -195,6 +195,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
 }
 
 export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false, readonlySource?: string): string[] {
+  const hostUser = dockerHostUser();
   return [
     "run",
     "--rm",
@@ -213,7 +214,9 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "--memory",
     "2g",
     "--cpus",
-    "2",
+    "4",
+    "--user",
+    hostUser,
     "--read-only",
     "--tmpfs",
     "/tmp:rw,nosuid,size=256m",
@@ -237,6 +240,12 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "-lc",
     request.command
   ];
+}
+
+function dockerHostUser(): string {
+  const uid = typeof process.getuid === "function" ? process.getuid() : 65_534;
+  const gid = typeof process.getgid === "function" ? process.getgid() : 65_534;
+  return `${Number.isSafeInteger(uid) && uid >= 0 ? uid : 65_534}:${Number.isSafeInteger(gid) && gid >= 0 ? gid : 65_534}`;
 }
 
 async function removeContainer(name: string): Promise<void> {
