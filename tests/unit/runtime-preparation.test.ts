@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { preparationDockerArgs } from "../../src/run/runtime-preparation.js";
 import { planExternalValidationTaskRun } from "../../src/run/task-run-planner.js";
+import { createExecutorRequest, dockerRunArgs } from "../../src/run/task-run-executor.js";
 
 describe("external runtime preparation policy", () => {
   it("keeps network-enabled preparation explicit, bounded, and separate from execution", () => {
@@ -11,6 +12,7 @@ describe("external runtime preparation policy", () => {
       "--network", "bridge",
       "--security-opt", "no-new-privileges",
       "--cap-drop", "ALL",
+      "--env", "COREPACK_HOME=/workspace/.runforge-corepack",
       "--entrypoint", "/bin/sh",
       "runforge:local"
     ]));
@@ -20,6 +22,21 @@ describe("external runtime preparation policy", () => {
   it("prepares dependencies from the nested execution root", () => {
     const args = preparationDockerArgs("/tmp/prepared", "runforge:local", "prepare-test", "corepack yarn install --immutable", "frontend");
     expect(args).toContain("/workspace/frontend");
+    expect(args).toContain("COREPACK_HOME=/workspace/frontend/.runforge-corepack");
+  });
+
+  it("persists Corepack only in the disposable workspace for offline validation", () => {
+    const previous = process.env.COREPACK_HOME; process.env.COREPACK_HOME = "/host/private/corepack-cache";
+    try {
+      const prep = preparationDockerArgs("/tmp/prepared", "runforge:local", "prepare-test", "corepack pnpm install --frozen-lockfile");
+      const request = createExecutorRequest({ runId: "CACHE-1", subtaskId: "validation", command: "corepack pnpm test", cwd: "/tmp/prepared", artifactDir: "/tmp/artifacts", lane: "docker-shell" });
+      const validation = dockerRunArgs(request, "runforge:local", "validation-test", true);
+      expect(prep).toContain("COREPACK_HOME=/workspace/.runforge-corepack");
+      expect(validation).toContain("COREPACK_HOME=/workspace/.runforge-corepack");
+      expect(prep).toEqual(expect.arrayContaining(["--network", "bridge"]));
+      expect(validation).toEqual(expect.arrayContaining(["--network", "none"]));
+      expect(`${prep.join(" ")} ${validation.join(" ")}`).not.toContain("/host/private/corepack-cache");
+    } finally { if (previous === undefined) delete process.env.COREPACK_HOME; else process.env.COREPACK_HOME = previous; }
   });
 
   it("plans the required validation commands for the detected package manager", () => {
