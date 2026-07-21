@@ -1,4 +1,4 @@
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { ControlPlaneError } from "./contracts.js";
@@ -10,7 +10,7 @@ export class CampaignCoordinatorLease {
   private readonly token = randomUUID();
   private readonly lockDir: string;
   private held = false;
-  constructor(root: string) { this.lockDir = join(root, ".campaign-coordinator.lock"); }
+  constructor(root: string, private readonly ownerlessStaleMs = 5_000) { this.lockDir = join(root, ".campaign-coordinator.lock"); }
   get active(): boolean { return this.held; }
   acquire(): void {
     if (this.held) return;
@@ -25,6 +25,7 @@ export class CampaignCoordinatorLease {
       } catch (error) {
         const owner = this.readOwner();
         if (owner && !processAlive(owner.pid)) { rmSync(this.lockDir, { recursive: true, force: true }); continue; }
+        if (!owner && this.ownerlessAgeMs() >= this.ownerlessStaleMs) { rmSync(this.lockDir, { recursive: true, force: true }); continue; }
         throw new ControlPlaneError(409, "campaign_coordinator_already_active", "Another campaign coordinator already owns this control-plane state root.", owner ? { ownerPid: owner.pid, acquiredAt: owner.acquiredAt } : undefined);
       }
     }
@@ -38,6 +39,7 @@ export class CampaignCoordinatorLease {
   }
   private ownerPath(): string { return join(this.lockDir, "owner.json"); }
   private readOwner(): Owner | null { try { const value = JSON.parse(readFileSync(this.ownerPath(), "utf8")) as Partial<Owner>; return value.schemaVersion === 1 && Number.isInteger(value.pid) && typeof value.token === "string" && typeof value.acquiredAt === "string" ? value as Owner : null; } catch { return null; } }
+  private ownerlessAgeMs(): number { try { return Math.max(0, Date.now() - statSync(this.ownerPath()).mtimeMs); } catch { try { return Math.max(0, Date.now() - statSync(this.lockDir).mtimeMs); } catch { return 0; } } }
 }
 
 function processAlive(pid: number): boolean { try { process.kill(pid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code !== "ESRCH"; } }

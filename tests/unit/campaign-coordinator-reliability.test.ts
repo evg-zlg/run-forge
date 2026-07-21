@@ -1,8 +1,9 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { CampaignCoordinator } from "../../src/control-plane/campaign-coordinator.js";
+import { CampaignCoordinatorLease } from "../../src/control-plane/campaign-coordinator-lease.js";
 import type { CampaignPlan, CampaignRecord, CampaignSpec, ControlTaskRecord } from "../../src/control-plane/contracts.js";
 
 const roots: string[] = [];
@@ -43,7 +44,7 @@ describe("CampaignCoordinator reliability", () => {
     expect(final.children.one.reservedTokens).toBe(0);
     expect(final.reserved.tokens).toBe(40);
     expect(final.failures).toContainEqual(expect.objectContaining({ reason: "campaign_budget_exceeded" }));
-    coordinator.close();
+    await coordinator.drain();
   });
 
   it("adopts a deterministic task created before a crash instead of dispatching it again", async () => {
@@ -70,6 +71,36 @@ describe("CampaignCoordinator reliability", () => {
     expect(completed.children.one.taskId).toBe(`${campaignId}-one`);
     expect(completed.children.one.reservedTokens).toBe(0);
     expect(completed.reserved).toEqual({ tokens: 0, costUsd: 0 });
-    coordinator.close();
+    await coordinator.drain();
+  });
+
+  it("holds the lease until a deferred dispatch settles and fences its stale binding save", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-drain-barrier-")); roots.push(root);
+    let releaseCreate!: () => void, markStarted!: () => void;
+    const started = new Promise<void>((resolve) => { markStarted = resolve; });
+    const created = new Map<string, ControlTaskRecord>();
+    const coordinatorA = new CampaignCoordinator({
+      root, planCampaign: async (record) => ({ ...plan(record.id), nodes: [plan(record.id).nodes[0]!], estimatedTokens: 40, estimatedCostUsd: .4 }),
+      createTask: async (input) => { markStarted(); await new Promise<void>((resolve) => { releaseCreate = resolve; }); const value = task(String(input.taskSpec.taskId), "completed"); created.set(value.id, value); return value; },
+      getTask: async (id) => created.get(id) ?? Promise.reject(new Error("missing")), getResult: async () => ({ status: "workflow_completed", usage: { totalTokens: 25, costUsd: .25 } }),
+    });
+    const campaign = await coordinatorA.createCampaign({ ...spec(), limits: { ...spec().limits, maxTasks: 1, maxConcurrency: 1 } });
+    await started; coordinatorA.close();
+    const coordinatorB = new CampaignCoordinator({ root, planCampaign: async () => { throw new Error("not used"); }, createTask: async () => { throw new Error("must reconcile"); }, getTask: async (id) => created.get(id) ?? Promise.reject(new Error("missing")), getResult: async () => ({ status: "workflow_completed", usage: { totalTokens: 25, costUsd: .25 } }) });
+    await expect(coordinatorB.initialize()).rejects.toMatchObject({ code: "campaign_coordinator_already_active" });
+    releaseCreate(); await coordinatorA.drain();
+    expect(await coordinatorA.getCampaign(campaign.id)).toMatchObject({ children: { one: { status: "dispatching" } }, reserved: { tokens: 40 } });
+    await coordinatorB.initialize();
+    const completed = await waitFor(() => coordinatorB.getCampaign(campaign.id), (value) => value.status === "completed");
+    expect(completed.usage.tokens).toBe(25); await coordinatorB.drain();
+  });
+
+  it("recovers ownerless and malformed leases only after their mtime grace", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-stale-lease-")); roots.push(root);
+    const lock = join(root, ".campaign-coordinator.lock"), old = new Date(Date.now() - 10_000);
+    await mkdir(lock); await utimes(lock, old, old);
+    const ownerless = new CampaignCoordinatorLease(root, 1_000); ownerless.acquire(); ownerless.release();
+    await mkdir(lock); const owner = join(lock, "owner.json"); await writeFile(owner, "not-json\n"); await utimes(owner, old, old);
+    const malformed = new CampaignCoordinatorLease(root, 1_000); malformed.acquire(); malformed.release();
   });
 });

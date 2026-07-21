@@ -31,7 +31,7 @@ export class ControlPlaneManager {
   async listCampaigns(): Promise<Array<Pick<CampaignRecord, "id" | "status" | "createdAt" | "updatedAt" | "usage">>> { return this.campaigns.listCampaigns(); } async getCampaign(id: string): Promise<CampaignRecord> { return this.campaigns.getCampaign(id); }
   async getCampaignResult(id: string): Promise<Record<string, unknown>> { return this.campaigns.getCampaignResult(id); }
   private async planCampaign(record: CampaignRecord) { return planSemanticCampaign(record.id, record.spec); }
-  close(): void { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; this.campaigns.close(); for (const worker of this.active.values()) worker.controller.abort(); this.active.clear(); }
+  close(): void { if (this.watchdog) clearInterval(this.watchdog); this.watchdog = null; this.campaigns.close(); for (const worker of this.active.values()) worker.controller.abort(); this.active.clear(); } async drain(): Promise<void> { this.close(); await this.campaigns.drain(); }
   async inspectProject(input: { path: string; workingDirectory: string; register: boolean; runtime?: "local" | "docker"; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing" }): Promise<Record<string, unknown>> {
     const report = await buildDoctorReport({ repo: input.path, workingDirectory: input.workingDirectory, runtime: input.runtime, dependencyPreparation: input.dependencyPreparation, publication: "none" });
     let project: ProjectRecord | null = null;
