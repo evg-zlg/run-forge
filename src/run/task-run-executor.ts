@@ -59,9 +59,10 @@ export class LocalShellExecutor implements TaskRunExecutor {
     let timedOut = false;
 
     try {
+      const environment = this.controlledEnvironment ? await controlledLocalEnvironment(request.artifactDir) : process.env;
       const output = await execFileAsync("sh", ["-lc", request.command], {
         cwd: request.cwd,
-        env: this.controlledEnvironment ? controlledLocalEnvironment() : process.env,
+        env: environment,
         maxBuffer: 1024 * 1024 * 8,
         timeout: request.timeoutMs
       });
@@ -114,17 +115,21 @@ export class LocalShellExecutor implements TaskRunExecutor {
   }
 }
 
-function controlledLocalEnvironment(): NodeJS.ProcessEnv {
-  const allowed = ["PATH", "LANG", "LC_ALL", "TMPDIR", "SHELL", "TERM"];
-  const temporaryHome = process.env.TMPDIR || "/tmp";
+async function controlledLocalEnvironment(artifactDir: string): Promise<NodeJS.ProcessEnv> {
+  const allowed = ["PATH", "LANG", "LC_ALL", "SHELL", "TERM"];
+  // These directories are owned by this request's artifact root. They are
+  // retained and removed with the execution evidence, never borrowed from a
+  // caller-provided HOME or TMPDIR.
+  const runtimeRoot = join(artifactDir, "runtime");
+  const home = join(runtimeRoot, "home");
+  const temporaryDirectory = join(runtimeRoot, "tmp");
+  const npmCache = join(runtimeRoot, "npm-cache");
+  await Promise.all([home, temporaryDirectory, npmCache].map((directory) => mkdir(directory, { recursive: true })));
   return {
     ...Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]])),
-    // Docker validation runs as the host UID, which is not necessarily present
-    // in the image's passwd database. npm falls back to os.homedir() when HOME
-    // is absent, so keep HOME inside the controlled temporary filesystem rather
-    // than inheriting the host home directory.
-    HOME: temporaryHome,
-    npm_config_cache: join(temporaryHome, "npm-cache"),
+    HOME: home,
+    TMPDIR: temporaryDirectory,
+    npm_config_cache: npmCache,
     CI: "1",
     RUNFORGE_RUNTIME_NETWORK: "denied"
   };
