@@ -38,7 +38,7 @@ describe("control plane campaign branch integration", () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-campaign-branch-")), repo = join(root, "repo"), state = join(root, "state"), artifacts = join(root, "child-artifacts");
     await mkdir(repo); await mkdir(state); await mkdir(artifacts);
     try {
-      await exec("git", ["init", "-q", repo]); await writeFile(join(repo, "README.md"), "base\n"); await exec("git", ["-C", repo, "add", "README.md"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]);
+      await exec("git", ["init", "-q", "-b", "main", repo]); await writeFile(join(repo, "README.md"), "base\n"); await exec("git", ["-C", repo, "add", "README.md"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]);
       const baseSha = (await exec("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
       await writeFile(join(artifacts, "implementation.patch"), ["diff --git a/src/new.ts b/src/new.ts", "new file mode 100644", "--- /dev/null", "+++ b/src/new.ts", "@@ -0,0 +1 @@", "+export const integrated = true;", ""].join("\n"));
       const manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize();
@@ -75,7 +75,7 @@ describe("control plane campaign branch integration", () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-campaign-no-patch-")), repo = join(root, "repo"), state = join(root, "state"), artifacts = join(root, "child-artifacts");
     await mkdir(repo); await mkdir(state); await mkdir(artifacts);
     try {
-      await exec("git", ["init", "-q", repo]); await writeFile(join(repo, "README.md"), "base\n"); await exec("git", ["-C", repo, "add", "README.md"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]);
+      await exec("git", ["init", "-q", "-b", "main", repo]); await writeFile(join(repo, "README.md"), "base\n"); await exec("git", ["-C", repo, "add", "README.md"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]);
       const baseSha = (await exec("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
       const manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize(); const tasks = new Map<string, any>();
       (manager as any).planCampaign = async (record: any) => { const plan = planCampaignFromGoal(record.id, record.spec); addRequiredValidationSink(plan); plan.nodes[0]!.estimatedTokens = 2_000; plan.estimatedTokens = 3_000; return { plan, evidence: { mode: "semantic-openrouter", model: "test", attempts: 1, repaired: false, usage: { tokens: 100, costUsd: .001 }, validationCodes: [] } }; };
@@ -90,7 +90,7 @@ describe("control plane campaign branch integration", () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-campaign-validation-no-patch-")), repo = join(root, "repo"), state = join(root, "state"), artifacts = join(root, "child-artifacts");
     await mkdir(repo); await mkdir(state); await mkdir(artifacts);
     try {
-      await exec("git", ["init", "-q", repo]); await writeFile(join(repo, "README.md"), "base\n"); await exec("git", ["-C", repo, "add", "README.md"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]);
+      await exec("git", ["init", "-q", "-b", "main", repo]); await writeFile(join(repo, "README.md"), "base\n"); await exec("git", ["-C", repo, "add", "README.md"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]);
       const baseSha = (await exec("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
       const manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize(); const tasks = new Map<string, any>();
       (manager as any).planCampaign = async (record: any) => { const plan = planCampaignFromGoal(record.id, record.spec); addRequiredValidationSink(plan); plan.nodes = [plan.nodes[1]!]; plan.nodes[0]!.dependsOn = []; plan.estimatedTokens = 1_000; plan.estimatedCostUsd = .1; return { plan, evidence: { mode: "semantic-openrouter", model: "test", attempts: 1, repaired: false, usage: { tokens: 100, costUsd: .001 }, validationCodes: [] } }; };
@@ -103,7 +103,7 @@ describe("control plane campaign branch integration", () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-campaign-repair-")), repo = join(root, "repo"), state = join(root, "state"), bad = join(root, "bad"), good = join(root, "good");
     await mkdir(repo); await mkdir(state); await mkdir(bad); await mkdir(good);
     try {
-      await exec("git", ["init", "-q", repo]); await writeFile(join(repo, "src.txt"), "base\n"); await exec("git", ["-C", repo, "add", "src.txt"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]); const baseSha = (await exec("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
+      await exec("git", ["init", "-q", "-b", "main", repo]); await writeFile(join(repo, "src.txt"), "base\n"); await exec("git", ["-C", repo, "add", "src.txt"]); await exec("git", ["-C", repo, "-c", "user.name=Test", "-c", "user.email=test@localhost", "commit", "-qm", "base"]); const baseSha = (await exec("git", ["-C", repo, "rev-parse", "HEAD"])).stdout.trim();
       await writeFile(join(bad, "implementation.patch"), ["diff --git a/src.txt b/src.txt", "--- a/src.txt", "+++ b/src.txt", "@@ -1 +1 @@", "-wrong-base", "+bad", ""].join("\n"));
       await writeFile(join(good, "implementation.patch"), ["diff --git a/src.txt b/src.txt", "--- a/src.txt", "+++ b/src.txt", "@@ -1 +1 @@", "-base", "+repaired", ""].join("\n"));
       const manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize(); const tasks = new Map<string, any>(); let calls = 0;
