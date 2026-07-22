@@ -166,7 +166,7 @@ export function buildSemanticReviewPrompt(request: Omit<SemanticReviewRequest, "
     `Structural evidence (explicitly non-semantic; context only):\n${request.structuralEvidence.map((item) => `- ${item}`).join("\n")}`,
     `Review phase budget/deadline:\n${JSON.stringify(request.reviewBudget ?? null, null, 2)}`,
     ...(request.reviewSubject ? [`Existing-source review subject (validation-only; no patch was created):\n${request.reviewSubject}`] : [`Patch:\n${request.patch}`]),
-    "Return JSON only: {\"semanticReview\":{\"confidence\":\"high|medium|low|unknown\",\"limitations\":[\"review limitation\"],\"findings\":[{\"severity\":\"critical|high|medium|low|info\",\"file\":\"path\",\"location\":\"line or range\",\"category\":\"category\",\"evidence\":\"specific evidence\",\"recommendation\":\"actionable fix\",\"blocking\":true|false}]}}. Return an empty findings array when no semantic issues exist.",
+    "Return raw JSON only, without Markdown code fences: {\"semanticReview\":{\"confidence\":\"high|medium|low|unknown\",\"limitations\":[\"review limitation\"],\"findings\":[{\"severity\":\"critical|high|medium|low|info\",\"file\":\"path\",\"location\":\"line or range\",\"category\":\"category\",\"evidence\":\"specific evidence\",\"recommendation\":\"actionable fix\",\"blocking\":true|false}]}}. Return an empty findings array when no semantic issues exist.",
     "Do not edit files, run commands, publish, or access secrets, databases, or production.",
   ].join("\n\n");
 }
@@ -223,15 +223,31 @@ export function normalizeSemanticReviewResult(value: SemanticReviewResult): Sema
 }
 
 function parsePayload(stdout: string, stderr: string): Record<string, unknown> {
-  const candidates = [stdout.trim(), stderr.trim(), ...stdout.split(/\r?\n/).reverse(), ...stderr.split(/\r?\n/).reverse()].filter(Boolean);
+  const candidates = [stdout.trim(), stderr.trim()].flatMap((output) => {
+    if (!output) return [];
+    const fenced = fencedJsonBody(output);
+    if (fenced !== null) return [fenced];
+    // A fence anywhere else is malformed or surrounded by prose; never fall
+    // back to parsing its interior line-by-line.
+    if (output.includes("```")) return [];
+    return [output, ...output.split(/\r?\n/).reverse()];
+  });
   for (const candidate of candidates) {
     try {
       const parsed = JSON.parse(candidate) as Record<string, unknown>;
+      if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+      if (Object.keys(parsed).length !== 1 || !("semanticReview" in parsed)) continue;
       const review = parsed.semanticReview;
       if (review && typeof review === "object" && !Array.isArray(review)) return review as Record<string, unknown>;
     } catch { /* provider streams may contain non-JSON diagnostic lines */ }
   }
   throw new Error("semantic reviewer did not return the required JSON payload");
+}
+
+/** Compatibility for providers that wrap an otherwise exact response in one Markdown JSON fence. */
+function fencedJsonBody(value: string): string | null {
+  const match = /^```(?:json)?[\t ]*\r?\n([\s\S]*?)\r?\n```$/.exec(value);
+  return match ? match[1]! : null;
 }
 
 function delegated(status: "unavailable" | "forbidden", party: "external_session" | "owner", reason: string, selectedReviewer?: ReviewerIdentity): SemanticReviewResult {
