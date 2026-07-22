@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { publishDurableCheckpointTransition, readDurableCheckpoint } from "../implementation/durable-checkpoint.js";
 import { ControlPlaneError, type ControlTaskRecord } from "./contracts.js";
 import type { ControlPlaneStore } from "./state.js";
+import { validationSatisfiesImplementationCheckpoint, type ValidationOutcomeRecord } from "../validation/capability-contract.js";
 
 export type AcceptCompletedInput = { decisionId: string; checkpointId: string; delivery: "patch" | "local_commit" };
 
@@ -30,7 +31,7 @@ export async function acceptCompletedResult(input: { task: ControlTaskRecord; re
 
 async function validatedCandidateEvidence(root: string, checkpointId: string, expectedDigest: string | null): Promise<Record<string, any> | null> {
   const directory = join(root, "checkpoint-resume", checkpointId); const names = await readdir(directory).catch(() => [] as string[]);
-  for (const name of names.filter((item) => item.endsWith(".candidate-validation-evidence.json")).sort().reverse()) try { const content = await readFile(join(directory, name), "utf8"), declaredDigest = name.slice(0, 64); if (!/^[a-f0-9]{64}$/.test(declaredDigest) || createHash("sha256").update(content).digest("hex") !== declaredDigest) continue; const value = JSON.parse(content) as Record<string, any>; if (value.checkpointDigest === expectedDigest && value.providerCalls === 0 && object(value.candidateBinary).compatible === true && /^[a-f0-9]{64}$/.test(String(object(value.candidateBinary).sha256)) && ["passed", "completed_with_validation_gaps"].includes(String(value.validationAggregate))) return { ...value, path: `checkpoint-resume/${checkpointId}/${name}` }; } catch { /* Ignore malformed non-authoritative evidence. */ }
+  for (const name of names.filter((item) => item.endsWith(".candidate-validation-evidence.json")).sort().reverse()) try { const content = await readFile(join(directory, name), "utf8"), declaredDigest = name.slice(0, 64); if (!/^[a-f0-9]{64}$/.test(declaredDigest) || createHash("sha256").update(content).digest("hex") !== declaredDigest) continue; const value = JSON.parse(content) as Record<string, any>, validations = Array.isArray(value.validations) ? value.validations as ValidationOutcomeRecord[] : []; if (value.checkpointDigest === expectedDigest && value.providerCalls === 0 && object(value.candidateBinary).compatible === true && /^[a-f0-9]{64}$/.test(String(object(value.candidateBinary).sha256)) && validationSatisfiesImplementationCheckpoint(validations)) return { ...value, path: `checkpoint-resume/${checkpointId}/${name}` }; } catch { /* Ignore malformed non-authoritative evidence. */ }
   return null;
 }
 

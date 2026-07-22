@@ -217,7 +217,7 @@ export type CampaignRecord = {
     reservedCostUsd: number;
     integrationRepairAttempts: number;
     executionRetryAttempts: number;
-    evidence?: Record<string, unknown>;
+    evidence?: Record<string, unknown>; checkpointRepair?: { state: "pending" | "started"; taskId: string; decisionId: string; checkpointId: string; checkpointDigest: string; additionalProviderTokens: number; repairIntent: string };
   }>;
   usage: { tokens: number; costUsd: number; tasks: number };
   /** Sum of child reservations that have not yet been converted to actual usage. */

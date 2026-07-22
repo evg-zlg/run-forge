@@ -97,7 +97,7 @@ export async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: 
   const ownerRequired = result.ownerGate.required;
   const agreement = implementationAgreement(spec, result, completed);
   const status: RunForgeCompletionStatus = result.validationAggregate === "blocked_by_capability" ? "blocked_by_capability" : result.validationAggregate === "blocked_by_policy" ? "blocked_by_policy" : ownerRequired ? "awaiting_owner" : completed ? completionStatusForAgreement(agreement) : "failed";
-  const validationCompleted = ["passed", "completed_with_validation_gaps"].includes(result.validationAggregate);
+  const validationCompleted = result.checkpoints.at(-1)?.validationPassed === true;
   const next = implementationNextAction(status, agreement); const handoff = implementationHandoff(spec, result, status, next);
   const agreementAware = buildAgreementAwareTaskResult({ taskId: spec.taskId, status, agreement, handoff, next, validationPlan: result.validationPlan, validationAggregate: result.validationAggregate, review: result.review });
   const legacyStatus = status === "blocked_by_capability" || status === "blocked_by_policy" ? status : completed ? "completed" : ownerRequired ? "awaiting_owner_decision" : "failed";
@@ -319,7 +319,7 @@ function implementationHandoff(
 }
 
 export function clearRepairedFindings(result: ImplementationExecutorResult): void {
-  if (result.status === "implemented_and_validated" && result.validationResults.length > 0 && ["passed", "completed_with_validation_gaps"].includes(result.validationAggregate)) {
+  if (result.status === "implemented_and_validated" && result.checkpoints.at(-1)?.validationPassed === true) {
     result.unresolvedFindings = [];
   }
 }
