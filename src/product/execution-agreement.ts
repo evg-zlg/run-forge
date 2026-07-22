@@ -214,6 +214,16 @@ export function renderExecutionAgreementSummary(agreement: Pick<ExecutionAgreeme
 export const createExecutionAgreement = negotiateExecutionAgreement;
 export const renderHumanSummary = renderExecutionAgreementSummary;
 
+/**
+ * Validation is normally structural-only. Provider-backed semantic review is
+ * an explicit custom agreement opt-in, never an implication of validation.
+ */
+export function validationSemanticReviewOptIn(agreement: Pick<ExecutionAgreement, "profile" | "phases">): boolean {
+  if (agreement.profile !== "custom") return false;
+  const owner = (phaseId: ExecutionPhaseId) => agreement.phases.find((phase) => phase.phaseId === phaseId)?.responsibleParty;
+  return owner("independentReview") === runforge && owner("providerModelCalls") === runforge;
+}
+
 function decidePhase(phaseId: ExecutionPhaseId, requested: boolean, responsibleParty: ExecutionParty, available: boolean, authorized: boolean, policyAllowed: boolean, evidence: string[]): Pick<ExecutionPhaseAgreement, "status" | "reason"> {
   if (!requested || responsibleParty === nobody) return { status: "not_requested", reason: "Not requested." };
   if (evidence.length > 0) return { status: "completed", reason: `Completed by ${responsibleParty}; evidence recorded.` };

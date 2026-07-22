@@ -7,10 +7,27 @@ import { executeOpenRouterChatCompletion, OpenRouterExecutionError } from "../pr
 import { scanSecrets } from "../security/secret-scan.js";
 import { selectProviderModel } from "../product/provider-routing.js";
 import type { ImplementationExecutorCapability, ImplementationExecutorRequest } from "./executor.js";
+import type { ExecutionAgreement } from "../product/execution-agreement.js";
+import { validationSemanticReviewOptIn } from "../product/execution-agreement.js";
+import { routingBudgetOverrun } from "./executor-accounting.js";
 
 export type OpenRouterPhase = "planner" | "implementer" | "repair" | "reviewer" | "logCompression";
 export type OpenRouterRun = { startedAt: string; finishedAt: string; durationMs: number; exitCode: number | null; signal: NodeJS.Signals | null; summary: string; cancelled: boolean; timedOut: boolean; stdout: string; stderr: string; truncation: { stdout: boolean; stderr: boolean; limitBytes: number }; failureReason: string | null; tokenUsage: number | null; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; stdoutArtifact: string; stderrArtifact: string; requestId: string | null; costUsd: number | null; attempts: number; model: string | null };
 type Selection = { selected: ImplementationExecutorCapability | null; reason: string; rejected: Array<{ id: string; reason: string }> };
+export type OpenRouterSemanticReviewerSelection = {
+  selected: { provider: "openrouter"; model: string; logCompressionModel: string | null } | null;
+  reason: string;
+};
+export type OpenRouterSemanticReviewInvocation = {
+  provider: "openrouter"; model: string; invocationId: string | null;
+  content: string; usage: { totalTokens: number | null; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null }; costUsd: number | null; attempts: number;
+};
+export type OpenRouterValidationBudget = { usedCalls: number; remainingCalls: number; usedTokens: number; remainingTokens: number; usedCostUsd: number | null; remainingCostUsd: number | null };
+export type OpenRouterModelPricing = { inputUsdPerToken: number; outputUsdPerToken: number };
+export type OpenRouterValidationAllowance = OpenRouterValidationBudget & { phase: "reviewer" | "logCompression"; maxAttempts: number; estimatedInputTokens: number; maxTokens: number; pricingBounded: boolean };
+export class OpenRouterValidationInvocationError extends Error {
+  constructor(message: string, readonly providerCall: Record<string, unknown>) { super(message); this.name = "OpenRouterValidationInvocationError"; }
+}
 const attemptAccounting = new WeakMap<Array<Record<string, unknown>>, number>();
 const safeExcerptBytes = 16_384;
 
@@ -30,6 +47,94 @@ export function selectOpenRouterExecutor(spec: TaskSpecV2): Selection {
   capability.model = selectProviderModel(spec.providerRouting, "implementer", spec.taskId)?.model ?? null;
   return { selected: capability, reason: "Explicit providerRouting selected OpenRouter.", rejected };
 }
+
+/** Read-only reviewer route. It deliberately does not select a coding executor. */
+export function selectOpenRouterSemanticReviewer(spec: TaskSpecV2, agreement: ExecutionAgreement, rawLogsRequireCompression = false): OpenRouterSemanticReviewerSelection {
+  if (spec.execution.mode !== "validation" || !validationSemanticReviewOptIn(agreement)) return { selected: null, reason: "semantic_review_not_requested" };
+  if (spec.runtime.preference !== "docker") return { selected: null, reason: "semantic_validation_requires_docker" };
+  if (spec.providerRouting.provider !== "openrouter") return { selected: null, reason: "semantic_review_openrouter_required" };
+  if (!spec.authority.allowProviderCalls || !spec.authority.allowNetwork || spec.runtime.externalNetwork !== "allowed") return { selected: null, reason: "openrouter_network_or_authority_unavailable" };
+  if (!process.env.OPENROUTER_API_KEY?.trim()) return { selected: null, reason: "openrouter_credentials_unavailable" };
+  const model = selectProviderModel(spec.providerRouting, "reviewer", spec.taskId)?.model;
+  if (!model) return { selected: null, reason: "openrouter_model_unavailable: missing reviewer model" };
+  const compression = rawLogsRequireCompression ? selectProviderModel(spec.providerRouting, "logCompression", spec.taskId)?.model ?? null : null;
+  if (rawLogsRequireCompression && !compression) return { selected: null, reason: "openrouter_model_unavailable: missing logCompression model" };
+  return { selected: { provider: "openrouter", model, logCompressionModel: compression }, reason: "Explicit validation semantic-review route selected." };
+}
+
+/** Shared fail-closed ledger for validation log-compression and review calls. */
+export function assertOpenRouterValidationBudget(spec: TaskSpecV2, calls: Array<Record<string, unknown>>): OpenRouterValidationBudget {
+  const attempts = calls.map((call) => call.attempts);
+  if (attempts.some((value) => !Number.isInteger(value) || Number(value) < 1)) throw new Error("openrouter_accounting_unavailable: attempt accounting is incomplete");
+  if (calls.some((call) => typeof call.tokenUsage !== "number" || !Number.isFinite(call.tokenUsage))) throw new Error("openrouter_accounting_unavailable: token accounting is incomplete");
+  if (spec.providerRouting.costBudgetUsd !== undefined && calls.some((call) => typeof call.costUsd !== "number" || !Number.isFinite(call.costUsd))) throw new Error("openrouter_accounting_unavailable: cost accounting is incomplete");
+  const usedCalls = attempts.reduce<number>((sum, value) => sum + Number(value), 0);
+  if (usedCalls > spec.providerRouting.maxCalls) throw new Error(`openrouter_max_calls_exceeded: ${usedCalls} > ${spec.providerRouting.maxCalls}`);
+  for (const phase of ["logCompression", "reviewer"] as const) {
+    const overrun = routingBudgetOverrun(calls, spec.providerRouting, phase);
+    if (overrun) throw new Error(overrun.reason);
+  }
+  const usedTokens = calls.reduce((sum, call) => sum + Number(call.tokenUsage), 0);
+  const costs = calls.map((call) => call.costUsd);
+  const usedCostUsd = costs.length ? costs.reduce<number>((sum, value) => sum + Number(value), 0) : null;
+  return { usedCalls, remainingCalls: spec.providerRouting.maxCalls - usedCalls, usedTokens, remainingTokens: spec.providerRouting.tokenBudget.total - usedTokens, usedCostUsd, remainingCostUsd: spec.providerRouting.costBudgetUsd === undefined ? null : spec.providerRouting.costBudgetUsd - (usedCostUsd ?? 0) };
+}
+
+/** Computes a conservative allowance before any validation provider transport. */
+export function openRouterValidationPreCallAllowance(input: { spec: TaskSpecV2; calls: Array<Record<string, unknown>>; phase: "reviewer" | "logCompression"; prompt: string; pricing?: OpenRouterModelPricing }): OpenRouterValidationAllowance {
+  const budget = assertOpenRouterValidationBudget(input.spec, input.calls);
+  const maxAttempts = Math.min(input.spec.providerRouting.retry.maxAttempts, budget.remainingCalls);
+  if (maxAttempts <= 0) throw new Error("openrouter_max_calls_exceeded");
+  const phaseUsed = input.calls.filter((call) => call.phase === input.phase).reduce((sum, call) => sum + Number(call.tokenUsage), 0);
+  const phaseRemaining = input.spec.providerRouting.tokenBudget.perPhase[input.phase] - phaseUsed;
+  const system = input.phase === "reviewer" ? semanticReviewerSystemPrompt : logCompressionSystemPrompt;
+  // Deliberately above the usual ~4-byte heuristic while remaining usable for bounded prompts.
+  const estimatedInputTokens = Math.max(1, Math.ceil(Buffer.byteLength(`${system}\n${input.prompt}`, "utf8") / 3));
+  const perAttemptTokens = Math.floor(Math.min(budget.remainingTokens, phaseRemaining) / maxAttempts);
+  let maxTokens = perAttemptTokens - estimatedInputTokens;
+  if (maxTokens < 1) throw new Error("openrouter_token_budget_exceeded: prompt and retry allowance exhaust remaining total or phase tokens");
+  let pricingBounded = input.spec.providerRouting.costBudgetUsd === undefined;
+  if (input.spec.providerRouting.costBudgetUsd !== undefined) {
+    const pricing = input.pricing;
+    if (!pricing || !validPrice(pricing.inputUsdPerToken) || !validPrice(pricing.outputUsdPerToken)) throw new Error("openrouter_cost_accounting_unavailable: model pricing is unavailable for a hard cost budget");
+    const perAttemptCost = (budget.remainingCostUsd ?? 0) / maxAttempts;
+    const outputCost = perAttemptCost - estimatedInputTokens * pricing.inputUsdPerToken;
+    if (outputCost <= 0) throw new Error("openrouter_cost_budget_exceeded: prompt cost exhausts remaining cost authority");
+    if (pricing.outputUsdPerToken > 0) maxTokens = Math.min(maxTokens, Math.floor(outputCost / pricing.outputUsdPerToken));
+    if (maxTokens < 1) throw new Error("openrouter_cost_budget_exceeded: no bounded output token fits remaining cost authority");
+    pricingBounded = true;
+  }
+  return { ...budget, phase: input.phase, maxAttempts, estimatedInputTokens, maxTokens, pricingBounded };
+}
+
+/** Invokes one review-only completion. No patch parsing, workspace mutation, or worktree is involved. */
+export async function invokeOpenRouterSemanticReviewer(input: { spec: TaskSpecV2; agreement: ExecutionAgreement; prompt: string; rawLogsRequireCompression?: boolean; previousCalls?: Array<Record<string, unknown>>; pricing?: OpenRouterModelPricing; signal?: AbortSignal }): Promise<OpenRouterSemanticReviewInvocation> {
+  const selection = selectOpenRouterSemanticReviewer(input.spec, input.agreement, input.rawLogsRequireCompression === true);
+  if (!selection.selected) throw new Error(selection.reason);
+  const allowance = openRouterValidationPreCallAllowance({ spec: input.spec, calls: input.previousCalls ?? [], phase: "reviewer", prompt: input.prompt, ...(input.pricing ? { pricing: input.pricing } : {}) });
+  let response: Awaited<ReturnType<typeof executeOpenRouterChatCompletion>>;
+  try {
+    response = await executeOpenRouterChatCompletion({ model: selection.selected.model, messages: [
+      { role: "system", content: semanticReviewerSystemPrompt },
+      { role: "user", content: input.prompt },
+    ], timeoutMs: input.spec.providerRouting.timeoutMs, maxCalls: allowance.maxAttempts, maxTokens: allowance.maxTokens, reasoning: input.spec.providerRouting.reasoning?.reviewer, signal: input.signal });
+  } catch (error) {
+    const failure = error instanceof OpenRouterExecutionError ? error : null;
+    const usage = failure?.options.usage;
+    const providerCall = { purpose: "semantic-review", phase: "reviewer", provider: "openrouter", model: selection.selected.model, invocationId: failure?.options.requestId ?? null, success: false, providerCalls: true, networkAuthorized: true, exitCode: 1, usageAccounting: "provider", tokenUsage: usage?.totalTokens ?? null, inputTokens: usage?.inputTokens ?? null, outputTokens: usage?.outputTokens ?? null, reasoningTokens: usage?.reasoningTokens ?? null, costUsd: usage?.costUsd ?? null, attempts: Math.max(1, failure?.options.attempts ?? 1), failureReason: failure?.code ?? "provider" };
+    let reason = error instanceof Error ? error.message : String(error);
+    try { assertOpenRouterValidationBudget(input.spec, [...(input.previousCalls ?? []), providerCall]); } catch (accountingError) { reason = accountingError instanceof Error ? accountingError.message : String(accountingError); }
+    throw new OpenRouterValidationInvocationError(reason, providerCall);
+  }
+  const invocation = { provider: "openrouter" as const, model: selection.selected.model, invocationId: response.requestId ?? null, content: response.content, usage: { totalTokens: response.usage.totalTokens, inputTokens: response.usage.inputTokens, outputTokens: response.usage.outputTokens, reasoningTokens: response.usage.reasoningTokens }, costUsd: response.usage.costUsd, attempts: response.attempts };
+  const providerCall = { purpose: "semantic-review", phase: "reviewer", provider: "openrouter", model: invocation.model, invocationId: invocation.invocationId, success: true, providerCalls: true, networkAuthorized: true, exitCode: 0, usageAccounting: "provider", tokenUsage: invocation.usage.totalTokens, inputTokens: invocation.usage.inputTokens, outputTokens: invocation.usage.outputTokens, reasoningTokens: invocation.usage.reasoningTokens, costUsd: invocation.costUsd, attempts: invocation.attempts };
+  try { assertOpenRouterValidationBudget(input.spec, [...(input.previousCalls ?? []), providerCall]); }
+  catch (error) { throw new OpenRouterValidationInvocationError(error instanceof Error ? error.message : String(error), providerCall); }
+  return invocation;
+}
+const semanticReviewerSystemPrompt = "Perform an independent read-only semantic review. Return concise structured findings only; do not propose or emit patches, commands, worktrees, planning, implementation, or repair actions.";
+export const logCompressionSystemPrompt = "Return only the requested structured raw-log digest. Do not call tools or include raw logs beyond the supplied sanitized chunks.";
+function validPrice(value: number): boolean { return Number.isFinite(value) && value >= 0; }
 export async function runOpenRouterAgent(request: ImplementationExecutorRequest, cwd: string, prompt: string, phase: OpenRouterPhase, previous: Array<Record<string, unknown>>, iteration: number | string): Promise<OpenRouterRun> {
   const routing = request.spec.providerRouting, phaseUsed = previous.filter((call) => call.phase === phase).reduce((n, call) => n + (typeof call.tokenUsage === "number" ? call.tokenUsage : 0), 0), totalUsed = previous.reduce((n, call) => n + (typeof call.tokenUsage === "number" ? call.tokenUsage : 0), 0), costUsed = previous.reduce((n, call) => n + (typeof call.costUsd === "number" ? call.costUsd : 0), 0);
   const usedAttempts = attemptAccounting.get(previous) ?? previous.reduce((total, call) => total + (typeof call.attempts === "number" ? call.attempts : 1), 0);

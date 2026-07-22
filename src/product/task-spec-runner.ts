@@ -133,7 +133,11 @@ async function finalizeCapabilityAwareValidationArtifacts(spec: TaskSpecV2, resu
   const workflowStatus = result.validationAggregate === "blocked_by_capability" ? "blocked_by_capability"
     : result.validationAggregate === "blocked_by_policy" ? "blocked_by_policy"
       : result.status === "completed" ? completionStatusForAgreement(agreement) : "failed";
-  const delegation = result.review.semantic.delegation!;
+  const delegation = result.review.semantic.delegation ?? {
+    party: "external_session" as const,
+    reason: "RunForge completed the provider-backed independent semantic review.",
+    exactAction: "No further semantic review action is required; inspect the structured review evidence.",
+  };
   const next: ResultNextAction = {
     party: delegation.party,
     exactAction: delegation.exactAction,
@@ -144,10 +148,10 @@ async function finalizeCapabilityAwareValidationArtifacts(spec: TaskSpecV2, resu
     summary: `Validation-only execution completed with aggregate ${result.validationAggregate}; no implementation or publication was performed.`,
     changedFiles: [], patch: null, branch: null, commit: null,
     validation: result.validationResults.map((item) => ({ command: item.command, status: item.outcome, exitCode: item.exitCode, evidence: item.artifactPaths, lane: item.lane, cwd: item.cwd, ...(item.argv ? { argv: item.argv } : {}), repositoryIdentity: item.repositoryIdentity, boundSha: item.boundSha, capabilities: item.requiredCapabilities, safetyAssertions: item.safetyAssertions })),
-    findings: [], structuralEvidence: result.review.structural.evidence.map((reference) => ({ kind: "artifact", reference, summary: "Structural validation evidence." })), semanticReview: result.review.semantic,
+    findings: result.review.semantic.findings, structuralEvidence: result.review.structural.evidence.map((reference) => ({ kind: "artifact", reference, summary: "Structural validation evidence." })), semanticReview: result.review.semantic,
     risks: result.validationResults.filter((item) => item.outcome !== "passed").map((item) => `${item.command}: ${item.outcome}${item.failureReason ? ` (${item.failureReason})` : ""}`),
     nextActions: [next], publicationInstructions: ["Publication was not requested or performed."], ciCommands: spec.validation.commands,
-    safety: { providerCalls: false, notes: ["Source SHA and worktree state were unchanged; unsupported and policy-skipped commands were not spawned."] },
+    safety: { providerCalls: result.providerCalls.length > 0, notes: ["Source SHA and worktree state were unchanged; unsupported and policy-skipped commands were not spawned."] },
     targetSha: result.source.after.head, baseSha: result.source.before.head,
   };
   const workflow = buildAgreementAwareTaskResult({ taskId: spec.taskId, status: workflowStatus, agreement, handoff, next, validationPlan: result.validationPlan, validationAggregate: result.validationAggregate, review: result.review });
@@ -159,23 +163,27 @@ async function finalizeCapabilityAwareValidationArtifacts(spec: TaskSpecV2, resu
     ...settlement,
     requestedIntent: spec.execution.mode, actualExecutorMode: "validation", validationPlan: result.validationPlan, validationAggregate: result.validationAggregate,
     validation: result.validationResults, review: result.review,
+    providerCalls: result.providerCalls, usage: result.usage,
     targetRepository: { path: spec.target.repository, repositoryRoot: spec.target.repository, executionRoot: join(spec.target.repository, spec.target.workingDirectory), initialSha: result.source.before.head, finalSha: result.source.after.head, changed: !result.source.unchanged, initialStatus: result.source.before.status, finalStatus: result.source.after.status },
     completedWork: result.validationResults.filter((item) => item.outcome === "passed").map((item) => ({ command: item.command, status: item.outcome, lane: item.lane })),
     artifacts: { summary: "summary.md", results: "results.json", normalizedTaskSpec: "task-spec.normalized.json", validationPlan: "validation-plan.json" },
     git: { branch: null, commit: null, pullRequest: null, merge: null }, ownerGate: { required: false, status: "not_required" },
     nextAction: { recommendation: next.exactAction },
-    safetyAssertions: { targetUnchanged: result.source.unchanged, targetMainMutation: false, targetMainPush: false, targetPrMerge: false, deploy: false, databaseAccess: false, productionAccess: false, secretAccess: false, providerCalls: false },
+    safetyAssertions: { targetUnchanged: result.source.unchanged, targetMainMutation: false, targetMainPush: false, targetPrMerge: false, deploy: false, databaseAccess: false, productionAccess: false, secretAccess: false, providerCalls: result.providerCalls.length > 0 },
     errors: result.status === "failed" ? result.validationResults.filter((item) => item.acceptance === "required" && item.outcome !== "passed").map((item) => `${item.command}: ${item.outcome}`) : [],
     limitations: result.review.semantic.limitations,
   };
   validateTaskResultContract(document);
   await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify(document, null, 2) + "\n", "utf8");
-  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} validation result\n\nStatus: **${status}**\n\nValidation aggregate: **${result.validationAggregate}**\n\nSource unchanged: **${result.source.unchanged}**\n\nStructural review: **${result.review.structural.status}**\n\nSemantic review: **${result.review.semantic.status}**; delegated to **${delegation.party}**.\n\nProvider calls, publication, database, production, secrets, merge, and deploy: **none**.\n`, "utf8");
+  await writeFile(join(spec.artifacts.root, "summary.md"), `# ${spec.taskId} validation result\n\nStatus: **${status}**\n\nValidation aggregate: **${result.validationAggregate}**\n\nSource unchanged: **${result.source.unchanged}**\n\nStructural review: **${result.review.structural.status}**\n\nSemantic review: **${result.review.semantic.status}**${result.review.semantic.delegation ? `; delegated to **${delegation.party}**` : "; provider-backed RunForge review completed"}.\n\nProvider calls: **${result.providerCalls.length}**. Publication, database, production, secrets, merge, and deploy: **none**.\n`, "utf8");
 }
 
 function validationExecutionAgreement(spec: TaskSpecV2): ExecutionAgreement {
   const enabled = Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, true]));
-  const requested = Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, ["projectDiscovery", "taskAnalysis", "localValidation"].includes(phase)]));
+  const semanticOptIn = spec.executionAgreement.profile === "custom"
+    && spec.executionAgreement.phaseOwnership?.independentReview === "runforge"
+    && spec.executionAgreement.phaseOwnership?.providerModelCalls === "runforge";
+  const requested = Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, ["projectDiscovery", "taskAnalysis", "localValidation", ...(semanticOptIn ? ["independentReview", "providerModelCalls"] : [])].includes(phase)]));
   return negotiateExecutionAgreement({ profile: spec.executionAgreement.profile, requested, requestedOwnership: spec.executionAgreement.phaseOwnership, technicalCapability: enabled, authority: enabled, policy: enabled });
 }
 

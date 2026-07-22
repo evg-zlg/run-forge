@@ -74,6 +74,8 @@ export type SemanticReviewRequest = {
   acceptanceCriteria: string[];
   changedFiles: string[];
   patch: string;
+  /** Existing bounded source for validation-only review; never raw validation output. */
+  reviewSubject?: string;
   structuralEvidence: string[];
   taskSpecContext?: Record<string, unknown>;
   validationOutcomes?: DigestOnlyValidationOutcome[];
@@ -163,7 +165,7 @@ export function buildSemanticReviewPrompt(request: Omit<SemanticReviewRequest, "
     `Known limitations:\n${(request.knownLimitations ?? []).map((item) => `- ${item}`).join("\n") || "- none reported"}`,
     `Structural evidence (explicitly non-semantic; context only):\n${request.structuralEvidence.map((item) => `- ${item}`).join("\n")}`,
     `Review phase budget/deadline:\n${JSON.stringify(request.reviewBudget ?? null, null, 2)}`,
-    `Patch:\n${request.patch}`,
+    ...(request.reviewSubject ? [`Existing-source review subject (validation-only; no patch was created):\n${request.reviewSubject}`] : [`Patch:\n${request.patch}`]),
     "Return JSON only: {\"semanticReview\":{\"confidence\":\"high|medium|low|unknown\",\"limitations\":[\"review limitation\"],\"findings\":[{\"severity\":\"critical|high|medium|low|info\",\"file\":\"path\",\"location\":\"line or range\",\"category\":\"category\",\"evidence\":\"specific evidence\",\"recommendation\":\"actionable fix\",\"blocking\":true|false}]}}. Return an empty findings array when no semantic issues exist.",
     "Do not edit files, run commands, publish, or access secrets, databases, or production.",
   ].join("\n\n");

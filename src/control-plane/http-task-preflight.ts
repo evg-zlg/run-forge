@@ -1,7 +1,7 @@
 import type { ExecutionAgreement } from "../product/execution-agreement.js";
 import type { TaskSpecV2 } from "../product/task-spec-v2.js";
 import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor } from "../product/task-spec-contract.js";
-import { selectProviderModel } from "../product/provider-routing.js";
+import { selectOpenRouterSemanticReviewer } from "../implementation/openrouter-executor.js";
 
 /** Stable HTTP-facing preflight facts.  This deliberately performs no provider call. */
 export type HttpTaskPreflight = {
@@ -18,6 +18,12 @@ export function requestedRuntimeCorrection(taskSpec: Record<string, unknown>): R
   return corrected;
 }
 
+export function requestedSemanticValidationRuntimeCorrection(taskSpec: Record<string, unknown>): Record<string, unknown> {
+  const corrected = structuredClone(taskSpec);
+  corrected.runtime = { ...object(corrected.runtime), preference: "docker" };
+  return corrected;
+}
+
 export function runtimeContractFailure(spec: TaskSpecV2): string | null {
   if (!["implementation", "repair"].includes(spec.execution.mode)) return null;
   return runtimeCompatibleWithImplementationExecutor(spec.runtime.preference) ? null : `runtime '${spec.runtime.preference}' is incompatible with the implementation executor`;
@@ -29,15 +35,15 @@ export function runtimeContractFailure(spec: TaskSpecV2): string | null {
  * the provider-backed execution result.
  */
 export function negotiateSemanticReviewer(spec: TaskSpecV2, agreement: ExecutionAgreement): HttpTaskPreflight {
-  const required = agreement.phases.find((phase) => phase.phaseId === "independentReview")?.responsibleParty === "runforge";
+  const selection = selectOpenRouterSemanticReviewer(spec, agreement);
+  const required = selection.reason !== "semantic_review_not_requested";
   if (!required) return { schemaVersion: 1, outcome: "semantic_review_negotiated", runtime: spec.runtime.preference, reviewer: { required: false, provider: null, model: null } };
-  const provider = spec.providerRouting.provider;
-  const model = provider === "openrouter" ? selectProviderModel(spec.providerRouting, "reviewer", spec.taskId)?.model ?? null : null;
-  return { schemaVersion: 1, outcome: "semantic_review_negotiated", runtime: spec.runtime.preference, reviewer: { required: true, provider, model } };
+  return { schemaVersion: 1, outcome: selection.selected ? "semantic_review_negotiated" : "preflight_contract_rejected", runtime: spec.runtime.preference, reviewer: { required: true, provider: "openrouter", model: selection.selected?.model ?? null } };
 }
 
 export function reviewerUnavailableReason(preflight: HttpTaskPreflight): string | null {
   if (!preflight.reviewer.required) return null;
+  if (preflight.outcome === "preflight_contract_rejected") return "OpenRouter semantic review requires provider/network authority, external network access, ready credentials/backend, and a configured reviewer model.";
   if (preflight.reviewer.provider === "openrouter" && !preflight.reviewer.model) return "OpenRouter semantic review requires a configured reviewer model.";
   return null;
 }
