@@ -123,10 +123,10 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
       runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "disabled", externalNetwork: "denied" },
       validation: {
         mode: "explicit",
-        commands: ["node --version", "test ! -d .git", "git diff --check", databaseCommand],
+        commands: ["node --version", "test -d .git", "git diff --check", databaseCommand],
         requirements: [
           { command: "node --version", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation", fallbacks: [] },
-          { command: "test ! -d .git", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation", fallbacks: [] },
+          { command: "test -d .git", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation", fallbacks: [] },
           { command: "git diff --check", capabilities: ["git-read-only-evidence"], acceptance: "evidence-only", evidenceRole: "git-evidence", fallbacks: [] },
           { command: databaseCommand, capabilities: ["database"], acceptance: "optional", evidenceRole: "database-evidence", fallbacks: ["Delegate database evidence."] },
         ],
@@ -139,7 +139,7 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
       expect(accepted.status).toBe(202);
       expect(await json(accepted)).toMatchObject({ validationNegotiation: { status: "accepted", requirements: [
         { command: "node --version", disposition: "deferred_preflight" },
-        { command: "test ! -d .git", disposition: "deferred_preflight" },
+        { command: "test -d .git", disposition: "deferred_preflight" },
         { command: "git diff --check", disposition: "deferred_preflight" },
         { command: databaseCommand, disposition: "capability_unsupported", blocking: false },
       ] } });
@@ -156,7 +156,7 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
       });
       expect(validation.slice(0, 2)).toEqual(expect.arrayContaining([
         expect.objectContaining({ command: "node --version", outcome: "passed", lane: "docker-validation", executor: "docker-shell", exitCode: 0 }),
-        expect.objectContaining({ command: "test ! -d .git", outcome: "passed", lane: "docker-validation", executor: "docker-shell", exitCode: 0 }),
+        expect.objectContaining({ command: "test -d .git", outcome: "passed", lane: "docker-validation", executor: "docker-shell", exitCode: 0 }),
       ]));
       const gitEvidence = validation.find((item) => item.command === "git diff --check")!;
       expect(gitEvidence).toMatchObject({ outcome: "passed", lane: "git-evidence", executor: "safe-git-evidence", argv: ["git", "diff", "--no-ext-diff", "--no-textconv", "--check"], repositoryIdentity: "[internal path]", boundSha: before.head });
@@ -165,7 +165,7 @@ if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
       expect(unsupported).toMatchObject({ outcome: "capability_unsupported", exitCode: null, lane: "docker-validation", missingCapabilities: ["database"] });
       expect(await access(join(validation[0]!.cwd, ".git")).then(() => true, () => false)).toBe(false);
       const invocations = await readFile(dockerLog, "utf8");
-      expect(invocations).toContain("node --version"); expect(invocations).toContain("test ! -d .git");
+      expect(invocations).toContain("node --version"); expect(invocations).toContain("test -d .git");
       expect(invocations).not.toContain("git diff --check"); expect(invocations).not.toContain(databaseCommand);
       const lifecycle = invocations.trim().split("\n");
       const createIndex = lifecycle.findIndex((line) => line.startsWith("volume create "));

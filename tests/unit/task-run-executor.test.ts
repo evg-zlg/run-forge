@@ -51,6 +51,38 @@ describe("DockerShellExecutor policy", () => {
     expect(args.find((item) => item.startsWith("type=bind"))).toContain("readonly");
   });
 
+  it("mounts the autonomous repository root while starting in a contained monorepo package", async () => {
+    const root = await tempRoot(), cwd = join(root, "packages", "app"); await mkdir(cwd, { recursive: true });
+    const request = createExecutorRequest({ runId: "MONOREPO-1", subtaskId: "validation", command: "git status --short", cwd, artifactDir: join(root, "artifacts"), lane: "docker-shell", dockerWorkspace: { root, workingDirectory: "packages/app" } });
+    const args = dockerRunArgs(request, "runforge:test", "monorepo-validation", true);
+    expect(args).toContain(`type=bind,src=${root},dst=/workspace`);
+    expect(args).toEqual(expect.arrayContaining(["--workdir", "/workspace/packages/app", "COREPACK_HOME=/workspace/packages/app/.runforge-corepack"]));
+    const dependencyArgs = dockerRunArgs(request, "runforge:test", "monorepo-dependencies", true, undefined, undefined, "/private/task-dependencies");
+    expect(dependencyArgs).toContain("type=bind,src=/private/task-dependencies,dst=/workspace/packages/app/node_modules");
+    expect(dependencyArgs).not.toContain("type=bind,src=/private/task-dependencies,dst=/workspace/packages/app/node_modules,readonly");
+    for (const workingDirectory of ["../escape", "/absolute", "C:\\absolute"]) {
+      const unsafe = createExecutorRequest({ runId: "MONOREPO-1", subtaskId: "unsafe", command: "true", cwd, artifactDir: join(root, "unsafe"), dockerWorkspace: { root, workingDirectory } });
+      expect(() => dockerRunArgs(unsafe, "runforge:test", "unsafe", true)).toThrow(/relative path|escapes/i);
+    }
+  });
+
+  it("rejects mount-grammar delimiters and control characters in repository, package, dependency, and volume sources", async () => {
+    const root = await tempRoot(), cwd = join(root, "packages", "app"); await mkdir(cwd, { recursive: true });
+    const request = (workspaceRoot: string, workingDirectory: string) => createExecutorRequest({ runId: "MOUNT-GRAMMAR", subtaskId: "unsafe", command: "true", cwd, artifactDir: join(root, "artifacts"), dockerWorkspace: { root: workspaceRoot, workingDirectory } });
+    for (const unsafeRoot of [`${root},readonly`, `${root}=injected`, `${root}\n--mount`]) {
+      expect(() => dockerRunArgs(request(unsafeRoot, "packages/app"), "runforge:test", "unsafe", true)).toThrow(/mount grammar/i);
+    }
+    for (const unsafePackage of ["packages/app,readonly", "packages/app=dst", "packages/app\n--mount"]) {
+      expect(() => dockerRunArgs(request(root, unsafePackage), "runforge:test", "unsafe", true)).toThrow(/mount grammar/i);
+    }
+    const safe = request(root, "packages/app");
+    for (const unsafeDependency of ["/private/deps,readonly", "/private/deps=dst", "/private/deps\n--mount"]) {
+      expect(() => dockerRunArgs(safe, "runforge:test", "unsafe", true, unsafeDependency)).toThrow(/mount grammar/i);
+      expect(() => dockerRunArgs(safe, "runforge:test", "unsafe", true, undefined, undefined, unsafeDependency)).toThrow(/mount grammar/i);
+    }
+    expect(() => dockerRunArgs(safe, "runforge:test", "unsafe", true, undefined, "volume,readonly")).toThrow(/mount grammar/i);
+  });
+
   it("allows writes only when the caller declares a disposable prepared workspace", async () => {
     const root = await tempRoot();
     const request = createExecutorRequest({
@@ -100,7 +132,7 @@ describe("DockerShellExecutor policy", () => {
     }
   });
 
-  it("preserves no-preparation triage with a node_modules-only read-only mount", async () => {
+  it("preserves no-preparation triage with a resolving node_modules-only read-only mount", async () => {
     const root = await tempRoot();
     const request = createExecutorRequest({
       runId: "EXTERNAL-RUN-2",
@@ -113,7 +145,7 @@ describe("DockerShellExecutor policy", () => {
 
     const args = dockerRunArgs(request, "runforge:local", "runforge-test", true, "/external/source");
 
-    expect(args).toContain("type=bind,src=/external/source,dst=/source/node_modules,readonly");
+    expect(args).toContain("type=bind,src=/external/source,dst=/workspace/node_modules,readonly");
     expect(args).not.toContain("type=bind,src=/external/source,dst=/source,readonly");
     expect(args).toEqual(expect.arrayContaining(["--network", "none"]));
   });

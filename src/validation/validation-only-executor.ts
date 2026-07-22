@@ -15,7 +15,7 @@ import type { TaskSpecV2 } from "../product/task-spec-v2.js";
 import { executeOpenRouterChatCompletion, OpenRouterExecutionError } from "../providers/openrouter-execution-provider.js";
 import { inspectRepoState, prepareExternalRuntime, type RepoState, type RuntimePreparationResult } from "../run/runtime-preparation.js";
 import { createExecutorRequest, DockerShellExecutor } from "../run/task-run-executor.js";
-import { copyTaskRunWorkspace, prepareUnpreparedExternalWorkspace } from "../run/task-run-workspace.js";
+import { cleanupPrivateDependencyLease, copyTaskRunWorkspace, materializeAutonomousGitSnapshot, prepareUnpreparedExternalWorkspace, removePreparedWorkspaceArtifacts, type PrivateDependencyLease } from "../run/task-run-workspace.js";
 import {
   aggregateValidationOutcomes, buildMultiLaneValidationPreflightPlan, runtimeCapabilities,
   type ValidationAggregateStatus, type ValidationPreflightPlan,
@@ -62,17 +62,19 @@ export async function runValidationOnlyExecutor(input: {
   await mkdir(spec.artifacts.root, { recursive: true });
 
   let preparation: RuntimePreparationResult | null = null;
-  let syntheticGitContext = false;
+  let privateDependencies: string | undefined;
+  let privateDependencyLease: PrivateDependencyLease | undefined;
+  let productGitContext = false;
+  try {
   if (spec.runtime.preference === "docker" && spec.runtime.dependencyPreparation === "required") {
-    preparation = await prepareExternalRuntime({ repo: spec.target.repository, workingDirectory: spec.target.workingDirectory, workspace, outDir: spec.artifacts.root, image: spec.runtime.dockerImage });
-    await rm(join(workspace, ".git"), { recursive: true, force: true });
-    if (spec.validation.profile.id.startsWith("campaign-final-") && /[\\/]campaign-worktrees[\\/]cmp_v1_[^\\/]+(?:[\\/]|$)/.test(spec.target.repository)) {
-      await createSyntheticValidationGitContext(resolve(workspace, spec.target.workingDirectory));
-      syntheticGitContext = true;
-    }
+    preparation = await prepareExternalRuntime({ repo: spec.target.repository, workingDirectory: spec.target.workingDirectory, workspace, outDir: spec.artifacts.root, image: spec.runtime.dockerImage, gitSnapshot: { expectedSha: spec.target.expectedSha } });
+    productGitContext = true;
   } else {
     await copyTaskRunWorkspace(spec.target.repository, workspace, "");
-    await prepareUnpreparedExternalWorkspace(spec.target.repository, workspace, spec.target.workingDirectory, { taskId: spec.taskId, workspaceId: `validation-${spec.taskId}` });
+    await materializeAutonomousGitSnapshot(spec.target.repository, workspace, spec.target.expectedSha);
+    const linked = await prepareUnpreparedExternalWorkspace(spec.target.repository, workspace, spec.target.workingDirectory, { taskId: spec.taskId, workspaceId: `validation-${spec.taskId}` }, { onPrivateDependenciesCreated: (lease) => { privateDependencyLease = lease; } });
+    if (linked.owned && linked.expectedTarget) privateDependencies = linked.expectedTarget;
+    productGitContext = true;
   }
   const executionRoot = resolve(workspace, spec.target.workingDirectory);
   const sourceDependencies = await access(join(spec.target.repository, spec.target.workingDirectory, "node_modules")).then(() => true, () => false);
@@ -84,7 +86,7 @@ export async function runValidationOnlyExecutor(input: {
   });
   const productRuntime = runtimeCapabilities({
     runtime: spec.runtime.preference,
-    hasGitMetadata: syntheticGitContext,
+    hasGitMetadata: productGitContext,
     packageManager: packageCapabilities.packageManager,
     dependencies: preparation !== null || sourceDependencies || packageCapabilities.dependencies,
     docker: spec.runtime.preference === "docker",
@@ -118,7 +120,7 @@ export async function runValidationOnlyExecutor(input: {
   await input.onProgress?.("validate", `Executing ${validationPlan.commands.filter((entry) => entry.disposition === "execute").length} supported validation command(s) across negotiated lanes.`);
 
   const docker = spec.runtime.preference === "docker"
-    ? new DockerShellExecutor(process.cwd(), spec.runtime.dockerImage, true, preparation === null && sourceDependencies ? join(spec.target.repository, spec.target.workingDirectory, "node_modules") : undefined, input.tempVolume)
+    ? new DockerShellExecutor(process.cwd(), spec.runtime.dockerImage, true, undefined, input.tempVolume, privateDependencies)
     : null;
   const validationResults: CommandDiagnostic[] = [];
   for (const [index, entry] of validationPlan.commands.entries()) {
@@ -128,6 +130,7 @@ export async function runValidationOnlyExecutor(input: {
         const executed = await docker.execute(createExecutorRequest({
           runId: spec.taskId, subtaskId: `validation-${index + 1}`, command: plan.command,
           cwd: plan.cwd, artifactDir: artifactDirectory, lane: docker.lane, timeoutMs: spec.execution.timeoutMs,
+          dockerWorkspace: { root: workspace, workingDirectory: spec.target.workingDirectory },
         }));
         return { stdout: executed.stdout, stderr: executed.stderr, exitCode: executed.exitCode, signal: executed.signal, timedOut: executed.timedOut };
       } : undefined,
@@ -203,7 +206,9 @@ export async function runValidationOnlyExecutor(input: {
   const review = { structural: { kind: "structural" as const, status: validationAggregate, evidence: validationResults.flatMap((item) => item.artifactPaths) }, semantic };
   const completed = structuralReady && (!semanticOptIn || semantic.status === "completed");
   const costs = providerCalls.flatMap((call) => typeof call.costUsd === "number" ? [call.costUsd] : []);
-  return { status: completed ? "completed" : "failed", validationPlan, validationAggregate, validationResults, source: { before: sourceBefore, after: sourceAfter, unchanged }, productWorkspace: workspace, preparation, providerCalls, usage: { providerCalls: providerCalls.length, totalTokens: providerCalls.reduce((sum, call) => sum + (typeof call.tokenUsage === "number" ? call.tokenUsage : 0), 0), costUsd: costs.length ? costs.reduce((sum, value) => sum + value, 0) : null, phases: { reviewer: providerCalls.filter((call) => call.phase === "reviewer").length, logCompression: providerCalls.filter((call) => call.phase === "logCompression").length } }, review, executionAgreement: agreement };
+  const result = { status: completed ? "completed" : "failed", validationPlan, validationAggregate, validationResults, source: { before: sourceBefore, after: sourceAfter, unchanged }, productWorkspace: workspace, preparation, providerCalls, usage: { providerCalls: providerCalls.length, totalTokens: providerCalls.reduce((sum, call) => sum + (typeof call.tokenUsage === "number" ? call.tokenUsage : 0), 0), costUsd: costs.length ? costs.reduce((sum, value) => sum + value, 0) : null, phases: { reviewer: providerCalls.filter((call) => call.phase === "reviewer").length, logCompression: providerCalls.filter((call) => call.phase === "logCompression").length } }, review, executionAgreement: agreement } as ValidationOnlyExecutorResult;
+  return result;
+  } finally { try { await removePreparedWorkspaceArtifacts(workspace, spec.target.workingDirectory); } finally { await cleanupPrivateDependencyLease(privateDependencyLease); } }
 }
 
 async function compressValidationLogs(spec: TaskSpecV2, agreement: ExecutionAgreement, sources: RawLogSourceV1[], label: string, signal: AbortSignal | undefined, providerCalls: Array<Record<string, unknown>>): Promise<{ digest: LogDigestV1; ref: string }> {
@@ -251,21 +256,6 @@ function isBoundSuccessfulReviewerCall(call: Record<string, unknown>): boolean {
 /** Includes all ref names and object IDs, so a review adapter cannot quietly move a source ref. */
 async function sourceRefs(repository: string): Promise<string> {
   return (await execFileAsync("git", ["-C", repository, "for-each-ref", "--format=%(refname) %(objectname)"], { maxBuffer: 2_000_000 })).stdout.trim();
-}
-
-/** Creates non-authoritative Git context inside a disposable validation snapshot. */
-export async function createSyntheticValidationGitContext(workspace: string): Promise<void> {
-  const env = { PATH: process.env.PATH ?? "/usr/bin:/bin", LANG: "C", LC_ALL: "C", GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_TERMINAL_PROMPT: "0", GIT_ASKPASS: "/usr/bin/false", GIT_OPTIONAL_LOCKS: "0" };
-  const git = (args: string[]) => execFileAsync("git", args, { cwd: workspace, env, maxBuffer: 2_000_000 });
-  await git(["init", "--quiet", "--initial-branch=runforge-validation-snapshot"]);
-  await git(["config", "user.name", "RunForge Validation Snapshot"]);
-  await git(["config", "user.email", "validation-snapshot@runforge.invalid"]);
-  await git(["config", "core.hooksPath", "/dev/null"]);
-  await git(["config", "credential.helper", ""]);
-  await git(["config", "protocol.file.allow", "never"]);
-  await writeFile(join(workspace, ".git", "info", "exclude"), ["**/node_modules/", "**/.runforge-corepack/", "**/.runforge-tmp/", ""].join("\n"), "utf8");
-  await git(["add", "--all"]);
-  await git(["commit", "--quiet", "--no-verify", "--message", "RunForge disposable validation snapshot"]);
 }
 
 function semanticReviewDelegation(phase: ExecutionPhaseAgreement): NonNullable<SemanticReviewResult["delegation"]> {
