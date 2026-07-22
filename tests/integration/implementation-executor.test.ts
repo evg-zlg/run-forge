@@ -45,11 +45,10 @@ describe("implementation executor", () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
     process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ maxInputContextTokens: 80 });
     const result = await execute(await repository(), "EXECUTOR-CONTEXT-1", `bounded task ${"oversized-context ".repeat(400)}`, ["node -e \"process.exit(0)\""], [], (value) => { value.discovery = { profile: "small-scope", maxFiles: 3, maxBytes: 300000, maxTokens: 6000, explicitFiles: ["calculator.js"], stopCondition: "stop" }; value.execution.maxCallsPerPhase = 4; });
-    const call = result.providerCalls[0]; const summary = JSON.parse(call.stdout.split("\n").find((line: string) => line.includes("candidate_diff"))).message;
-    const published = JSON.parse(summary);
-    expect(published.envelope).toMatchObject({ profile: "small-scope", limits: { maxInputContextTokens: 80, maxCallsPerPhase: 4 }, phase: "implementation", taskId: "EXECUTOR-CONTEXT-1" });
-    expect(published.prompt.length).toBeLessThanOrEqual(320);
+    const call = result.providerCalls[0];
     expect(call).toMatchObject({ executionEnvelope: { model: null, limits: { maxInputContextTokens: 80 } } });
+    expect(call).not.toHaveProperty("stdout"); expect(call).not.toHaveProperty("stderr");
+    expectReceipt(result, { outcome: "completed", patchAvailable: true, inputTokens: 20, outputTokens: 5, reasoningTokens: 2, cost: 0.01 });
   });
 
   it("fast-fails no-progress once without a hidden same-profile retry", async () => {
@@ -64,6 +63,19 @@ describe("implementation executor", () => {
     expect(result.providerCalls[0]).toMatchObject({ failureReason: expect.stringContaining("no_progress"), noProgress: true });
     expect(JSON.stringify(result.implementation)).toContain("no_progress");
     expect(result.diagnostics.retryPlan).toMatchObject({ automatic: false, sameModelProfileAllowed: false, options: expect.arrayContaining([expect.stringContaining("smaller context"), expect.stringContaining("faster model")]) });
+    expectReceipt(result, { outcome: "no_progress", failureClassification: "no_progress", patchAvailable: false, testsStarted: 0, testsCompleted: 0 });
+  });
+
+  it("publishes a provider failure receipt without raw provider output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-provider-failure-")); const agent = await makeAgent(root, [
+      `console.error("provider unavailable");`,
+      `process.exitCode = 2;`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    const result = await execute(await repository(), "EXECUTOR-PROVIDER-FAILED-1", "fix", ["node -e \"process.exit(0)\""]);
+    expectReceipt(result, { outcome: "provider_failed", failureClassification: "provider_failed", patchAvailable: false, checkpointId: null });
+    expect(result.providerCalls[0]).not.toHaveProperty("stdout"); expect(result.providerCalls[0]).not.toHaveProperty("stderr");
+    expect(result.diagnostics).not.toHaveProperty("agentSummary");
   });
 
   it("treats a streamed RED test as progress", async () => {
@@ -75,6 +87,8 @@ describe("implementation executor", () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500";
     const result = await execute(await repository(), "EXECUTOR-RED-PROGRESS-1", "fix", ["node -e \"process.exit(0)\""]);
     expect(result.providerCalls[0]).toMatchObject({ noProgress: false, progressSignals: expect.objectContaining({ redTest: expect.any(String) }) });
+    expectReceipt(result, { outcome: "completed", patchAvailable: true });
+    expect(result.receipt.testsStarted).toBeGreaterThanOrEqual(1);
   });
 
   it("treats a nested Codex file_change as progress and streams a checkpoint", async () => {
@@ -114,6 +128,17 @@ describe("implementation executor", () => {
     expect(result.artifact.checkpoints.length).toBeGreaterThanOrEqual(2);
     expect(JSON.stringify(result.implementation)).toContain("checkpoint_available");
     expect(JSON.stringify(result.implementation)).toContain("durable partial patch");
+    expectReceipt(result, { outcome: "checkpoint_available", failureClassification: "deadline_exceeded", patchAvailable: true, checkpointId: expect.any(String), testsCompleted: 0 });
+  });
+
+  it("classifies a provider deadline with no files as validation not started", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-empty-timeout-")); const agent = await makeAgent(root, [
+      `console.log(JSON.stringify({ type: "test", status: "red", file: "calculator.test.js", message: "RED before timeout" }));`,
+      `setInterval(() => {}, 1000);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500"; process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ maxWallClockMs: 200 });
+    const result = await execute(await repository(), "EXECUTOR-EMPTY-TIMEOUT-1", "fix", ["node -e \"process.exit(0)\""]);
+    expectReceipt(result, { outcome: "deadline_exceeded", failureClassification: "validation_not_started", patchAvailable: false, checkpointId: null, testsCompleted: 0 });
   });
 
   it("stops after reported usage exhausts the phase budget before another call", async () => {
@@ -128,6 +153,7 @@ describe("implementation executor", () => {
     const result = await execute(await repository(), "EXECUTOR-POST-BUDGET-1", "fix", ["node -e \"process.exit(1)\""], [], (value) => { value.execution.phaseBudgets = { implementation: 100, repair: 100 }; });
     expect(await readFile(counter, "utf8")).toBe("1"); expect(result.providerCalls).toHaveLength(1);
     expect(result.implementation).toMatchObject({ status: "blocked_with_owner_gate" });
+    expectReceipt(result, { outcome: "budget_exhausted", failureClassification: "budget_exhausted", calls: 1, patchAvailable: true });
   });
   it("preserves approved preset ownership through the shared resolver", () => {
     expect(executionPhaseOwner("assist-only", "localBranch")).toBe("external_session");
@@ -155,6 +181,10 @@ describe("implementation executor", () => {
     expect((result.validation as Array<Record<string, unknown>>).every((item) => item.exitCode === 0 && typeof item.stdout === "string" && typeof item.stderr === "string")).toBe(true);
     expect(result.providerCalls).toMatchObject([{ providerCalls: true, networkAuthorized: true }, { providerCalls: true, networkAuthorized: true }]);
     expect(result.providerCalls).toMatchObject([{ tokenUsage: 100 }, { tokenUsage: 100 }]);
+    expectReceipt(result, { outcome: "completed", calls: 2, patchAvailable: true, checkpointId: expect.any(String), testsStarted: 4, testsCompleted: 4, lastCompletedStage: "completed" });
+    expect(result.receipt.providerExecutionDuration).toBeGreaterThan(0);
+    expect(result.receipt.totalDuration).toBeGreaterThanOrEqual(result.receipt.providerExecutionDuration);
+    expect(result.receipt.queueDuration).toBe(0);
     expect(result).toMatchObject({
       status: "awaiting_external_session",
       agreement: { profile: "local-ready", requestedProfile: "local-ready", effectiveProfile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]), awaitingPhases: expect.arrayContaining([{ phaseId: "remotePush", responsibleParty: "external_session", prerequisites: [] }]) },
@@ -341,6 +371,7 @@ describe("implementation executor", () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const result = await execute(await repository(), `EXECUTOR-${task}-1`, task, ["node test.js"], task === "FORBIDDEN_CHANGE" ? ["secrets.txt"] : []);
     expect(result.status).toBe(status); expect(result.implementation).toMatchObject({ status: outcome });
+    if (task === "FALSE_POSITIVE") expectReceipt(result, { outcome: "completed", patchAvailable: false, checkpointId: null, testsStarted: 0, testsCompleted: 0 });
   });
 
   it("ignores credential-like assignments that appear only as unchanged patch context", async () => {
@@ -385,6 +416,7 @@ describe("implementation executor", () => {
     const result = await execute(await repository(), "EXECUTOR-EMPTY-DIAGNOSTIC-1", "fix add", ["node -e \"process.exit(1)\""]);
     expect(result).toMatchObject({ status: "failed", implementation: { status: "failed_with_diagnostics" } });
     expect(result.validation).toMatchObject([{ exitCode: 1, stdout: "", stderr: "", infrastructureDefect: "non-zero exit produced empty stdout and stderr" }]);
+    expectReceipt(result, { outcome: "infrastructure_failure", failureClassification: "infrastructure_failure", patchAvailable: true, testsStarted: 1, testsCompleted: 1 });
   });
 
   it("runs end-to-end through localhost HTTP with visible selection and publication separation", async () => {
@@ -430,6 +462,10 @@ describe("implementation executor", () => {
         implementation: { status: "implemented_and_validated", unresolvedAcceptanceCriteria: [] },
         publication: { status: "on_hold", performed: false },
       });
+      expectReceipt(result, { outcome: "completed", patchAvailable: true, calls: 1, testsStarted: 2, testsCompleted: 2 });
+      const resultSchema = JSON.parse(await readFile(resolve(here, "../../schemas/task-result-v1.schema.json"), "utf8"));
+      const validateResult = new Ajv2020({ strict: true, strictRequired: false }).compile(resultSchema);
+      expect(validateResult(result), validateResult.errors?.map((item: { instancePath: string; message?: string }) => `${item.instancePath} ${item.message}`).join("; ")).toBe(true);
       expect(result.workflow.agreement.awaitingPhases).toEqual(expect.arrayContaining([
         expect.objectContaining({ phaseId: "remotePush", responsibleParty: "external_session" }),
       ]));
@@ -535,5 +571,6 @@ function spec(repo: string, taskId: string, text: string, commands: string[], fo
 async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = [], configure?: (value: Record<string, any>) => void): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); configure?.(value); value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
 async function makeAgent(root: string, source: string[]): Promise<string> { const path = join(root, "agent.mjs"); await writeFile(path, source.join("\n") + "\n"); return path; }
 async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string, executionMode: "implementation" | "repair" = "implementation", attempt?: number, dirtyPolicy?: string): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.execution.mode = executionMode; value.executionAgreement = executionAgreement; if (dirtyPolicy) value.target.dirtyPolicy = dirtyPolicy; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId, attempt }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
+function expectReceipt(result: Record<string, any>, expected: Record<string, unknown>): void { const required = ["queueDuration", "providerExecutionDuration", "totalDuration", "provider", "model", "phase", "calls", "inputTokens", "cachedTokens", "outputTokens", "reasoningTokens", "billedTokens", "cost", "availability", "filesRead", "filesChanged", "patchAvailable", "checkpointId", "testsStarted", "testsCompleted", "outcome", "stopReason", "failureClassification", "lastCompletedStage", "nextSafeAction"]; expect(Object.keys(result.receipt)).toEqual(expect.arrayContaining(required)); expect(result.receipt).toMatchObject({ queueDuration: expect.any(Number), providerExecutionDuration: expect.any(Number), totalDuration: expect.any(Number), provider: expect.any(String), phase: expect.any(String), calls: expect.any(Number), availability: { queueDuration: expect.any(String), inputTokens: expect.any(String), cachedTokens: expect.any(String), outputTokens: expect.any(String), reasoningTokens: expect.any(String), billedTokens: expect.any(String), cost: expect.any(String) }, filesRead: expect.any(Array), filesChanged: expect.any(Array), patchAvailable: expect.any(Boolean), testsStarted: expect.any(Number), testsCompleted: expect.any(Number), stopReason: expect.any(String), lastCompletedStage: expect.any(String), nextSafeAction: expect.any(String), ...expected }); expect(result.receipt.totalDuration).toBeGreaterThanOrEqual(result.receipt.providerExecutionDuration + result.receipt.queueDuration); }
 async function poll(url: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("task did not finish"); }
 async function pollPhase(url: string, phase: string): Promise<void> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (task.progress?.phase === phase) return; await new Promise((done) => setTimeout(done, 25)); } throw new Error(`task did not reach ${phase}`); }
