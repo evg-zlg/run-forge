@@ -16,7 +16,7 @@ export type ExecutorStatus = "ready" | "degraded" | "unavailable";
 export type ImplementationExecutorCapability = {
   id: string; status: ExecutorStatus; supports: TaskExecutionMode[]; providerCalls: boolean;
   runtime: string[]; providerRequirements: string[]; networkRequirements: string[];
-  maxLimits: { timeoutMs: number; repairIterations: number; changedFiles: number; patchBytes: number; providerTokens: number };
+  maxLimits: Readonly<Record<keyof typeof implementationExecutorContract.maxLimits, number>>;
   limitations: string[]; command: string | null; model: string | null;
 };
 export type CommandDiagnostic = {

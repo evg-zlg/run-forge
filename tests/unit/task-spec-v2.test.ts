@@ -33,6 +33,68 @@ describe("TaskSpec v2", () => {
     expect(redactedTaskSpec(first)).toEqual(first);
   });
 
+  it("truncates requested context and token limits to executor-owned effective caps", async () => {
+    const repo = await gitRepo();
+    const spec = await normalizeTaskSpecV2({
+      ...minimal(repo),
+      execution: {
+        mode: "validation",
+        maxInputContextTokens: 999_999,
+        maxOutputTokens: 999_999,
+        maxReasoningTokens: 999_999,
+        reasoningSetting: "high",
+        maxCallsPerPhase: 999,
+        maxPhaseTokens: 999_999,
+        maxTaskTokens: 999_999,
+        earlyProgressDeadlineMs: 999_999,
+        maxCostUsd: 999
+      }
+    });
+    expect(spec.execution).toMatchObject({
+      maxInputContextTokens: 120_000,
+      maxOutputTokens: 16_000,
+      maxReasoningTokens: 32_000,
+      reasoningSetting: "high",
+      maxCallsPerPhase: 8,
+      maxPhaseTokens: 80_000,
+      maxTaskTokens: 200_000,
+      earlyProgressDeadlineMs: 90_000,
+      maxCostUsd: 25
+    });
+  });
+
+  it("selects the fast economical profile deterministically for a two-file task", async () => {
+    const repo = await gitRepo();
+    const spec = await normalizeTaskSpecV2({
+      ...minimal(repo),
+      execution: { mode: "validation", maxChangedFiles: 2 },
+      discovery: { policy: "explicit", profile: "small-scope", explicitFiles: ["src/a.ts", "tests/a.test.ts"], maxFiles: 2 }
+    });
+    expect(spec.execution.plan).toEqual({
+      classification: "bounded-small",
+      profile: "fast",
+      modelSelection: "economical",
+      expectedDurationMs: 300_000
+    });
+  });
+
+  it("does not select the heavy profile without an explicit complexity signal", async () => {
+    const repo = await gitRepo();
+    const base = { ...minimal(repo), discovery: { profile: "standard", maxFiles: 40 } };
+    await expect(normalizeTaskSpecV2({ ...base, execution: { mode: "validation", requestedProfile: "heavy" } }))
+      .rejects.toThrow("requires execution.complexitySignal='heavy'");
+    await expect(normalizeTaskSpecV2({ ...base, execution: { mode: "validation", requestedProfile: "heavy", complexitySignal: "heavy" } }))
+      .resolves.toMatchObject({ execution: { plan: { classification: "heavy", profile: "heavy", modelSelection: "capable" } } });
+  });
+
+  it("rejects internally inconsistent hard token budgets", async () => {
+    const repo = await gitRepo();
+    await expect(normalizeTaskSpecV2({
+      ...minimal(repo),
+      execution: { mode: "validation", maxTaskTokens: 100_000, maxPhaseTokens: 80_000, phaseBudgets: { analysis: 80_000, implementation: 80_000 } }
+    })).rejects.toThrow("phaseBudgets total must not exceed execution.maxTaskTokens");
+  });
+
   it.each(EXECUTION_PROFILES.filter((profile) => profile !== "custom"))("normalizes the %s execution agreement profile", async (profile) => {
     const repo = await gitRepo();
     await expect(normalizeTaskSpecV2({ ...minimal(repo), executionAgreement: { schemaVersion: 1, profile } }))
@@ -97,6 +159,10 @@ describe("TaskSpec v2", () => {
     const contract = publicTaskSpecContract() as Record<string, any>;
     expect(contract.executionAgreement).toMatchObject({ schemaVersion: 1, profiles: EXECUTION_PROFILES, phases: EXECUTION_PHASE_IDS, phaseOwnershipParties: EXECUTION_PARTIES });
     expect(contract.implementationRequest.taskSpec.executionAgreement).toEqual({ schemaVersion: 1, profile: "local-ready" });
+    expect(contract.implementationExecutor).toMatchObject({
+      profiles: { fast: { modelSelection: "economical" }, heavy: { requiresComplexitySignal: "heavy" } },
+      defaultEarlyProgressDeadlineMs: 75_000
+    });
     const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(fileSchema);
     expect(validate(contract.implementationRequest.taskSpec), JSON.stringify(validate.errors)).toBe(true);
   });
