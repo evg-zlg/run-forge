@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   VALIDATION_CAPABILITIES, aggregateValidationOutcomes, buildValidationPreflightPlan,
-  classifyValidationExecution, defaultValidationProfile, normalizeValidationRequirements, runtimeCapabilities,
+  classifyValidationExecution, defaultValidationProfile, normalizeValidationRequirements, runtimeCapabilities, validationSatisfiesImplementationCheckpoint,
   type ValidationPlanEntry,
 } from "../../src/validation/capability-contract.js";
 
@@ -35,6 +35,28 @@ describe("capability-aware validation contract", () => {
       record("unknown advisory", "advisory", "capability_unsupported"),
     ];
     expect(aggregateValidationOutcomes(outcomes)).toBe("completed_with_validation_gaps");
+    expect(validationSatisfiesImplementationCheckpoint(outcomes)).toBe(true);
+  });
+
+  it("does not certify a checkpoint from advisory git integrity gaps alone", () => {
+    const outcomes = [
+      { ...record("git diff --check", "advisory", "passed"), evidenceRole: "git-evidence" },
+      { ...record("bespoke-validator --all", "advisory", "capability_unsupported"), evidenceRole: "campaign-validation" },
+    ];
+    expect(aggregateValidationOutcomes(outcomes)).toBe("completed_with_validation_gaps");
+    expect(validationSatisfiesImplementationCheckpoint(outcomes)).toBe(false);
+  });
+
+  it("does not certify a checkpoint when only git integrity evidence passed", () => {
+    expect(validationSatisfiesImplementationCheckpoint([
+      { ...record("git diff --check", "evidence-only", "passed"), evidenceRole: "git-evidence" },
+    ])).toBe(false);
+  });
+
+  it("does not let a passing advisory product command substitute for required validation", () => {
+    expect(validationSatisfiesImplementationCheckpoint([
+      record("node advisory-check.js", "advisory", "passed"),
+    ])).toBe(false);
   });
 
   it("blocks required unsupported validation by capability", () => {

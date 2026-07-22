@@ -11,7 +11,7 @@ import { implementationExecutorContract, runtimeCompatibleWithImplementationExec
 import { durableCheckpointContext, persistDurableCheckpoint } from "./durable-checkpoint.js";
 import { executionPhaseOwner } from "../product/execution-agreement.js";
 import {
-  aggregateValidationOutcomes, buildMultiLaneValidationPreflightPlan, runtimeCapabilities,
+  aggregateValidationOutcomes, buildMultiLaneValidationPreflightPlan, runtimeCapabilities, validationSatisfiesImplementationCheckpoint,
   type ValidationAggregateStatus, type ValidationPreflightPlan,
 } from "../validation/capability-contract.js";
 import { createGitEvidenceBinding, parseGitEvidenceCommand } from "../validation/git-evidence-lane.js";
@@ -233,7 +233,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       validationLogDigestRef = logGate.ref; validationLogDigest = logGate.digest;
       const compressionOverrun = routingBudgetOverrun(providerCalls, request.spec.providerRouting, "logCompression");
       const validationAggregate = aggregateValidationOutcomes(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole })));
-      const validationPassed = !safetyErrors.length && ["passed", "completed_with_validation_gaps"].includes(validationAggregate);
+      const validationPassed = !safetyErrors.length && validationSatisfiesImplementationCheckpoint(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole })));
       if (!validationPassed && !safetyErrors.length) unresolved = validations.filter((item) => item.outcome !== "passed").map((item) => `${item.command}: ${item.outcome}${item.infrastructureDefect ? ` (${item.infrastructureDefect})` : ""}`);
       const actualTokens = providerCalls.reduce((sum, item) => sum + (typeof item.tokenUsage === "number" ? item.tokenUsage : 0), 0);
       const phaseLimit = openRouter ? request.spec.providerRouting.tokenBudget.perPhase[phaseKey] : request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"];

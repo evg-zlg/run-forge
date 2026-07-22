@@ -304,6 +304,18 @@ export function aggregateValidationOutcomes(outcomes: readonly ValidationOutcome
   return outcomes.some((item) => item.outcome !== "passed") ? "completed_with_validation_gaps" : "passed";
 }
 
+/**
+ * Decides whether structural evidence is sufficient to certify an implementation
+ * checkpoint.  An aggregate can legitimately retain non-required gaps, but git
+ * integrity evidence alone neither exercises the candidate nor proves that its
+ * declared validation contract ran.
+ */
+export function validationSatisfiesImplementationCheckpoint(outcomes: readonly ValidationOutcomeRecord[]): boolean {
+  const aggregate = aggregateValidationOutcomes(outcomes);
+  if (aggregate !== "passed" && aggregate !== "completed_with_validation_gaps") return false;
+  return outcomes.some((item) => item.acceptance === "required" && item.outcome === "passed" && item.evidenceRole !== "git-evidence" && !/^git(?:\s|$)/.test(item.command.trim()));
+}
+
 export function runtimeCapabilities(input: {
   runtime: "docker" | "local-disposable"; hasGitMetadata: boolean; hasGitHistory?: boolean;
   hasWorkingTreeIndex?: boolean; packageManager?: boolean; dependencies?: boolean; network?: boolean;

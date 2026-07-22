@@ -78,6 +78,24 @@ describe("implementation executor", () => {
     await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("keeps a local-ready checkpoint unvalidated when only advisory evidence passes", async () => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository(), root = await mkdtemp(join(tmpdir(), "runforge-git-only-validation-")), specPath = join(root, "task.json");
+    const value: Record<string, any> = spec(repo, "EXECUTOR-GIT-ONLY-VALIDATION-1", "fix add", ["git diff --check", "node test.js", "bespoke-validator --all"]);
+    value.validation.requirements = [{ command: "git diff --check", acceptance: "advisory", evidenceRole: "git-evidence" }, { command: "node test.js", acceptance: "advisory", evidenceRole: "campaign-validation" }, { command: "bespoke-validator --all", acceptance: "advisory", evidenceRole: "campaign-validation" }];
+    value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" };
+    await writeFile(specPath, JSON.stringify(value)); await runTaskSpecFile(specPath, { logCompressionInvoker: testLogCompressionInvoker });
+    const result = JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8"));
+    expect(result).toMatchObject({
+      status: "failed", validationAggregate: "completed_with_validation_gaps",
+      implementation: { status: "failed_with_diagnostics" },
+      workflow: { validationCompleted: false },
+      artifact: { bestValidatedCheckpointId: null, checkpoints: [expect.objectContaining({ id: "implementation-0", validationPassed: false })] },
+      handoffPackage: { bestValidatedCheckpoint: null },
+    });
+    expect(result.validation).toEqual(expect.arrayContaining([expect.objectContaining({ command: "node test.js", acceptance: "advisory", outcome: "passed" })]));
+  });
+
   it.each(["required", "reuse-existing"] as const)("prepares %s dependencies before provider execution and re-plans required package validation", async (dependencyPreparation) => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const repo = await repository(), root = await mkdtemp(join(tmpdir(), "runforge-executor-dependencies-")), specPath = join(root, "task.json"), beforeCI = process.env.CI;

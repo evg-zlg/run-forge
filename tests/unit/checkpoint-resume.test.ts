@@ -53,6 +53,16 @@ describe("restart-safe checkpoint resume", () => {
     expect((await readDurableCheckpoint(fixture.artifactRoot, "checkpoint-0"))?.manifest).toMatchObject({ status: "accepted", sequence: 3 });
   });
 
+  it("rejects advisory-only candidate validation and prevents candidate acceptance", async () => {
+    const fixture = await resumeFixture("node test.js", "advisory");
+    const resumed = await resumeDurableCheckpoint(fixture.context);
+    expect(resumed).toMatchObject({ status: "rejected", validationAggregate: "passed", providerCalls: 0 });
+    expect((await readDurableCheckpoint(fixture.artifactRoot, "checkpoint-0"))?.manifest).toMatchObject({ status: "rejected", sequence: 2 });
+    await writeFile(join(fixture.artifactRoot, "results.json"), JSON.stringify({ artifact: { checkpoints: [{ id: "checkpoint-0", validationPassed: false }] }, git: {}, usage: {}, handoffPackage: {} }) + "\n");
+    const store = new ControlPlaneStore(join(fixture.root, "state")); await store.initialize(); const task: any = { ...fixture.context.task, decisions: [], ownerGate: { required: true, status: "pending" }, events: [], updatedAt: new Date().toISOString() };
+    await expect(acceptCompletedResult({ task, request: { decisionId: "reject-advisory-candidate", checkpointId: "checkpoint-0", delivery: "patch" }, store, persist: async () => undefined })).rejects.toMatchObject({ code: "checkpoint_not_validated", status: 409 });
+  });
+
   it("conflicts a concurrent generation and ignores implementation providers", async () => {
     const fixture = await resumeFixture("node -e \"setTimeout(() => {}, 150)\"");
     const active = resumeDurableCheckpoint(fixture.context); await new Promise((done) => setTimeout(done, 20));
@@ -71,14 +81,14 @@ describe("restart-safe checkpoint resume", () => {
   });
 });
 
-async function resumeFixture(command: string) {
+async function resumeFixture(command: string, acceptance: "required" | "advisory" = "required") {
   const root = await mkdtemp(join(tmpdir(), "runforge-resume-")), repository = join(root, "target"), candidateRepository = join(root, "candidate"), artifactRoot = join(root, "artifacts");
   await mkdir(repository); await writeFile(join(repository, "value.js"), "export default 'bad';\n"); await writeFile(join(repository, "test.js"), "import value from './value.js'; if (value !== 'good') process.exit(1);\n"); await writeFile(join(repository, "package.json"), '{"type":"module"}\n'); await init(repository); const baseSha = await git(repository, ["rev-parse", "HEAD"]);
   await writeFile(join(repository, "value.js"), "export default 'good';\n"); const patch = (await exec("git", ["diff", "--binary", baseSha], { cwd: repository })).stdout; await git(repository, ["reset", "--hard", baseSha]);
   await mkdir(candidateRepository); const binaryPath = join(candidateRepository, "runforge-candidate.js"); await writeFile(binaryPath, "candidate-v2\n"); await chmod(binaryPath, 0o755); await init(candidateRepository); const candidateSourceSha = await git(candidateRepository, ["rev-parse", "HEAD"]), binarySha = sha(await readFile(binaryPath));
   const agreement = { id: "ea_v1_aaaaaaaaaaaaaaaaaaaaaaaa", schemaVersion: 2, profile: "custom", phaseOwnership: [] };
   const immutableSubset = { id: agreement.id, schemaVersion: agreement.schemaVersion, profile: agreement.profile };
-  const authoritySnapshot = { allowProviderCalls: true, allowNetwork: false }, validationPlan = { schemaVersion: 1, createdAt: new Date().toISOString(), profile: { id: "test", defaultAcceptance: "required", defaultEvidenceRole: "product-validation", additionalCapabilities: [] }, runtime: { runtime: "local-disposable", lane: "local-disposable-validation", available: ["filesystem", "shell"] }, commands: [{ command, requiredCapabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation", fallbacks: [], source: "explicit", runtime: "local-disposable", lane: "local-disposable-validation", cwd: repository, availableCapabilities: ["filesystem", "shell"], missingCapabilities: [], supported: true, reason: "test", disposition: "execute" }] };
+  const authoritySnapshot = { allowProviderCalls: true, allowNetwork: false }, validationPlan = { schemaVersion: 1, createdAt: new Date().toISOString(), profile: { id: "test", defaultAcceptance: acceptance, defaultEvidenceRole: "product-validation", additionalCapabilities: [] }, runtime: { runtime: "local-disposable", lane: "local-disposable-validation", available: ["filesystem", "shell"] }, commands: [{ command, requiredCapabilities: ["filesystem", "shell"], acceptance, evidenceRole: "product-validation", fallbacks: [], source: "explicit", runtime: "local-disposable", lane: "local-disposable-validation", cwd: repository, availableCapabilities: ["filesystem", "shell"], missingCapabilities: [], supported: true, reason: "test", disposition: "execute" }] };
   await persistDurableCheckpoint(artifactRoot, { checkpointId: "checkpoint-0", taskId: "RESUME-TASK-1", projectId: repository, executionAgreementId: agreement.id, sourceRunforgeSha: "a".repeat(40), expectedBaseSha: baseSha, iteration: 0, attempt: 1, generation: "old-generation", kind: "implementation", workspace: { identity: "implementation-workspace", workingDirectory: ".", sha: null, state: "dirty" }, patch, changedFiles: ["value.js"], taskSpec: { taskId: "RESUME-TASK-1", target: { repository, workingDirectory: ".", expectedSha: baseSha } }, executionAgreement: immutableSubset, authoritySnapshot, validationPlan, completedEvidence: [], pendingPhases: ["candidate_validation", "independent_review", "publication"], providerUsage: { implementation: { providerCalls: 1 }, repair: null, validation: { providerCalls: 0 }, review: { providerCalls: 0 } }, executor: {}, safetyAssertions: { secretScanPassed: true }, secretScanResult: { status: "passed" }, unresolvedFindings: [] });
   const task: any = { id: "RESUME-TASK-1", artifactRoot, executionAgreement: { ...agreement, agreementId: agreement.id } };
   const request: any = { artifactRoot, projectId: repository, targetRepository: repository, workingDirectory: ".", expectedBaseSha: baseSha, executionAgreementId: agreement.id, authoritySnapshot, candidateBinary: { path: binaryPath, sha256: binarySha, sourceRunforgeSha: candidateSourceSha, minimumCheckpointSchemaVersion: 2, maximumCheckpointSchemaVersion: 2, features: [] }, dependency: { strategy: "no_dependencies" } };

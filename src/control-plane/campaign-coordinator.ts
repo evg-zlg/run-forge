@@ -1,5 +1,4 @@
-import { randomUUID } from "node:crypto";
-import { lstat } from "node:fs/promises";
+import { randomUUID } from "node:crypto"; import { lstat } from "node:fs/promises";
 import { join } from "node:path";
 import { detectCycle, validateCampaignPlan } from "../run/task-run-planner.js";
 import { SemanticCampaignPlannerError, type CampaignPlannerEvidence, type SemanticCampaignPlannerResult } from "../run/semantic-campaign-planner.js";
@@ -8,17 +7,15 @@ import { ControlPlaneError, type CampaignPlan, type CampaignRecord, type Campaig
 import { CampaignIntegration, CampaignIntegrationError } from "./campaign-integration.js";
 import { accountCampaignChildUsage, aggregateCampaignUsage as aggregateUsageFromValue, campaignChildCompletion, childReservationTokens, deterministicPlannerEvidence, failedPlannerEvidence, finiteNumber, object, reconcileCampaignResult, releaseCampaignReservation, reserveCampaignChild, reservedUsage, taskIdFromSpec, usageFromEvidence } from "./campaign-coordinator-state.js";
 import { CampaignCoordinatorLease } from "./campaign-coordinator-lease.js";
-import { CampaignRecordStore } from "./campaign-record-store.js";
+import { CampaignRecordStore } from "./campaign-record-store.js"; import { projectCampaignValidation, projectPhaseBudgets, routingHasPhase, withoutRoutingPhase } from "./campaign-child-projection.js";
 
 type Deps = {
-  root: string;
-  planCampaign: (record: CampaignRecord) => Promise<CampaignPlan | SemanticCampaignPlannerResult>;
+  root: string; planCampaign: (record: CampaignRecord) => Promise<CampaignPlan | SemanticCampaignPlannerResult>;
   createTask: (input: { projectId?: string; taskSpec: Record<string, unknown>; authority: CampaignSpec["authority"]; publicationRequested: "none" | "draft-pr" }) => Promise<ControlTaskRecord>;
   getTask: (id: string) => Promise<ControlTaskRecord>;
-  getResult: (id: string) => Promise<Record<string, unknown>>; preflightCampaign?: (id: string, spec: CampaignSpec) => void;
+  getResult: (id: string) => Promise<Record<string, unknown>>; repairTaskFromCheckpoint?: (id: string, request: { taskId: string; decisionId: string; checkpointId: string; checkpointDigest: string; choice: "retry_from_checkpoint"; additionalProviderTokens: number; repairIntent: string }) => Promise<Record<string, unknown>>; preflightCampaign?: (id: string, spec: CampaignSpec) => void;
   integration?: CampaignIntegration;
 };
-
 export class CampaignCoordinator {
   private readonly activeCampaignLoops = new Map<string, Promise<void>>();
   private readonly activeCampaignCreates = new Set<Promise<CampaignRecord>>();
@@ -128,6 +125,7 @@ export class CampaignCoordinator {
         if (child.status === "dispatching") {
           if (!this.current(generation)) return; const node = campaign.plan.nodes.find((item) => item.id === child.nodeId);
           if (!node) return this.failReservedChild(campaign, child, "CAMPAIGN_NODE_MISSING", generation);
+          if (child.checkpointRepair?.state === "pending") { if (await this.startPendingCheckpointRepair(campaign, child, generation)) { progressed = true; continue; } if (!this.current(generation)) return; releaseCampaignReservation(campaign, child); child.accounted = true; child.status = "blocked"; child.finishedAt = new Date().toISOString(); child.error = "campaign_checkpoint_repair_required"; return this.finishCampaign(campaign, "on_hold", generation); }
           await this.dispatchReservedChild(campaign, child, node, this.taskSpecForNode(campaign, node), generation);
           progressed = true;
           continue;
@@ -158,7 +156,8 @@ export class CampaignCoordinator {
           child.finishedAt = new Date().toISOString();
         } else if (["failed", "interrupted", "awaiting_owner_decision"].includes(task.status)) {
           progressed = true;
-          if (!child.accounted) { const result = await this.deps.getResult(child.taskId).catch(() => ({})); accountCampaignChildUsage(campaign, child, result); }
+          const result = await this.deps.getResult(child.taskId).catch(() => ({})); if (!child.accounted) accountCampaignChildUsage(campaign, child, result);
+          if (implementationCheckpoint(result)) { if (!this.current(generation)) return; if (await this.retryFromCheckpoint(campaign, child, task, result, generation)) continue; if (!this.current(generation)) return; if (child.checkpointRepair?.state === "pending") { releaseCampaignReservation(campaign, child); child.accounted = true; } child.status = "blocked"; child.finishedAt = new Date().toISOString(); child.error = "campaign_checkpoint_repair_required"; campaign.failures.push({ at: child.finishedAt, nodeId: child.nodeId, taskId: child.taskId, reason: child.error }); return this.finishCampaign(campaign, "on_hold", generation); }
           if (!this.current(generation)) return; if (await this.retryFailedChild(campaign, child, task.error ?? "CHILD_EXECUTION_FAILED", generation)) continue;
           child.status = "failed"; child.finishedAt = new Date().toISOString(); child.error = task.error ?? "child_failed"; campaign.status = "failed"; campaign.failures.push({ at: child.finishedAt, nodeId: child.nodeId, taskId: child.taskId, reason: child.error });
         } else child.status = "running";
@@ -262,7 +261,7 @@ export class CampaignCoordinator {
     const source = node.taskSpec;
     const taskSpec = structuredClone(source), target = object(taskSpec.target), task = object(taskSpec.task);
     const discovery = object(taskSpec.discovery);
-    taskSpec.discovery = { ...discovery, writeScopes: [...(node.writeScopes ?? [])] };
+    taskSpec.discovery = { ...discovery, writeScopes: [...(node.writeScopes ?? [])] }; projectCampaignValidation(taskSpec, campaign, node);
     const integration = campaign.integration;
     if (integration) {
       taskSpec.target = { ...target, repository: integration.worktreeRoot, workingDirectory: campaign.spec.target.workingDirectory ?? ".", expectedSha: integration.headSha };
@@ -272,11 +271,9 @@ export class CampaignCoordinator {
       const campaignRemaining = Math.max(0, campaign.spec.limits.maxTokens - campaign.usage.tokens - reservedUsage(campaign).tokens + childReservationTokens(campaign, node.id));
       const total = Math.floor(Math.max(0, Math.min(configuredTotal, nodeReservation, campaignRemaining)));
       if (total < 1_000) throw new ControlPlaneError(409, "campaign_budget_exhausted", `Campaign node '${node.id}' cannot receive the minimum executable 1000-token budget.`);
-      const perPhase = object(tokenBudget.perPhase), hasLogCompressionRouting = routingHasLogCompressionRouteOrPool(routing);
-      const allocation = projectPhaseBudgets(perPhase, total, implementation, hasLogCompressionRouting), adjustedRouting = allocation.logCompression > 0 ? routing : withoutLogCompressionRouting(routing);
+      const perPhase = object(tokenBudget.perPhase), hasLogCompressionRouting = routingHasPhase(routing, "logCompression"), hasReviewerRouting = routingHasPhase(routing, "reviewer"), hasRepairRouting = implementation && routingHasPhase(routing, "repair"), allocation = projectPhaseBudgets(perPhase, total, implementation, hasLogCompressionRouting, hasReviewerRouting, hasRepairRouting); let adjustedRouting = allocation.logCompression > 0 ? routing : withoutRoutingPhase(routing, "logCompression"); if (allocation.reviewer === 0) adjustedRouting = withoutRoutingPhase(adjustedRouting, "reviewer"); if (allocation.repair === 0) adjustedRouting = withoutRoutingPhase(adjustedRouting, "repair");
       const retryAttempts = Math.max(1, Math.floor(finiteNumber(object(routing.retry).maxAttempts) ?? 1)), requiredCalls = Object.values(allocation).filter((budget) => budget > 0).length * retryAttempts;
-      taskSpec.execution = { ...execution, ...(implementation ? { maxRepairIterations: 0 } : {}), maxProviderTokens: total };
-      taskSpec.providerRouting = { ...adjustedRouting, maxCalls: Math.max(Math.floor(finiteNumber(routing.maxCalls) ?? 1), requiredCalls), tokenBudget: { ...tokenBudget, total, perPhase: allocation } };
+      taskSpec.execution = { ...execution, ...(implementation ? { maxRepairIterations: hasRepairRouting ? 1 : 0 } : {}), maxProviderTokens: total }; taskSpec.providerRouting = { ...adjustedRouting, maxCalls: Math.max(Math.floor(finiteNumber(routing.maxCalls) ?? 1), requiredCalls), tokenBudget: { ...tokenBudget, total, perPhase: allocation } };
       const validation = object(taskSpec.validation);
       if (typeof validation.mode === "string" && Array.isArray(validation.commands)) {
         const replaceBase = (value: unknown): unknown => typeof value === "string" ? value.replaceAll("__CAMPAIGN_BASE__", integration.baseSha) : value;
@@ -339,11 +336,14 @@ export class CampaignCoordinator {
       return true;
     } catch { return false; }
   }
-  private integrationFailure(campaign: CampaignRecord, child: CampaignRecord["children"][string], code: string): "failed" { const at = new Date().toISOString(); releaseCampaignReservation(campaign, child); child.status = "failed"; child.finishedAt = at; child.error = code; if (campaign.integration) { campaign.integration.status = "failed"; campaign.integration.lastError = code; } campaign.failures.push({ at, nodeId: child.nodeId, ...(child.taskId ? { taskId: child.taskId } : {}), reason: code }); return "failed"; }
-  private async saveCampaign(campaign: CampaignRecord, generation: number): Promise<void> { this.assertCurrent(generation); await this.records.save(campaign, () => this.assertCurrent(generation)); }
-  private readCampaign(id: string): Promise<CampaignRecord | null> { return this.records.read(id); }
-  private readCampaigns(): Promise<CampaignRecord[]> { return this.records.list(); }
+  private async retryFromCheckpoint(campaign: CampaignRecord, child: CampaignRecord["children"][string], task: ControlTaskRecord, result: Record<string, unknown>, generation: number): Promise<boolean> { const checkpoint = implementationCheckpoint(result), node = campaign.plan?.nodes.find((item) => item.id === child.nodeId), attempt = (child.executionRetryAttempts ?? 0) + 1; if (!checkpoint || !node || task.status !== "awaiting_owner_decision" || !this.deps.repairTaskFromCheckpoint || attempt > 1) return false;
+    const projected = this.taskSpecForNode(campaign, node), desiredRepair = Math.max(1, Math.floor(finiteNumber(object(object(object(projected.providerRouting).tokenBudget).perPhase).repair) ?? 1)), acceptedRepair = Math.max(0, Math.floor(finiteNumber(object(object(object(object(task.selection).budgets).tokenBudget).perPhase).repair) ?? desiredRepair)), repairIntent = `Repair only the failed validation or review after completed implementation for campaign node ${node.id}.`;
+    const reservation = checkpointRepairReservation(node, desiredRepair); if (!withinRetryBudget(campaign, reservation)) return false; child.status = "pending"; child.accounted = false; child.executionRetryAttempts = attempt; child.finishedAt = null; child.error = null; child.checkpointRepair = { state: "pending", taskId: task.id, decisionId: `${campaign.id}_${node.id}_checkpoint_retry_${attempt}`, checkpointId: checkpoint.id, checkpointDigest: checkpoint.digest, additionalProviderTokens: acceptedRepair > 0 ? 0 : desiredRepair, repairIntent }; reserveCampaignChild(campaign, child, reservation, task.id); await this.saveCampaign(campaign, generation); return this.startPendingCheckpointRepair(campaign, child, generation);
+  }
+  private async startPendingCheckpointRepair(campaign: CampaignRecord, child: CampaignRecord["children"][string], generation: number): Promise<boolean> { const intent = child.checkpointRepair; if (!intent || intent.state !== "pending" || !this.deps.repairTaskFromCheckpoint) return false; try { await this.deps.repairTaskFromCheckpoint(intent.taskId, { taskId: intent.taskId, decisionId: intent.decisionId, checkpointId: intent.checkpointId, checkpointDigest: intent.checkpointDigest, choice: "retry_from_checkpoint", additionalProviderTokens: intent.additionalProviderTokens, repairIntent: intent.repairIntent }); intent.state = "started"; child.status = "running"; await this.saveCampaign(campaign, generation); return true; } catch { return false; } }
+  private integrationFailure(campaign: CampaignRecord, child: CampaignRecord["children"][string], code: string): "failed" { const at = new Date().toISOString(); releaseCampaignReservation(campaign, child); child.status = "failed"; child.finishedAt = at; child.error = code; if (campaign.integration) { campaign.integration.status = "failed"; campaign.integration.lastError = code; } campaign.failures.push({ at, nodeId: child.nodeId, ...(child.taskId ? { taskId: child.taskId } : {}), reason: code }); return "failed"; } private async saveCampaign(campaign: CampaignRecord, generation: number): Promise<void> { this.assertCurrent(generation); await this.records.save(campaign, () => this.assertCurrent(generation)); }
+  private readCampaign(id: string): Promise<CampaignRecord | null> { return this.records.read(id); } private readCampaigns(): Promise<CampaignRecord[]> { return this.records.list(); }
 }
-function routingHasLogCompressionRouteOrPool(routing: Record<string, unknown>): boolean { if (routing.logCompressionRoute !== undefined || routing.logCompressionModelPool !== undefined || routing.logCompressionPool !== undefined) return true; return ["models", "route", "routes", "phaseRoutes", "modelPool", "modelPools", "phaseModelPools", "pools"].some((key) => { const container = object(routing[key]); return Object.prototype.hasOwnProperty.call(container, "logCompression") && container.logCompression !== undefined; }); }
-function withoutLogCompressionRouting(routing: Record<string, unknown>): Record<string, unknown> { const adjusted = { ...routing }; delete adjusted.logCompressionRoute; delete adjusted.logCompressionModelPool; delete adjusted.logCompressionPool; for (const key of ["models", "route", "routes", "phaseRoutes", "modelPool", "modelPools", "phaseModelPools", "pools"]) { const container = object(adjusted[key]); if (!Object.prototype.hasOwnProperty.call(container, "logCompression")) continue; const next = { ...container }; delete next.logCompression; adjusted[key] = next; } return adjusted; }
-function projectPhaseBudgets(perPhase: Record<string, unknown>, total: number, implementation: boolean, compressionRoute: boolean): Record<string, number> { const phases = ["planner", "implementer", "repair", "reviewer"] as const, desiredLog = compressionRoute ? Math.max(1, Math.floor(finiteNumber(perPhase.logCompression) ?? 1)) : 0, logCompression = Math.min(desiredLog, Math.max(0, total - (implementation ? 1 : 0))), remaining = total - logCompression; if (implementation) return { planner: 0, implementer: remaining, repair: 0, reviewer: 0, logCompression }; const result: Record<string, number> = { logCompression }; let available = remaining; for (const phase of phases) { const allocated = Math.min(available, Math.max(0, Math.floor(finiteNumber(perPhase[phase]) ?? 0))); result[phase] = allocated; available -= allocated; } return result; }
+function implementationCheckpoint(result: Record<string, unknown>): { id: string; digest: string } | null { const workflow = object(result.workflow), implementation = object(result.implementation), checkpoints = Array.isArray(object(result.artifact).checkpoints) ? object(result.artifact).checkpoints : [], checkpoint = object(checkpoints.at(-1)); if (workflow.implementationCompleted !== true && !/^implemented/.test(String(implementation.status ?? "")) && !/^implementation(?:-|$)/.test(String(checkpoint.id ?? ""))) return null; return typeof checkpoint.id === "string" && typeof checkpoint.digest === "string" ? { id: checkpoint.id, digest: checkpoint.digest } : null; }
+function checkpointRepairReservation(node: CampaignPlan["nodes"][number], tokens: number): CampaignPlan["nodes"][number] { const ratio = tokens / Math.max(1, node.estimatedTokens ?? tokens); return { ...node, estimatedTokens: tokens, ...(node.estimatedCostUsd === undefined ? {} : { estimatedCostUsd: node.estimatedCostUsd * ratio }) }; }
+function withinRetryBudget(campaign: CampaignRecord, node: CampaignPlan["nodes"][number]): boolean { return campaign.usage.tokens + reservedUsage(campaign).tokens + (node.estimatedTokens ?? 0) <= campaign.spec.limits.maxTokens && (campaign.spec.limits.maxCostUsd === undefined || campaign.usage.costUsd + reservedUsage(campaign).costUsd + (node.estimatedCostUsd ?? 0) <= campaign.spec.limits.maxCostUsd); }
