@@ -18,7 +18,7 @@ import { createGitEvidenceBinding, parseGitEvidenceCommand } from "../validation
 import { detectPackageValidationCapabilities } from "./validation-runtime-capabilities.js";
 import { runValidation, type CommandDiagnostic } from "./validation-command-runner.js";
 import { blockedRequiredSemanticReview, runSemanticReview, SemanticReviewRequiredError, semanticReviewBudgetOverrun, semanticReviewPhaseTimeoutMs, semanticTaskSpecContext, semanticValidationOutcome, uniqueReviewLimitations, type SemanticReviewResult } from "./semantic-review.js";
-import { extractTokenUsage, runLocalAgent } from "./local-agent.js"; import { aggregateProviderAccounting, boundedProviderText, routingBudgetOverrun } from "./executor-accounting.js";
+import { extractTokenUsage, runLocalAgent } from "./local-agent.js"; import { aggregateProviderAccounting, boundedProviderText, phaseTokenOverrun, routingBudgetOverrun } from "./executor-accounting.js";
 import { buildContextPlan } from "./bounded-context.js";
 import type { LogCompressionInvoker, LogDigestV1 } from "./raw-log-compressor.js";
 import { gateValidationRawLogs, repairDigestContext, requireRawLogDigest } from "./raw-log-gate.js"; import { selectProviderModel } from "../product/provider-routing.js";
@@ -247,10 +247,11 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
         safetyAssertions: { targetMainMutation: false, targetMainPush: false, forbiddenZonesRespected: safetyErrors.length === 0, secretScanPassed: !safetyErrors.includes("Secret scan rejected the patch.") }, secretScanResult: secretScan, unresolvedFindings: unresolved
       });
       checkpoints.push({ id: checkpoint.id, path: relative(request.artifactRoot, checkpoint.path), patchPath: relative(request.artifactRoot, checkpoint.patchPath), digest: checkpoint.digest, iteration, validationPassed });
-      const phaseExceeded = (call.tokenUsage ?? 0) > phaseLimit, totalExceeded = actualTokens > (openRouter ? request.spec.providerRouting.tokenBudget.total : request.spec.execution.maxProviderTokens);
+      const phaseOverrun = phaseTokenOverrun(providerCalls, phaseKey, phaseLimit);
+      const phaseExceeded = phaseOverrun !== null, totalExceeded = actualTokens > (openRouter ? request.spec.providerRouting.tokenBudget.total : request.spec.execution.maxProviderTokens);
       budgetExceeded = Boolean(compressionOverrun) || totalExceeded || phaseExceeded;
       if (compressionOverrun) { overrunPhase = "logCompression"; overrunActual = compressionOverrun.actual; overrunLimit = compressionOverrun.limit; budgetReason = compressionOverrun.reason; }
-      else if (budgetExceeded) { overrunPhase = phase === "implement" ? "implementation" : "repair"; overrunActual = phaseExceeded ? call.tokenUsage ?? 0 : actualTokens; overrunLimit = phaseExceeded ? phaseLimit : (openRouter ? request.spec.providerRouting.tokenBudget.total : request.spec.execution.maxProviderTokens); }
+      else if (budgetExceeded) { overrunPhase = phase === "implement" ? "implementation" : "repair"; overrunActual = phaseOverrun?.actual ?? actualTokens; overrunLimit = phaseOverrun?.limit ?? (openRouter ? request.spec.providerRouting.tokenBudget.total : request.spec.execution.maxProviderTokens); }
       if (openRouter) { const routingOverrun = routingBudgetOverrun(providerCalls, request.spec.providerRouting, phaseKey); if (routingOverrun && !compressionOverrun) { budgetExceeded = true; overrunActual = routingOverrun.actual; overrunLimit = routingOverrun.limit; budgetReason = routingOverrun.reason; } }
       if (safetyErrors.length) { status = "blocked_with_owner_gate"; break; }
       if (validationPassed) {

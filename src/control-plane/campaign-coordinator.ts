@@ -270,17 +270,18 @@ export class CampaignCoordinator {
       const configuredTotal = finiteNumber(tokenBudget.total) ?? finiteNumber(execution.maxProviderTokens) ?? 1_000;
       const nodeReservation = finiteNumber(node.estimatedTokens) ?? configuredTotal;
       const campaignRemaining = Math.max(0, campaign.spec.limits.maxTokens - campaign.usage.tokens - reservedUsage(campaign).tokens + childReservationTokens(campaign, node.id));
-      const total = Math.min(configuredTotal, nodeReservation, campaignRemaining);
-      taskSpec.execution = implementation ? { ...execution, maxRepairIterations: 0, maxProviderTokens: total } : execution;
-      taskSpec.providerRouting = { ...routing, maxCalls: implementation ? 1 : routing.maxCalls, tokenBudget: { ...tokenBudget, total, perPhase: implementation ? { planner: 0, implementer: total, repair: 0, reviewer: 0 } : object(tokenBudget.perPhase) } };
+      const total = Math.floor(Math.max(0, Math.min(configuredTotal, nodeReservation, campaignRemaining)));
+      if (total < 1_000) throw new ControlPlaneError(409, "campaign_budget_exhausted", `Campaign node '${node.id}' cannot receive the minimum executable 1000-token budget.`);
+      const perPhase = object(tokenBudget.perPhase), hasLogCompressionRouting = routingHasLogCompressionRouteOrPool(routing);
+      const allocation = projectPhaseBudgets(perPhase, total, implementation, hasLogCompressionRouting), adjustedRouting = allocation.logCompression > 0 ? routing : withoutLogCompressionRouting(routing);
+      const retryAttempts = Math.max(1, Math.floor(finiteNumber(object(routing.retry).maxAttempts) ?? 1)), requiredCalls = Object.values(allocation).filter((budget) => budget > 0).length * retryAttempts;
+      taskSpec.execution = { ...execution, ...(implementation ? { maxRepairIterations: 0 } : {}), maxProviderTokens: total };
+      taskSpec.providerRouting = { ...adjustedRouting, maxCalls: Math.max(Math.floor(finiteNumber(routing.maxCalls) ?? 1), requiredCalls), tokenBudget: { ...tokenBudget, total, perPhase: allocation } };
       const validation = object(taskSpec.validation);
       if (typeof validation.mode === "string" && Array.isArray(validation.commands)) {
         const replaceBase = (value: unknown): unknown => typeof value === "string" ? value.replaceAll("__CAMPAIGN_BASE__", integration.baseSha) : value;
         validation.commands = validation.commands.map(replaceBase);
-        if (Array.isArray(validation.requirements)) validation.requirements = validation.requirements.map((requirement) => {
-          const item = object(requirement);
-          return Object.keys(item).length ? { ...item, command: replaceBase(item.command) } : requirement;
-        });
+        if (Array.isArray(validation.requirements)) validation.requirements = validation.requirements.map((requirement) => { const item = object(requirement); return Object.keys(item).length ? { ...item, command: replaceBase(item.command) } : requirement; });
         taskSpec.validation = validation;
       }
     }
@@ -343,3 +344,6 @@ export class CampaignCoordinator {
   private readCampaign(id: string): Promise<CampaignRecord | null> { return this.records.read(id); }
   private readCampaigns(): Promise<CampaignRecord[]> { return this.records.list(); }
 }
+function routingHasLogCompressionRouteOrPool(routing: Record<string, unknown>): boolean { if (routing.logCompressionRoute !== undefined || routing.logCompressionModelPool !== undefined || routing.logCompressionPool !== undefined) return true; return ["models", "route", "routes", "phaseRoutes", "modelPool", "modelPools", "phaseModelPools", "pools"].some((key) => { const container = object(routing[key]); return Object.prototype.hasOwnProperty.call(container, "logCompression") && container.logCompression !== undefined; }); }
+function withoutLogCompressionRouting(routing: Record<string, unknown>): Record<string, unknown> { const adjusted = { ...routing }; delete adjusted.logCompressionRoute; delete adjusted.logCompressionModelPool; delete adjusted.logCompressionPool; for (const key of ["models", "route", "routes", "phaseRoutes", "modelPool", "modelPools", "phaseModelPools", "pools"]) { const container = object(adjusted[key]); if (!Object.prototype.hasOwnProperty.call(container, "logCompression")) continue; const next = { ...container }; delete next.logCompression; adjusted[key] = next; } return adjusted; }
+function projectPhaseBudgets(perPhase: Record<string, unknown>, total: number, implementation: boolean, compressionRoute: boolean): Record<string, number> { const phases = ["planner", "implementer", "repair", "reviewer"] as const, desiredLog = compressionRoute ? Math.max(1, Math.floor(finiteNumber(perPhase.logCompression) ?? 1)) : 0, logCompression = Math.min(desiredLog, Math.max(0, total - (implementation ? 1 : 0))), remaining = total - logCompression; if (implementation) return { planner: 0, implementer: remaining, repair: 0, reviewer: 0, logCompression }; const result: Record<string, number> = { logCompression }; let available = remaining; for (const phase of phases) { const allocated = Math.min(available, Math.max(0, Math.floor(finiteNumber(perPhase[phase]) ?? 0))); result[phase] = allocated; available -= allocated; } return result; }
