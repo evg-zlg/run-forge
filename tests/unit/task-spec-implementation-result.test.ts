@@ -46,4 +46,18 @@ describe("normalized implementation usage", () => {
     expect(partial).toMatchObject({ totalTokens: 20, tokenAvailability: "partial", costUsd: 0.02, costAvailability: "partial" });
     expect(unavailable).toMatchObject({ totalTokens: null, tokenAvailability: "unavailable", costUsd: null, costAvailability: "unavailable" });
   });
+
+  it("reports provider repair overrun from durable phase usage even if the executor summary missed it", () => {
+    const usage = phaseUsage({ ...spec, execution: { ...spec.execution, phaseBudgets: { ...spec.execution.phaseBudgets, repair: 12_094 } } }, result([
+      { phase: "repair", tokenUsage: 10_911, usageAccounting: "provider", iteration: 1 },
+      { phase: "repair", tokenUsage: 10_912, usageAccounting: "provider", iteration: 2 },
+      { phase: "validation", tokenUsage: 999_999, usageAccounting: "synthetic" },
+    ]));
+
+    expect(usage).toMatchObject({
+      totalTokens: 21_823,
+      phases: { repair: { actualTokens: 21_823, requestedLimit: 12_094, effectiveLimit: 12_094, exceeded: true } },
+      syntheticAccounting: { totalTokens: 999_999, phases: { validation: { actualTokens: 999_999, exceeded: false } } },
+    });
+  });
 });

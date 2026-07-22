@@ -8,6 +8,18 @@ export function aggregateProviderAccounting(calls: Array<Record<string, unknown>
   const availability = (count: number): "complete" | "partial" | "unavailable" => count === calls.length ? "complete" : count ? "partial" : "unavailable";
   return { tokens: tokenValues.reduce((sum, value) => sum + value, 0), costUsd: costValues.length ? costValues.reduce((sum, value) => sum + value, 0) : null, usageAvailability: availability(tokenValues.length), costAvailability: availability(costValues.length) };
 }
+/**
+ * Checks the cumulative reported provider usage for one execution phase.
+ * A repair generation may contain more than one repair call, so comparing only
+ * the last call would incorrectly leave a phase budget overrun unreported.
+ */
+export function phaseTokenOverrun(calls: Array<Record<string, unknown>>, phase: string, limit: number | undefined): { actual: number; limit: number } | null {
+  if (typeof limit !== "number" || !Number.isFinite(limit)) return null;
+  const actual = calls
+    .filter((call) => call.phase === phase)
+    .reduce((sum, call) => sum + (typeof call.tokenUsage === "number" && Number.isFinite(call.tokenUsage) ? call.tokenUsage : 0), 0);
+  return actual > limit ? { actual, limit } : null;
+}
 export function routingBudgetOverrun(calls: Array<Record<string, unknown>>, routing: { tokenBudget: { total: number; perPhase: Record<string, number> }; costBudgetUsd?: number }, phase: string): { kind: "phase_tokens" | "total_tokens" | "cost" | "accounting_unavailable"; actual: number; limit: number; reason: string } | null {
   const accounting = aggregateProviderAccounting(calls), phaseTokens = calls.filter((call) => call.phase === phase).reduce((sum, call) => sum + (typeof call.tokenUsage === "number" ? call.tokenUsage : 0), 0), phaseLimit = routing.tokenBudget.perPhase[phase];
   if (accounting.usageAvailability !== "complete") return { kind: "accounting_unavailable", actual: accounting.tokens, limit: routing.tokenBudget.total, reason: "OpenRouter token accounting is incomplete; budget enforcement stopped closed after durable evidence." };

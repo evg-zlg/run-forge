@@ -1,13 +1,17 @@
+import { execFile } from "node:child_process";
 import { mkdtemp, mkdir, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import { CampaignCoordinator } from "../../src/control-plane/campaign-coordinator.js";
 import { CampaignCoordinatorLease } from "../../src/control-plane/campaign-coordinator-lease.js";
 import { campaignChildCompletion } from "../../src/control-plane/campaign-coordinator-state.js";
 import type { CampaignPlan, CampaignRecord, CampaignSpec, ControlTaskRecord } from "../../src/control-plane/contracts.js";
+import { normalizeTaskSpecV2 } from "../../src/product/task-spec-v2.js";
 
 const roots: string[] = [];
+const exec = promisify(execFile);
 afterEach(async () => { while (roots.length) await rm(roots.pop()!, { recursive: true, force: true }); });
 
 const authority = { inspect: true, implementation: false, providerCalls: false, network: false, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false };
@@ -24,6 +28,8 @@ async function waitFor(read: () => Promise<CampaignRecord>, predicate: (value: C
   while (Date.now() < deadline) { const value = await read(); if (predicate(value)) return value; await new Promise((resolve) => setTimeout(resolve, 10)); }
   throw new Error("campaign did not reach expected state");
 }
+async function initRepository(root: string): Promise<string> { await writeFile(join(root, "README.md"), "fixture\n"); await exec("git", ["init", "-q", "-b", "main"], { cwd: root }); await exec("git", ["add", "README.md"], { cwd: root }); await exec("git", ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-qm", "fixture"], { cwd: root }); return (await exec("git", ["rev-parse", "HEAD"], { cwd: root })).stdout.trim(); }
+function implementationNodeSpec(taskId: string): Record<string, unknown> { return { schemaVersion: 2, taskId, target: {}, task: { text: "implement", goal: "validated implementation", acceptanceCriteria: ["validation passes"] }, discovery: {}, execution: { mode: "implementation", maxProviderTokens: 1_000 }, providerRouting: { provider: "openrouter", fallbackPolicy: "same_provider", models: { implementer: "openai/implementer", logCompression: "openai/compressor" }, modelPools: { logCompression: ["openai/compressor"] }, maxCalls: 1, tokenBudget: { total: 1_000, perPhase: { planner: 0, implementer: 900, repair: 0, reviewer: 0, logCompression: 100 } }, timeoutMs: 10_000, retry: { maxAttempts: 2 } }, validation: { mode: "explicit", commands: ["node --version"] }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: false }, runtime: { preference: "local-disposable", dependencyPreparation: "disabled", externalNetwork: "denied" } }; }
 
 describe("CampaignCoordinator reliability", () => {
   it("accepts a completed implementation result despite an external nested review, but keeps validation strict", () => {
@@ -141,5 +147,90 @@ describe("CampaignCoordinator reliability", () => {
     const ownerless = new CampaignCoordinatorLease(root, 1_000); ownerless.acquire(); ownerless.release();
     await mkdir(lock); const owner = join(lock, "owner.json"); await writeFile(owner, "not-json\n"); await utimes(owner, old, old);
     const malformed = new CampaignCoordinatorLease(root, 1_000); malformed.acquire(); malformed.release();
+  });
+
+  it("projects a strictly positive logCompression phase budget for normal integrated child dispatch", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-logcompression-normal-")); roots.push(root);
+    await mkdir(join(root, "campaigns"), { recursive: true }); const head = await initRepository(root);
+    const campaignId = "cmp_v1_logcompression_normal";
+    const dispatchedSpecs: Record<string, unknown>[] = [];
+    const campaign: CampaignRecord = {
+      schemaVersion: 1, id: campaignId, status: "queued",
+      spec: { ...spec(), authority: { ...authority, implementation: true }, limits: { ...spec().limits, maxTokens: 1_000, maxTasks: 1, maxConcurrency: 1 } },
+      plan: { schemaVersion: 1, campaignId, estimatedTokens: 1_000, estimatedCostUsd: .01, nodes: [{ id: "one", dependsOn: [], estimatedTokens: 1_000, estimatedCostUsd: .01, taskSpec: implementationNodeSpec(`${campaignId}-one`) }] },
+      plannerEvidence: null,
+      integration: { status: "ready", worktreeRoot: root, branch: "cmp/test", baseSha: head, headSha: head, appliedNodes: [], repairAttempts: 0, lastError: null },
+      children: { one: { nodeId: "one", dependsOn: [], taskId: `${campaignId}-one`, status: "dispatching", startedAt: null, finishedAt: null, error: null, accounted: false, reservedTokens: 1_000, reservedCostUsd: .01, integrationRepairAttempts: 0, executionRetryAttempts: 0 } },
+      usage: { tokens: 0, costUsd: 0, tasks: 0 }, reserved: { tokens: 1_000, costUsd: .01 }, checkpoints: [], failures: [], result: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    };
+    await writeFile(join(root, "campaigns", `${campaignId}.json`), JSON.stringify(campaign));
+    const coordinator = new CampaignCoordinator({
+      root,
+      planCampaign: async () => { throw new Error("not used"); },
+      createTask: async (input) => { const normalized = await normalizeTaskSpecV2(input.taskSpec, root); dispatchedSpecs.push(normalized as unknown as Record<string, unknown>); return task(normalized.taskId, "queued"); },
+      getTask: async () => null as unknown as ControlTaskRecord,
+      getResult: async () => ({ status: "workflow_completed", usage: { totalTokens: 2, costUsd: .02 } }),
+    });
+    await coordinator.initialize();
+    await waitFor(() => coordinator.getCampaign(campaignId), () => dispatchedSpecs.length === 1);
+    expect(dispatchedSpecs).toHaveLength(1);
+    const projected = dispatchedSpecs[0] as { providerRouting?: { tokenBudget?: { total?: number; perPhase?: { logCompression?: number } }; routes?: { logCompression?: unknown }; modelPools?: { logCompression?: unknown } } };
+    expect(projected.providerRouting?.routes?.logCompression ?? projected.providerRouting?.modelPools?.logCompression).toBeDefined();
+    expect(projected.providerRouting?.tokenBudget?.total).toBe(1_000);
+    expect(projected.providerRouting?.tokenBudget?.perPhase?.logCompression).toBeGreaterThan(0);
+    expect((projected.providerRouting as { maxCalls?: number }).maxCalls).toBeGreaterThanOrEqual(4);
+    await coordinator.drain();
+  });
+
+  it("projects retry child specs with a strictly positive logCompression phase budget", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-logcompression-retry-")); roots.push(root);
+    await mkdir(join(root, "campaigns"), { recursive: true }); const head = await initRepository(root);
+    const campaignId = "cmp_v1_logcompression_retry";
+    const dispatchedSpecs: Record<string, unknown>[] = [];
+    const campaign: CampaignRecord = {
+      schemaVersion: 1, id: campaignId, status: "queued",
+      spec: { ...spec(), authority: { ...authority, implementation: true }, limits: { ...spec().limits, maxTokens: 2_000, maxTasks: 1, maxConcurrency: 1 } },
+      plan: { schemaVersion: 1, campaignId, estimatedTokens: 1_000, estimatedCostUsd: .01, nodes: [{ id: "one", dependsOn: [], estimatedTokens: 1_000, estimatedCostUsd: .01, taskSpec: implementationNodeSpec(`${campaignId}-one`) }] },
+      plannerEvidence: null,
+      integration: { status: "ready", worktreeRoot: root, branch: "cmp/test", baseSha: head, headSha: head, appliedNodes: [], repairAttempts: 0, lastError: null },
+      children: { one: { nodeId: "one", dependsOn: [], taskId: `${campaignId}-one`, status: "dispatching", startedAt: null, finishedAt: null, error: null, accounted: false, reservedTokens: 1_000, reservedCostUsd: .01, integrationRepairAttempts: 0, executionRetryAttempts: 0 } },
+      usage: { tokens: 0, costUsd: 0, tasks: 0 }, reserved: { tokens: 1_000, costUsd: .01 }, checkpoints: [], failures: [], result: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString()
+    };
+    await writeFile(join(root, "campaigns", `${campaignId}.json`), JSON.stringify(campaign));
+    const taskStatus = new Map<string, ControlTaskRecord["status"]>();
+    const coordinator = new CampaignCoordinator({
+      root,
+      planCampaign: async () => { throw new Error("not used"); },
+      createTask: async (input) => {
+        const normalized = await normalizeTaskSpecV2(input.taskSpec, root); dispatchedSpecs.push(normalized as unknown as Record<string, unknown>);
+        const id = normalized.taskId;
+        taskStatus.set(id, "failed");
+        return task(id, "queued");
+      },
+      getTask: async (id) => taskStatus.has(id) ? task(id, taskStatus.get(id)!) : null as unknown as ControlTaskRecord,
+      getResult: async () => ({ status: "workflow_completed", usage: { totalTokens: 0, costUsd: 0 } }),
+    });
+    await coordinator.initialize();
+    await waitFor(() => coordinator.getCampaign(campaignId), (value) => value.status === "failed" && dispatchedSpecs.length === 2);
+    const normal = dispatchedSpecs[0] as { taskId?: string; providerRouting?: { tokenBudget?: { total?: number; perPhase?: { logCompression?: number } } } };
+    const retry = dispatchedSpecs[1] as { taskId?: string; providerRouting?: { tokenBudget?: { total?: number; perPhase?: { logCompression?: number } } } };
+    expect(normal.taskId).toBe(`${campaignId}-one`);
+    expect(retry.taskId).toContain("_one_er1");
+    expect(normal.providerRouting?.tokenBudget?.total).toBe(1_000);
+    expect(retry.providerRouting?.tokenBudget?.total).toBe(1_000);
+    expect(normal.providerRouting?.tokenBudget?.perPhase?.logCompression).toBeGreaterThan(0);
+    expect(retry.providerRouting?.tokenBudget?.perPhase?.logCompression).toBeGreaterThan(0);
+    expect((normal.providerRouting as { maxCalls?: number }).maxCalls).toBeGreaterThanOrEqual(4);
+    expect((retry.providerRouting as { maxCalls?: number }).maxCalls).toBeGreaterThanOrEqual(4);
+    await coordinator.drain();
+  });
+
+  it("conserves non-implementation phases and does not retain a zero compression field without a route", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-validation-projection-")); roots.push(root); const head = await initRepository(root), campaignId = "cmp_v1_validation_projection";
+    const node = { id: "validate", dependsOn: [], estimatedTokens: 1_000, estimatedCostUsd: 0, taskSpec: { schemaVersion: 2, taskId: `${campaignId}-validate`, target: {}, task: { text: "validate", goal: "validate", acceptanceCriteria: ["validation passes"] }, discovery: {}, execution: { mode: "validation", maxProviderTokens: 1_000 }, providerRouting: { provider: "local", fallbackPolicy: "none", models: {}, maxCalls: 1, tokenBudget: { total: 1_000, perPhase: { planner: 700, implementer: 0, repair: 0, reviewer: 300, logCompression: 0 } }, timeoutMs: 10_000, retry: { maxAttempts: 1 } }, validation: { mode: "explicit", commands: ["node --version"] }, authority: { profile: "read-only", allowProviderCalls: false, allowNetwork: false }, runtime: { preference: "local-disposable", dependencyPreparation: "disabled", externalNetwork: "denied" } } } as CampaignPlan["nodes"][number];
+    const campaign = { schemaVersion: 1, id: campaignId, status: "running", spec: { ...spec(), limits: { ...spec().limits, maxTokens: 1_000 } }, plan: { schemaVersion: 1, campaignId, estimatedTokens: 1_000, estimatedCostUsd: 0, nodes: [node] }, integration: { status: "ready", worktreeRoot: root, branch: "cmp/test", baseSha: head, headSha: head, appliedNodes: [], repairAttempts: 0, lastError: null }, children: {}, usage: { tokens: 0, costUsd: 0, tasks: 0 }, reserved: { tokens: 0, costUsd: 0 }, checkpoints: [], failures: [], result: null, plannerEvidence: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as CampaignRecord;
+    const coordinator = new CampaignCoordinator({ root, planCampaign: async () => campaign.plan!, createTask: async () => task("unused", "queued"), getTask: async () => task("unused", "failed"), getResult: async () => ({}) });
+    const projected = (coordinator as unknown as { taskSpecForNode(value: CampaignRecord, item: CampaignPlan["nodes"][number]): Record<string, unknown> }).taskSpecForNode(campaign, node), normalized = await normalizeTaskSpecV2(projected, root), phases = normalized.providerRouting.tokenBudget.perPhase;
+    expect(phases.logCompression).toBe(0); expect(normalized.providerRouting.models.logCompression).toBeUndefined(); expect(normalized.providerRouting.modelPools?.logCompression).toBeUndefined(); expect(Object.values(phases).reduce((sum, value) => sum + value, 0)).toBeLessThanOrEqual(normalized.providerRouting.tokenBudget.total);
   });
 });

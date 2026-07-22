@@ -163,7 +163,11 @@ export function phaseUsage(spec: TaskSpecV2, result: ImplementationExecutorResul
       requestedLimit,
       effectiveLimit: requestedLimit,
       limitKind: spec.execution.budgetMode,
-      exceeded: phase === result.budget.overrunPhase && result.budget.accounting === "provider",
+      // Normalize durable provider evidence independently of the executor's
+      // summary flag. This keeps a reported phase overrun visible even if an
+      // earlier executor version failed to mark its aggregate repair usage.
+      exceeded: (requestedLimit !== undefined && usage.tokens > requestedLimit)
+        || (phase === result.budget.overrunPhase && result.budget.accounting === "provider"),
     }];
   }));
   const providerTokens = providerCalls.flatMap((call) => finite(call.tokenUsage) ? [call.tokenUsage] : []);
@@ -190,6 +194,7 @@ export function phaseUsage(spec: TaskSpecV2, result: ImplementationExecutorResul
 function usagePhase(call: Record<string, unknown>): UsagePhase {
   if (call.phase === "logCompression" || call.purpose === "raw-log-compression") return "logCompression";
   if (call.phase === "planner") return "analysis";
+  if (call.phase === "validation") return "validation";
   if (call.phase === "reviewer" || call.purpose === "semantic-review") return "review";
   if (call.phase === "implementer" || Number(call.iteration) === 0) return "implementation";
   return "repair";
