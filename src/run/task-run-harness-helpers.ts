@@ -50,7 +50,6 @@ export function parseProviderArgs(value: string | undefined): string[] {
 
 function summarizeEvidence(subtask: PlannedSubtask, result: ExecutorResult): string {
   const lines = result.stdout.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
-  const sample = lines.slice(0, 3).join(" | ");
   if (lines.length === 0) return `${subtask.id} produced no stdout; inspect ${subtask.inputs.join(", ")} manually.`;
-  return `${subtask.id} inspected ${subtask.inputs.length} input(s) and captured ${lines.length} stdout line(s). Sample: ${sample}`;
+  return `${subtask.id} inspected ${subtask.inputs.length} input(s) and captured ${lines.length} stdout line(s); raw output remains in the referenced local artifact.`;
 }

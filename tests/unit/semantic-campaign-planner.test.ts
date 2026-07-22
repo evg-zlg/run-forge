@@ -27,6 +27,29 @@ describe("semantic campaign planner", () => {
     expect(request.maxTokens + promptUpperBound).toBeLessThanOrEqual(spec().limits.maxTokens);
   });
 
+  it("propagates stable ordered pools and a budgeted log-compression route into every child", async () => {
+    const pooled = spec();
+    pooled.providerRouting = {
+      provider: "openrouter", fallbackPolicy: "none",
+      modelPools: {
+        planner: ["z-ai/glm-5.2", "moonshotai/kimi-k3"],
+        implementer: ["deepseek/deepseek-v4-flash", "openai/gpt-5.3-codex"],
+        repair: ["deepseek/deepseek-v4-flash", "z-ai/glm-4.7-flash"],
+        reviewer: ["moonshotai/kimi-k3", "openai/gpt-5.6-terra"],
+        logCompression: ["z-ai/glm-4.7-flash", "google/gemini-3.5-flash-lite"],
+      }
+    };
+    const result = await planSemanticCampaign("cmp_v1_poolpropagation1234567890", pooled, { chatCompletion: async () => response(JSON.stringify(valid)), repositoryManifest: {} });
+    for (const node of result.plan.nodes) {
+      const routing = (node.taskSpec as any).providerRouting;
+      expect(routing.modelPools).toEqual(pooled.providerRouting.modelPools);
+      expect(routing.models.logCompression).toMatch(/^(z-ai\/glm-4\.7-flash|google\/gemini-3\.5-flash-lite)$/);
+      expect(routing.tokenBudget.perPhase.logCompression).toBeGreaterThan(0);
+      expect(routing.maxCalls).toBe(7);
+    }
+    expect((result.plan.nodes[1]!.taskSpec as any).providerRouting.models.implementer).toMatch(/^(deepseek\/deepseek-v4-flash|openai\/gpt-5\.3-codex)$/);
+  });
+
   it("repairs one invalid draft and aggregates provider usage", async () => {
     const chat = vi.fn().mockResolvedValueOnce(response("not json", 10, .01)).mockResolvedValueOnce(response(`\`\`\`json\n${JSON.stringify(valid)}\n\`\`\``, 20, .02));
     const result = await planSemanticCampaign("cmp_v1_223456789012345678901234", uncappedSpec(), { chatCompletion: chat, repositoryManifest: {} });

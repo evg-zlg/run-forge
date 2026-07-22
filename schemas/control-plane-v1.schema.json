@@ -78,7 +78,19 @@
                 "planner": { "type": "string", "minLength": 1 },
                 "implementer": { "type": "string", "minLength": 1 },
                 "repair": { "type": "string", "minLength": 1 },
-                "reviewer": { "type": "string", "minLength": 1 }
+                "reviewer": { "type": "string", "minLength": 1 },
+                "logCompression": { "type": "string", "minLength": 1 }
+              }
+            },
+            "modelPools": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "planner": { "$ref": "#/$defs/modelPool" },
+                "implementer": { "$ref": "#/$defs/modelPool" },
+                "repair": { "$ref": "#/$defs/modelPool" },
+                "reviewer": { "$ref": "#/$defs/modelPool" },
+                "logCompression": { "$ref": "#/$defs/modelPool" }
               }
             },
             "fallbackPolicy": { "enum": ["none", "same_provider"] }
@@ -115,6 +127,7 @@
     "discardResult": { "type": "object", "additionalProperties": false, "required": ["checkpointId", "confirmation"], "properties": {
       "decisionId": { "type": "string", "minLength": 1 }, "checkpointId": { "type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{2,79}$" }, "confirmation": { "const": "discard_result" }
     } },
-    "emptyOperation": { "type": "object", "additionalProperties": false, "description": "Body for continue, retry, and cancel lifecycle operations. Retry is accepted only when recovery.retryAvailable is true; cleanup-pending retries return HTTP 409 recovery_pending with retryAfter and a polling action, while failed bounded cleanup returns non-retryable worker_cleanup_failed." }
+    "emptyOperation": { "type": "object", "additionalProperties": false, "description": "Body for continue, retry, and cancel lifecycle operations. Retry is accepted only when recovery.retryAvailable is true; cleanup-pending retries return HTTP 409 recovery_pending with retryAfter and a polling action, while failed bounded cleanup returns non-retryable worker_cleanup_failed." },
+    "modelPool": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
   }
 }

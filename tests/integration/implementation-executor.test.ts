@@ -11,16 +11,25 @@ import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
 import { discoverImplementationExecutors } from "../../src/implementation/executor.js";
 import { detectPackageValidationCapabilities } from "../../src/implementation/validation-runtime-capabilities.js";
 import { executionPhaseOwner } from "../../src/product/execution-agreement.js";
-import { startControlPlaneServer } from "../../src/control-plane/server.js";
+import { startControlPlaneServer as startBaseControlPlaneServer } from "../../src/control-plane/server.js";
 import { ControlPlaneManager } from "../../src/control-plane/manager.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 import { defaultAuthority } from "../../src/control-plane/contracts.js";
+import type { LogCompressionInvoker } from "../../src/implementation/raw-log-compressor.js";
 
 const exec = promisify(execFile);
 const here = dirname(fileURLToPath(import.meta.url));
 const fixture = resolve(here, "../fixtures/implementation/simple-js");
 const adapter = resolve(here, "../fixtures/implementation/coding-agent-adapter.mjs");
 const previousCommand = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+const testLogCompressionInvoker: LogCompressionInvoker = async ({ rawDigest }) => ({
+  content: JSON.stringify({ schemaVersion: 1, kind: "log-digest", summary: `Compressed ${rawDigest.sources.length} local test log source(s).`, failureClass: "test.validation", diagnostics: ["Consult the referenced local validation artifact."], sources: rawDigest.sources.map(({ redactions: _redactions, ...source }) => source) }),
+  model: "test/cheap-log-compressor", requestId: "test-log-compression", tokenUsage: 1, inputTokens: 1, outputTokens: 0, reasoningTokens: 0, costUsd: 0, attempts: 1,
+});
+const startControlPlaneServer = (options: { port?: number; stateRoot: string }) => {
+  const manager = new ControlPlaneManager(new ControlPlaneStore(options.stateRoot), undefined, undefined, { logCompressionInvoker: testLogCompressionInvoker });
+  return startBaseControlPlaneServer({ ...options, manager });
+};
 
 afterEach(() => { if (previousCommand === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousCommand; });
 
@@ -79,9 +88,12 @@ describe("implementation executor", () => {
     expect(result.implementation).toMatchObject({ status: "implemented_and_validated", performed: true, changedFiles: expect.arrayContaining(["calculator.js", "added.test.js"]), localBranch: "runforge/executor-success-1/standalone-attempt-1", localCommit: expect.any(String), patchPackage: expect.any(String) });
     expect(result.validation).toHaveLength(4);
     expect((result.validation as Array<Record<string, unknown>>).every((item) => item.exitCode === 0 && typeof item.stdout === "string" && typeof item.stderr === "string")).toBe(true);
-    expect(result.providerCalls).toHaveLength(3);
+    expect(result.providerCalls).toHaveLength(4);
+    expect(result.providerCalls.filter((call: Record<string, unknown>) => call.purpose === "raw-log-compression")).toEqual([
+      expect.objectContaining({ phase: "logCompression", model: "test/cheap-log-compressor", tokenUsage: 1, usageAccounting: "provider" }),
+    ]);
     expect(result.providerCalls.filter((call: Record<string, unknown>) => call.purpose === "semantic-review")).toHaveLength(1);
-    expect(result.providerCalls).toEqual(expect.arrayContaining([expect.objectContaining({ purpose: "semantic-review", invocationId: "semantic-review-1", providerCalls: true, networkAuthorized: true, validatedCheckpointId: "repair-1", timeoutMs: expect.any(Number), deadlineAt: expect.any(String) })]));
+    expect(result.providerCalls).toEqual(expect.arrayContaining([expect.objectContaining({ purpose: "semantic-review", provider: "local-coding-agent", model: null, invocationId: "semantic-review-1", providerCalls: true, networkAuthorized: true, success: true, validatedCheckpointId: "repair-1", timeoutMs: expect.any(Number), deadlineAt: expect.any(String) })]));
     expect(result).toMatchObject({
       status: "awaiting_external_session",
       agreement: { profile: "local-ready", requestedProfile: "local-ready", effectiveProfile: "local-ready", runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage", "localBranch", "localCommit"]), awaitingPhases: expect.arrayContaining([{ phaseId: "remotePush", responsibleParty: "external_session", prerequisites: [] }]) },
@@ -128,12 +140,12 @@ describe("implementation executor", () => {
     const repo = await repository();
     const result = await execute(repo, "EXECUTOR-SEMANTIC-UNAVAILABLE-1", "SEMANTIC_UNAVAILABLE fix add", ["node test.js"]);
     expect(result).toMatchObject({
-      status: "awaiting_external_session",
-      implementation: { status: "implemented_and_validated", performed: true },
-      review: { structural: { kind: "structural", status: "passed" }, semantic: { kind: "semantic", status: "unavailable", performed: false, selectedReviewer: { provider: "local-coding-agent", model: null }, confidence: "unknown", limitations: [expect.stringContaining("unavailable")], findings: [], delegation: { party: "external_session" } } },
-      handoff: { semanticReview: { status: "unavailable", performed: false, delegation: { party: "external_session" } } },
-      handoffPackage: { semanticReview: { status: "unavailable" }, nextResponsibleParty: "external_session" },
-      agreement: { runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation"]), awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "external_session" })]) },
+      status: "awaiting_owner",
+      implementation: { status: "blocked_with_owner_gate", performed: true },
+      review: { structural: { kind: "structural", status: "passed" }, semantic: { kind: "semantic", status: "unavailable", performed: false, selectedReviewer: { provider: "local-coding-agent", model: null }, confidence: "unknown", limitations: [expect.stringContaining("semantic_review_required")], findings: [], delegation: { party: "owner" } } },
+      handoff: { semanticReview: { status: "unavailable", performed: false, delegation: { party: "owner" } } },
+      handoffPackage: { semanticReview: { status: "unavailable" }, nextResponsibleParty: "owner" },
+      agreement: { runforgeCompletedPhases: [], awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
     });
   });
 
@@ -154,13 +166,13 @@ describe("implementation executor", () => {
     const repo = await repository();
     const result = await execute(repo, "EXECUTOR-SEMANTIC-TIMEOUT-1", "SEMANTIC_TIMEOUT fix add", ["node test.js"]);
     expect(result).toMatchObject({
-      status: "awaiting_external_session",
-      implementation: { status: "implemented_and_validated", performed: true },
+      status: "awaiting_owner",
+      implementation: { status: "blocked_with_owner_gate", performed: true },
       artifact: { status: "available", bestValidatedCheckpointId: "implementation-0", checkpoints: [expect.objectContaining({ id: "implementation-0", validationPassed: true })] },
-      review: { structural: { status: "passed" }, semantic: { status: "unavailable", performed: false, limitations: [expect.stringContaining("timed out")], delegation: { party: "external_session" } } },
-      handoffPackage: { bestValidatedCheckpoint: "implementation-0", latestSafePatch: expect.stringContaining("implementation-0"), semanticReview: { status: "unavailable", performed: false }, nextResponsibleParty: "external_session" },
-      agreement: { runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation"]), awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "external_session" })]) },
-      providerCalls: expect.arrayContaining([expect.objectContaining({ purpose: "semantic-review", timedOut: true, timeoutMs: expect.any(Number), validatedCheckpointId: "implementation-0" })]),
+      review: { structural: { status: "passed" }, semantic: { status: "unavailable", performed: false, limitations: [expect.stringContaining("timed out")], delegation: { party: "owner" } } },
+      handoffPackage: { bestValidatedCheckpoint: "implementation-0", latestSafePatch: expect.stringContaining("implementation-0"), semanticReview: { status: "unavailable", performed: false }, nextResponsibleParty: "owner" },
+      agreement: { runforgeCompletedPhases: [], awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
+      providerCalls: expect.arrayContaining([expect.objectContaining({ purpose: "semantic-review", provider: "local-coding-agent", model: null, success: false, timedOut: true, timeoutMs: expect.any(Number), validatedCheckpointId: "implementation-0" })]),
     });
     const reviewCall = result.providerCalls.find((call: Record<string, unknown>) => call.purpose === "semantic-review");
     expect(reviewCall.timeoutMs).toBeLessThan(1_000);
@@ -173,10 +185,10 @@ describe("implementation executor", () => {
     const finding = { severity: "high", file: "calculator.js", location: "1:1", category: "correctness", blocking: true };
     expect(result).toMatchObject({
       status: "awaiting_owner",
-      implementation: { status: "implemented_and_validated", performed: true }, ownerGate: { required: true },
+      implementation: { status: "blocked_with_owner_gate", performed: true }, ownerGate: { required: true },
       review: { structural: { kind: "structural", status: "passed" }, semantic: { status: "completed", performed: true, confidence: "high", findings: [finding] } },
-      handoff: { findings: [finding], semanticReview: { status: "completed", performed: true, confidence: "high", findings: [finding] } },
-      handoffPackage: { findings: [finding], semanticReview: { status: "completed", performed: true, confidence: "high", findings: [finding] } },
+      handoff: { findings: expect.arrayContaining([expect.objectContaining(finding)]), semanticReview: { status: "completed", performed: true, confidence: "high", findings: [finding] } },
+      handoffPackage: { findings: expect.arrayContaining([expect.objectContaining(finding)]), semanticReview: { status: "completed", performed: true, confidence: "high", findings: [finding] } },
     });
   });
 
@@ -419,7 +431,7 @@ describe("implementation executor", () => {
       const acceptedTask = await created.json() as Record<string, any>; expect(acceptedTask.timeout).toMatchObject({ requestedMs: 300000, effectiveMs: 300000, limitingSource: "requested" });
       const terminal = await poll(`${server.url}/v1/tasks/EXECUTOR-DURABLE-OVERRUN-1`); expect(terminal.status).toBe("awaiting_owner_decision");
       const result = await fetch(`${server.url}/v1/tasks/EXECUTOR-DURABLE-OVERRUN-1/result`).then((response) => response.json()) as Record<string, any>;
-      expect(result).toMatchObject({ implementation: { status: "implemented_and_validated" }, artifact: { status: "available", bestValidatedCheckpointId: "implementation-0" }, workflow: { status: "awaiting_owner", budgetExceeded: true }, usage: { accounting: "provider", totalTokens: 120000, costUsd: null, syntheticAccounting: { mixedWithProviderUsage: false } }, ownerGate: { required: true, options: expect.arrayContaining([expect.objectContaining({ id: "accept_completed_patch", providerRun: false })]) }, handoffPackage: { status: "available", bestValidatedCheckpoint: "implementation-0" } });
+      expect(result).toMatchObject({ implementation: { status: "blocked_with_owner_gate" }, artifact: { status: "available", bestValidatedCheckpointId: "implementation-0" }, workflow: { status: "awaiting_owner", budgetExceeded: true }, usage: { accounting: "provider", totalTokens: 120000, costUsd: null, syntheticAccounting: { mixedWithProviderUsage: false } }, ownerGate: { required: true, options: expect.arrayContaining([expect.objectContaining({ id: "accept_completed_patch", providerRun: false })]) }, handoffPackage: { status: "available", bestValidatedCheckpoint: "implementation-0" } });
       expect(await readFile(join(state, "tasks", "EXECUTOR-DURABLE-OVERRUN-1", "attempts", "1", "artifacts", result.artifact.checkpoints[0].patchPath), "utf8")).toContain("diff --git");
       const implicitDiscard = await fetch(`${server.url}/v1/tasks/EXECUTOR-DURABLE-OVERRUN-1/discard-result`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ checkpointId: "implementation-0" }) }); expect(implicitDiscard.status).toBe(400);
       const body = JSON.stringify({ decisionId: "accept-overrun-1", checkpointId: "implementation-0", delivery: "patch" });
@@ -459,13 +471,13 @@ describe("implementation executor", () => {
   it("repairs a persisted schema-v1 checkpoint through a restarted manager", async () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const taskId = "LEGACY-MANAGER-REPAIR-1"; const repo = await repository(); const head = await git(repo, ["rev-parse", "HEAD"]); const state = await mkdtemp(join(tmpdir(), "runforge-legacy-manager-"));
-    let manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize();
+    let manager = new ControlPlaneManager(new ControlPlaneStore(state), undefined, undefined, { logCompressionInvoker: testLogCompressionInvoker }); await manager.initialize();
     const value: Record<string, any> = spec(repo, taskId, "BUDGET_OVERRUN REPAIR_LOOP fix add", ["node test.js"]); value.execution.phaseBudgets = { implementation: 1_000, repair: 50_000 };
     await manager.createTask({ taskSpec: value, authority: defaultAuthority({ implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true }), publicationRequested: "none" });
     expect((await pollManager(manager, taskId)).status).toBe("awaiting_owner_decision");
     const v2Checkpoint = objectValue((await manager.getResult(taskId)).artifact).checkpoints[0]; await expect(manager.repairFromCheckpoint(taskId, { taskId, decisionId: "v2-strict-digest", checkpointId: v2Checkpoint.id, checkpointDigest: "0".repeat(64), choice: "retry_from_checkpoint", additionalProviderTokens: 0, repairIntent: "Verify strict schema-v2 digest binding." })).rejects.toMatchObject({ code: "checkpoint_digest_invalid" }); manager.close();
     const legacy = await downgradeCheckpointToLegacy(state, taskId, "implementation-0"); const before = await directorySnapshot(legacy.checkpointPath);
-    manager = new ControlPlaneManager(new ControlPlaneStore(state)); await manager.initialize();
+    manager = new ControlPlaneManager(new ControlPlaneStore(state), undefined, undefined, { logCompressionInvoker: testLogCompressionInvoker }); await manager.initialize();
     const result = await manager.getResult(taskId); const checkpoint = objectValue(result.artifact).checkpoints[0]; expect(checkpoint).toMatchObject({ checkpointSchemaVersion: 1, digest: expect.stringMatching(/^[a-f0-9]{64}$/) });
     const repairRequest = (decisionId: string, checkpointDigest: string) => ({ taskId, decisionId, checkpointId: checkpoint.id, checkpointDigest, choice: "retry_from_checkpoint" as const, additionalProviderTokens: 0, repairIntent: "Repair only the recorded validation failure." });
     await writeFile(join(legacy.checkpointPath, "patch.diff"), "corrupt\n"); await expect(manager.repairFromCheckpoint(taskId, repairRequest("corrupt", checkpoint.digest))).rejects.toMatchObject({ code: "checkpoint_digest_invalid" }); await restoreDirectory(legacy.checkpointPath, before);
@@ -548,10 +560,14 @@ describe("implementation executor", () => {
       process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
       const denied = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec(repo, "EXECUTOR-DENIED-1", "fix", ["node test.js"]), authority: { implementation: true, localBranch: true, localCommit: true } }) });
       expect(denied.status).toBe(403); expect(await denied.json()).toMatchObject({ error: { code: "provider_authority_denied" } });
+      const explicitAgreement = await server.manager.negotiateAgreement({ schemaVersion: 1, profile: "assist-only" });
+      const agreementsBeforeRejection = await directorySnapshot(join(state, "execution-agreements"));
       process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = "/definitely/missing/runforge-agent";
       const unavailable = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: spec(repo, "EXECUTOR-UNAVAILABLE-1", "fix", ["node test.js"]), authority: { implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true } }) });
       expect(unavailable.status).toBe(503); expect(await unavailable.json()).toMatchObject({ error: { code: "implementation_executor_unavailable" } });
       expect((await server.manager.store.listTasks()).map((item) => item.id)).not.toContain("EXECUTOR-UNAVAILABLE-1");
+      expect(await directorySnapshot(join(state, "execution-agreements"))).toEqual(agreementsBeforeRejection);
+      expect(await server.manager.getAgreement(explicitAgreement.agreementId)).toEqual(explicitAgreement);
     } finally { await server.close(); }
   });
 
@@ -565,16 +581,17 @@ describe("implementation executor", () => {
       ["NETWORK", (value) => { value.authority.allowNetwork = false; value.runtime.externalNetwork = "denied"; }, fullAuthority, "network_permission_denied"],
       ["MUTATION", () => undefined, { ...fullAuthority, localBranch: false, localCommit: false }, "mutation_authority_denied"],
       ["COMMIT", () => undefined, { ...fullAuthority, localCommit: false }, "local_commit_authority_denied"],
-      ["RUNTIME", (value) => { value.runtime.preference = "docker"; }, fullAuthority, "runtime_incompatible"]
+      ["RUNTIME", (value) => { value.runtime.preference = "docker"; }, fullAuthority, "preflight_contract_rejected"]
     ];
     try {
       for (const [name, mutate, authority, code] of cases) {
         const value = spec(repo, `EXECUTOR-${name}-PREFLIGHT`, "fix", ["node test.js"]); mutate(value);
         const response = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: value, authority }) });
         expect(response.status).toBeGreaterThanOrEqual(400); const error = await response.json(); expect(error).toMatchObject({ error: { code, details: { operation: "start_new_task", newTaskRequired: true } } });
-        if (name === "RUNTIME") expect(error).toMatchObject({ error: { code: "runtime_incompatible", message: expect.stringContaining("local-disposable"), details: { executorId: "local-coding-agent", requestedRuntime: "docker", allowedValues: ["docker", "local-disposable"], compatibleRuntimes: ["local-disposable"], correctedRequest: { taskSpec: { runtime: { preference: "local-disposable" } } } } } });
+        if (name === "RUNTIME") expect(error).toMatchObject({ error: { code: "preflight_contract_rejected", message: expect.stringContaining("local-disposable"), details: { schemaVersion: 1, outcome: "preflight_contract_rejected", rejection: "runtime_capability_mismatch", executorId: "local-coding-agent", requestedRuntime: "docker", allowedValues: ["docker", "local-disposable"], compatibleRuntimes: ["local-disposable"], correctedRequest: { taskSpec: { runtime: { preference: "local-disposable" } } } } } });
       }
       expect(await server.manager.store.listTasks()).toHaveLength(0);
+      await expect(access(join(state, "tasks", "EXECUTOR-RUNTIME-PREFLIGHT", "task-spec.json"))).rejects.toMatchObject({ code: "ENOENT" });
     } finally { await server.close(); }
   });
 
@@ -604,9 +621,9 @@ describe("implementation executor", () => {
 
 async function repository(withSensitiveContext = false): Promise<string> { const repo = await mkdtemp(join(tmpdir(), "runforge-implementation-repo-")); await cp(fixture, repo, { recursive: true }); if (withSensitiveContext) { const path = join(repo, "calculator.js"); const source = await readFile(path, "utf8"); const context = ["// API", "_KEY=", "existingvalue", "\n"].join(""); await writeFile(path, context + source); } await git(repo, ["init", "-b", "main"]); await git(repo, ["add", "."]); await git(repo, ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]); return repo; }
 async function git(cwd: string, args: string[]): Promise<string> { return (await exec("git", args, { cwd })).stdout; }
-function spec(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []) { return { schemaVersion: 2, taskId, task: { text, goal: "Make the deterministic fixture satisfy acceptance", acceptanceCriteria: ["validation is green", "local patch evidence exists"] }, target: { repository: repo, workingDirectory: "." }, execution: { mode: "implementation", maxRepairIterations: 2 }, runtime: { preference: "local-disposable", externalNetwork: "allowed", dependencyPreparation: "disabled" }, validation: { mode: "explicit", commands }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true, forbiddenAreas }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
-async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); if (text.includes("SEMANTIC_TIMEOUT")) value.execution.timeoutMs = 1_000; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
-async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string, executionMode: "implementation" | "repair" = "implementation", attempt?: number, dirtyPolicy?: string): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.execution.mode = executionMode; value.executionAgreement = executionAgreement; if (dirtyPolicy) value.target.dirtyPolicy = dirtyPolicy; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId, attempt }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
+function spec(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []) { return { schemaVersion: 2, taskId, task: { text, goal: "Make the deterministic fixture satisfy acceptance", acceptanceCriteria: ["validation is green", "local patch evidence exists"] }, target: { repository: repo, workingDirectory: "." }, execution: { mode: "implementation", maxRepairIterations: 2 }, providerRouting: { provider: "local", fallbackPolicy: "none", models: {}, maxCalls: 32, tokenBudget: { total: 100_000, perPhase: { logCompression: 10_000 } }, timeoutMs: 300_000, retry: { maxAttempts: 1 } }, runtime: { preference: "local-disposable", externalNetwork: "allowed", dependencyPreparation: "disabled" }, validation: { mode: "explicit", commands }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true, forbiddenAreas }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
+async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); if (text.includes("SEMANTIC_TIMEOUT")) { value.execution.timeoutMs = 1_000; value.providerRouting.timeoutMs = 1_000; } value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath, { logCompressionInvoker: testLogCompressionInvoker }); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
+async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string, executionMode: "implementation" | "repair" = "implementation", attempt?: number, dirtyPolicy?: string): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.execution.mode = executionMode; value.executionAgreement = executionAgreement; if (dirtyPolicy) value.target.dirtyPolicy = dirtyPolicy; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId, attempt, logCompressionInvoker: testLogCompressionInvoker }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
 async function poll(url: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("task did not finish"); }
 async function pollPhase(url: string, phase: string): Promise<void> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (task.progress?.phase === phase) return; await new Promise((done) => setTimeout(done, 25)); } throw new Error(`task did not reach ${phase}`); }
 async function downgradeCheckpointToLegacy(state: string, taskId: string, checkpointId: string): Promise<{ checkpointPath: string; manifestPath: string; manifest: Record<string, unknown> }> { const artifacts = join(state, "tasks", taskId, "attempts", "1", "artifacts"); const checkpointPath = join(artifacts, "checkpoints", checkpointId); const record = (await readdir(checkpointPath, { withFileTypes: true })).find((item) => item.isDirectory() && /^[a-f0-9]{64}$/.test(item.name)); if (!record) throw new Error("missing immutable checkpoint record"); const recordPath = join(checkpointPath, record.name), manifestPath = join(checkpointPath, "manifest.json"); const current = JSON.parse(await readFile(join(recordPath, "manifest.json"), "utf8")) as Record<string, unknown>; const { taskId: _taskId, executionAgreementId: _agreementId, workspace, ...legacy } = current; legacy.schemaVersion = 1; legacy.status = "available"; legacy.workspaceSha = objectValue(workspace).sha ?? null; legacy.workspaceState = objectValue(workspace).state ?? "dirty"; await chmod(checkpointPath, 0o700); for (const name of ["patch.diff", "changed-files.json", "validation.json", "usage.json", "executor.json", "safety.json", "unresolved-findings.json"]) { const target = join(checkpointPath, name); await cp(join(recordPath, name), target); await chmod(target, 0o600); } await chmod(recordPath, 0o700); await rm(recordPath, { recursive: true }); legacy.files = (legacy.files as Array<Record<string, unknown>>).filter((entry) => ["patch.diff", "changed-files.json", "validation.json", "usage.json", "executor.json", "safety.json", "unresolved-findings.json"].includes(String(entry.path))); await writeFile(manifestPath, JSON.stringify(legacy, null, 2) + "\n"); for (const resultPath of [join(artifacts, "results.json"), join(state, "tasks", taskId, "result.json")]) { const document = JSON.parse(await readFile(resultPath, "utf8")) as Record<string, any>; const result = document.result ?? document; for (const checkpoint of result.artifact.checkpoints) { checkpoint.path = `checkpoints/${checkpointId}`; checkpoint.patchPath = `checkpoints/${checkpointId}/patch.diff`; delete checkpoint.digest; } result.artifacts.checkpoints = [`checkpoints/${checkpointId}`]; await writeFile(resultPath, JSON.stringify(document, null, 2) + "\n"); } return { checkpointPath, manifestPath, manifest: legacy }; }

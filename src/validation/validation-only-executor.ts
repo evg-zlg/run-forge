@@ -63,7 +63,7 @@ export async function runValidationOnlyExecutor(input: {
     }
   } else {
     await copyTaskRunWorkspace(spec.target.repository, workspace, "");
-    await prepareUnpreparedExternalWorkspace(spec.target.repository, workspace, spec.target.workingDirectory);
+    await prepareUnpreparedExternalWorkspace(spec.target.repository, workspace, spec.target.workingDirectory, { taskId: spec.taskId, workspaceId: `validation-${spec.taskId}` });
   }
   const executionRoot = resolve(workspace, spec.target.workingDirectory);
   const sourceDependencies = await access(join(spec.target.repository, spec.target.workingDirectory, "node_modules")).then(() => true, () => false);

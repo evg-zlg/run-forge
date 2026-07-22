@@ -32,7 +32,11 @@ export type LogCompressionInvoker = (request: {
   phase: "logCompression";
   prompt: string;
   rawDigest: RawLogDigestV1;
-}) => Promise<{ content: string; model: string; requestId?: string | null }>;
+}) => Promise<{
+  content: string; model: string; requestId?: string | null;
+  tokenUsage?: number | null; inputTokens?: number | null; outputTokens?: number | null;
+  reasoningTokens?: number | null; costUsd?: number | null; attempts?: number;
+}>;
 export type RawLogCompressionLimits = {
   maxSources: number;
   maxSourcePromptBytes: number;

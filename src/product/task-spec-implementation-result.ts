@@ -132,12 +132,81 @@ export async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: 
   return status;
 }
 
-function phaseUsage(spec: TaskSpecV2, result: ImplementationExecutorResult): Record<string, unknown> {
-  const empty = () => ({ startup: 0, analysis: 0, implementation: 0, validation: 0, repair: 0, review: 0, publication: 0 }); const provider = empty(), synthetic = empty();
-  for (const call of result.providerCalls) { const phase = call.purpose === "semantic-review" ? "review" : Number(call.iteration) === 0 ? "implementation" : "repair"; const target = call.usageAccounting === "synthetic" ? synthetic : provider; target[phase] += typeof call.tokenUsage === "number" ? call.tokenUsage : 0; }
-  const phases = Object.fromEntries(Object.entries(provider).map(([phase, actualTokens]) => [phase, { actualTokens, requestedLimit: spec.execution.phaseBudgets[phase as keyof typeof provider], effectiveLimit: spec.execution.phaseBudgets[phase as keyof typeof provider], limitKind: spec.execution.budgetMode, exceeded: phase === result.budget.overrunPhase && result.budget.accounting === "provider" }]));
-  return { accounting: "provider", providerCalls: result.providerCalls.filter((item) => item.usageAccounting !== "synthetic").length, totalTokens: Object.values(provider).reduce((sum, value) => sum + value, 0), costUsd: null, costAvailability: "provider_did_not_report_cost", phases, syntheticAccounting: { accounting: "synthetic", mixedWithProviderUsage: false, totalTokens: Object.values(synthetic).reduce((sum, value) => sum + value, 0), phases: Object.fromEntries(Object.entries(synthetic).map(([phase, actualTokens]) => [phase, { actualTokens, exceeded: phase === result.budget.overrunPhase && result.budget.accounting === "synthetic" }])) } };
+type UsagePhase = "startup" | "analysis" | "implementation" | "validation" | "repair" | "review" | "logCompression" | "publication";
+type UsageAvailability = "complete" | "partial" | "unavailable";
+type UsageTotals = Record<UsagePhase, { tokens: number; costs: number[]; calls: number; tokenValues: number }>;
+const usagePhases: UsagePhase[] = ["startup", "analysis", "implementation", "validation", "repair", "review", "logCompression", "publication"];
+
+export function phaseUsage(spec: TaskSpecV2, result: ImplementationExecutorResult): Record<string, unknown> {
+  const empty = (): UsageTotals => usagePhases.reduce<UsageTotals>((totals, phase) => {
+    totals[phase] = { tokens: 0, costs: [], calls: 0, tokenValues: 0 };
+    return totals;
+  }, {} as UsageTotals);
+  const provider = empty(), synthetic = empty();
+  const providerCalls = result.providerCalls.filter((call) => call.usageAccounting !== "synthetic");
+  const syntheticCalls = result.providerCalls.filter((call) => call.usageAccounting === "synthetic");
+  for (const call of result.providerCalls) {
+    const target = call.usageAccounting === "synthetic" ? synthetic : provider;
+    const phase = usagePhase(call);
+    const entry = target[phase];
+    entry.calls += 1;
+    if (finite(call.tokenUsage)) { entry.tokens += call.tokenUsage; entry.tokenValues += 1; }
+    if (finite(call.costUsd)) entry.costs.push(call.costUsd);
+  }
+  const phases = Object.fromEntries(Object.entries(provider).map(([phase, usage]) => {
+    const requestedLimit = requestedPhaseLimit(spec, phase as UsagePhase);
+    return [phase, {
+      actualTokens: usage.tokens,
+      tokenAvailability: availability(usage.tokenValues, usage.calls),
+      costUsd: sum(usage.costs),
+      costAvailability: availability(usage.costs.length, usage.calls),
+      requestedLimit,
+      effectiveLimit: requestedLimit,
+      limitKind: spec.execution.budgetMode,
+      exceeded: phase === result.budget.overrunPhase && result.budget.accounting === "provider",
+    }];
+  }));
+  const providerTokens = providerCalls.flatMap((call) => finite(call.tokenUsage) ? [call.tokenUsage] : []);
+  const providerCosts = providerCalls.flatMap((call) => finite(call.costUsd) ? [call.costUsd] : []);
+  const syntheticTokens = syntheticCalls.flatMap((call) => finite(call.tokenUsage) ? [call.tokenUsage] : []);
+  return {
+    accounting: "provider",
+    providerCalls: providerCalls.length,
+    totalTokens: sum(providerTokens),
+    tokenAvailability: availability(providerTokens.length, providerCalls.length),
+    costUsd: sum(providerCosts),
+    costAvailability: availability(providerCosts.length, providerCalls.length),
+    phases,
+    syntheticAccounting: {
+      accounting: "synthetic",
+      mixedWithProviderUsage: syntheticCalls.length > 0 && providerCalls.length > 0,
+      totalTokens: sum(syntheticTokens),
+      tokenAvailability: availability(syntheticTokens.length, syntheticCalls.length),
+      phases: Object.fromEntries(Object.entries(synthetic).map(([phase, usage]) => [phase, { actualTokens: usage.tokens, tokenAvailability: availability(usage.tokenValues, usage.calls), exceeded: phase === result.budget.overrunPhase && result.budget.accounting === "synthetic" }])),
+    },
+  };
 }
+
+function usagePhase(call: Record<string, unknown>): UsagePhase {
+  if (call.phase === "logCompression" || call.purpose === "raw-log-compression") return "logCompression";
+  if (call.phase === "planner") return "analysis";
+  if (call.phase === "reviewer" || call.purpose === "semantic-review") return "review";
+  if (call.phase === "implementer" || Number(call.iteration) === 0) return "implementation";
+  return "repair";
+}
+
+function requestedPhaseLimit(spec: TaskSpecV2, phase: UsagePhase): number | undefined {
+  if (phase === "analysis") return spec.providerRouting.tokenBudget.perPhase.planner;
+  if (phase === "implementation") return spec.providerRouting.provider === "openrouter" ? spec.providerRouting.tokenBudget.perPhase.implementer : spec.execution.phaseBudgets.implementation;
+  if (phase === "repair") return spec.providerRouting.provider === "openrouter" ? spec.providerRouting.tokenBudget.perPhase.repair : spec.execution.phaseBudgets.repair;
+  if (phase === "review") return spec.providerRouting.provider === "openrouter" ? spec.providerRouting.tokenBudget.perPhase.reviewer : spec.execution.phaseBudgets.review;
+  if (phase === "logCompression") return spec.providerRouting.tokenBudget.perPhase.logCompression;
+  return spec.execution.phaseBudgets[phase as keyof typeof spec.execution.phaseBudgets];
+}
+
+function finite(value: unknown): value is number { return typeof value === "number" && Number.isFinite(value); }
+function sum(values: number[]): number | null { return values.length ? Number(values.reduce((total, value) => total + value, 0).toFixed(12)) : null; }
+function availability(values: number, calls: number): UsageAvailability { return calls === 0 || values === 0 ? "unavailable" : values === calls ? "complete" : "partial"; }
 function documentWorkflow(value: unknown): unknown { return value && typeof value === "object" ? (value as Record<string, unknown>).workflow : undefined; }
 function objectRecord(value: unknown): Record<string, unknown> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}; }
 

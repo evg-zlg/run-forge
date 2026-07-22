@@ -66,6 +66,24 @@ describe("campaign planner unit", () => {
     ).toThrow(/unknown field/i);
   });
 
+  test("accepts ordered phase pools and the log-compression legacy route", () => {
+    const parsed = parseCampaignRequest({
+      goal: "x", target: { repository: process.cwd(), workingDirectory: "." }, authority,
+      providerRouting: {
+        provider: "openrouter", fallbackPolicy: "none",
+        phaseModels: { logCompression: "google/gemini-3.5-flash-lite" },
+        modelPools: { planner: ["z-ai/glm-5.2", "moonshotai/kimi-k3"], logCompression: ["z-ai/glm-4.7-flash", "deepseek/deepseek-v4-flash"] }
+      },
+      limits: { maxTokens: 100, maxTasks: 1, maxConcurrency: 1 }
+    });
+    expect(parsed.providerRouting).toEqual({
+      provider: "openrouter", fallbackPolicy: "none",
+      phaseModels: { logCompression: "google/gemini-3.5-flash-lite" },
+      modelPools: { planner: ["z-ai/glm-5.2", "moonshotai/kimi-k3"], logCompression: ["z-ai/glm-4.7-flash", "deepseek/deepseek-v4-flash"] }
+    });
+    expect(() => parseCampaignRequest({ goal: "x", target: {}, authority, providerRouting: { provider: "openrouter", modelPools: { logCompression: [] } }, limits: { maxTokens: 100, maxTasks: 1, maxConcurrency: 1 } })).toThrow(/non-empty array/i);
+  });
+
   test("rejects implementation plans whose terminal sinks are not complete read-only validation", () => {
     const task = (mode: string, commands: string[], profile = "read-only") => ({ execution: { mode }, authority: { profile, allowProviderCalls: false, allowNetwork: false }, discovery: { writeScopes: [] }, validation: { mode: "explicit", commands, requirements: commands.map((command) => ({ command, acceptance: "required" })) }, providerRouting: { provider: "openrouter", costBudgetUsd: .1, fallbackPolicy: "none" }, merge: { policy: "never" }, deploy: { policy: "never" }, git: { publication: "none" } });
     const base: any = { schemaVersion: 1, campaignId: "cmp_v1_deadbeefdeadbeefdeadbeef", estimatedTokens: 2_000, estimatedCostUsd: .2, nodes: [
