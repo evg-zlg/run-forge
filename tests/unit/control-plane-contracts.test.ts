@@ -8,6 +8,7 @@ import { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from 
 import { boundPublicResult as extractedBoundPublicResult, projectAgreementLifecycle as extractedProjectAgreementLifecycle, redactPublicValue as extractedRedactPublicValue } from "../../src/control-plane/manager-results.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 import type { TaskSpecV2 } from "../../src/product/task-spec-v2.js";
+import { requestedSemanticValidationRuntimeCorrection } from "../../src/control-plane/http-task-preflight.js";
 
 const roots: string[] = [];
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))));
@@ -207,6 +208,24 @@ describe("control-plane contracts", () => {
     if (!remotePush) throw new Error("remotePush phase missing from agreement");
     remotePush.requested = false; remotePush.responsibleParty = "nobody";
     expect(() => assertAgreementMatchesTask(mismatched, spec, identicalExpected)).toThrow("does not match the TaskSpec");
+  });
+
+  it("keeps validation structural by default and enables only explicit custom semantic review ownership", () => {
+    const authority = defaultAuthority({ providerCalls: true, network: true });
+    const legacy = { taskId: "VALIDATION-LEGACY", execution: { mode: "validation" }, executionAgreement: { schemaVersion: 1, profile: "local-ready" }, authority: { allowProviderCalls: true } } as TaskSpecV2;
+    const optedIn = { ...legacy, taskId: "VALIDATION-OPT-IN", executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { independentReview: "runforge", providerModelCalls: "runforge" } } } as TaskSpecV2;
+    const legacyAgreement = negotiateTaskAgreement(legacy, authority);
+    const semanticAgreement = negotiateTaskAgreement(optedIn, authority);
+    expect(legacyAgreement.phases.find((phase) => phase.phaseId === "independentReview")).toMatchObject({ requested: false, responsibleParty: "nobody" });
+    expect(semanticAgreement.phases.find((phase) => phase.phaseId === "independentReview")).toMatchObject({ requested: true, responsibleParty: "runforge" });
+    expect(semanticAgreement.phases.find((phase) => phase.phaseId === "providerModelCalls")).toMatchObject({ requested: true, responsibleParty: "runforge" });
+  });
+
+  it("corrects a direct semantic-validation runtime request to Docker without mutating it", () => {
+    const requested = { execution: { mode: "validation" }, runtime: { preference: "local-disposable", externalNetwork: "allowed" }, executionAgreement: { profile: "custom", phaseOwnership: { independentReview: "runforge", providerModelCalls: "runforge" } } };
+    const corrected = requestedSemanticValidationRuntimeCorrection(requested);
+    expect(corrected).toMatchObject({ runtime: { preference: "docker", externalNetwork: "allowed" } });
+    expect(requested.runtime.preference).toBe("local-disposable");
   });
 
   it("bounds verbose public diagnostics while retaining compact result fields", () => {

@@ -1,16 +1,142 @@
 import { execFileSync } from "node:child_process";
-import { access, chmod, mkdir, mkdtemp, readFile, readlink, rm, writeFile } from "node:fs/promises";
+import { readFileSync } from "node:fs";
+import { access, chmod, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { negotiateExecutionAgreement, type ExecutionParty } from "../../src/product/execution-agreement.js";
 import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
-import { createSyntheticValidationGitContext } from "../../src/validation/validation-only-executor.js";
+import { loadTaskSpecV2 } from "../../src/product/task-spec-v2.js";
+import { createSyntheticValidationGitContext, runValidationOnlyExecutor } from "../../src/validation/validation-only-executor.js";
 
 const roots: string[] = [];
-afterEach(async () => { await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
+const originalPath = process.env.PATH;
+afterEach(async () => { vi.unstubAllGlobals(); delete process.env.OPENROUTER_API_KEY; process.env.PATH = originalPath; await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("validation-only multi-lane execution", () => {
+  it("performs only the explicitly owned provider review with bounded existing source and complete accounting", async () => {
+    const fixture = await semanticReviewFixture(["node --version"]);
+    const before = immutableSourceSnapshot(fixture.repository);
+    process.env.OPENROUTER_API_KEY = "test-key";
+    const finding = { severity: "medium", file: "src/review.ts", location: "1", category: "behavior", evidence: "value is stable", recommendation: "retain coverage", blocking: false };
+    const fetchMock = vi.fn().mockResolvedValue(openRouterResponse(JSON.stringify({ semanticReview: { confidence: "high", limitations: ["bounded source"], findings: [finding] } }), "review-request", 17, 0.004));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runValidationOnlyExecutor({ spec: fixture.spec, executionAgreement: fixture.agreement });
+    expect(result).toMatchObject({ status: "completed", source: { unchanged: true }, review: { semantic: { status: "completed", performed: true, reviewer: { provider: "openrouter", model: "review/model", invocationId: "review-request" }, findings: [finding] } }, usage: { providerCalls: 1, totalTokens: 17, costUsd: 0.004, phases: { reviewer: 1, logCompression: 0 } } });
+    expect(result.providerCalls).toEqual([expect.objectContaining({ purpose: "semantic-review", phase: "reviewer", provider: "openrouter", model: "review/model", invocationId: "review-request", success: true, tokenUsage: 17, costUsd: 0.004 })]);
+    expect(result.providerCalls.some((call) => ["planner", "implementer", "repair"].includes(String(call.phase)))).toBe(false);
+    const body = JSON.parse(fetchMock.mock.calls[0]![1].body as string);
+    expect(body.model).toBe("review/model");
+    expect(body.messages[1].content).toContain("--- BEGIN FILE src/review.ts ---");
+    expect(body.messages[1].content).toContain("export const reviewedValue = 1");
+    expect(body.messages[1].content).toContain("Validation-only review inspects bounded existing source");
+    expect(immutableSourceSnapshot(fixture.repository)).toEqual(before);
+    expect(result.executionAgreement.phases).toEqual(expect.arrayContaining([
+      expect.objectContaining({ phaseId: "independentReview", status: "completed" }),
+      expect.objectContaining({ phaseId: "providerModelCalls", status: "completed" }),
+    ]));
+  });
+
+  it("honors standalone TaskSpec custom dual opt-in without an injected execution agreement", async () => {
+    const fixture = await semanticReviewFixture(["node --version"]); process.env.OPENROUTER_API_KEY = "test-key";
+    const fetchMock = vi.fn().mockResolvedValue(openRouterResponse(JSON.stringify({ semanticReview: { confidence: "high", limitations: [], findings: [] } }), "standalone-review", 9, 0.002)); vi.stubGlobal("fetch", fetchMock);
+    const execution = await runTaskSpecFile(fixture.specPath);
+    expect(execution).toMatchObject({ kind: "validation", success: true, result: { status: "completed", review: { semantic: { performed: true, reviewer: { invocationId: "standalone-review" } } }, providerCalls: [expect.objectContaining({ purpose: "semantic-review" })] } });
+    const publicResult = JSON.parse(await readFile(join(fixture.artifacts, "results.json"), "utf8"));
+    expect(publicResult).toMatchObject({ review: { semantic: { performed: true } }, agreement: { runforgeCompletedPhases: expect.arrayContaining(["independentReview", "providerModelCalls"]) }, safetyAssertions: { providerCalls: true } });
+  });
+
+  it("compresses failed optional output before review and never sends raw canaries to the reviewer", async () => {
+    const fixture = await semanticReviewFixture(["node fail.cjs"], "optional");
+    await writeFile(join(fixture.repository, "fail.cjs"), "process.stdout.write('RAW_STDOUT_CANARY'); process.stderr.write('RAW_STDERR_CANARY'); process.exit(1);\n");
+    fixture.spec.providerRouting.retry.maxAttempts = 2;
+    fixture.spec.providerRouting.tokenBudget.perPhase.logCompression = 2_000;
+    process.env.OPENROUTER_API_KEY = "test-key";
+    let compressionAttempts = 0;
+    const fetchMock = vi.fn(async (_url: string, init: RequestInit) => {
+      const body = JSON.parse(String(init.body)); const model = body.model as string; const prompt = body.messages[1].content as string;
+      if (model === "compress/model") {
+        compressionAttempts += 1;
+        expect(body.max_tokens).toBeGreaterThan(0); expect(body.max_tokens).toBeLessThan(fixture.spec.providerRouting.tokenBudget.perPhase.logCompression);
+        if (compressionAttempts === 1) return new Response(JSON.stringify({ error: "retry" }), { status: 429 });
+        const raw = JSON.parse(prompt.split("\n\n").at(-1)!);
+        return openRouterResponse(JSON.stringify({ schemaVersion: 1, kind: "log-digest", summary: "optional validation failed", failureClass: "test.failure", diagnostics: ["inspect local artifact"], sources: raw.sources.map(({ redactions: _redactions, ...source }: any) => source) }), "compress-request", 5, 0.001);
+      }
+      expect(prompt).not.toContain("RAW_STDOUT_CANARY"); expect(prompt).not.toContain("RAW_STDERR_CANARY");
+      expect(prompt).toContain("optional validation failed");
+      return openRouterResponse(JSON.stringify({ semanticReview: { confidence: "medium", limitations: ["optional command failed"], findings: [] } }), "review-request", 11, 0.003);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await runValidationOnlyExecutor({ spec: fixture.spec, executionAgreement: fixture.agreement });
+    expect(result.review.semantic.limitations).toEqual(["optional command failed"]);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(result).toMatchObject({ status: "completed", validationAggregate: "completed_with_validation_gaps", usage: { providerCalls: 2, totalTokens: 16, costUsd: 0.004, phases: { reviewer: 1, logCompression: 1 } } });
+    expect(result.providerCalls.map((call) => call.purpose)).toEqual(["raw-log-compression", "semantic-review"]);
+    expect(result.providerCalls[0]).toMatchObject({ attempts: 2 });
+  });
+
+  it("fails closed when compression or the required reviewer is unavailable, while legacy validation makes no provider call", async () => {
+    const rawFixture = await semanticReviewFixture(["node -e \"process.stderr.write('RAW_FAILURE'); process.exit(1)\""], "optional");
+    process.env.OPENROUTER_API_KEY = "test-key";
+    const failedFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ error: "unavailable" }), { status: 500 })); vi.stubGlobal("fetch", failedFetch);
+    const compressedFailure = await runValidationOnlyExecutor({ spec: rawFixture.spec, executionAgreement: rawFixture.agreement });
+    expect(compressedFailure).toMatchObject({ status: "failed", review: { semantic: { status: "unavailable", performed: false } } });
+    expect(failedFetch).toHaveBeenCalledTimes(1);
+    expect(compressedFailure.providerCalls).toEqual([expect.objectContaining({ purpose: "raw-log-compression", success: false, exitCode: 1, attempts: 1, status: 500 })]);
+    expect(await readFile(join(rawFixture.artifacts, "provider", "log-compression-failure-validation-0.json"), "utf8")).toContain('"success": false');
+    expect(compressedFailure.executionAgreement.phases.find((phase) => phase.phaseId === "independentReview")?.status).not.toBe("completed");
+
+    const legacy = await semanticReviewFixture(["node --version"], "required", false);
+    const legacyFetch = vi.fn(); vi.stubGlobal("fetch", legacyFetch);
+    const legacyResult = await runValidationOnlyExecutor({ spec: legacy.spec, executionAgreement: legacy.agreement });
+    expect(legacyResult).toMatchObject({ status: "completed", providerCalls: [], usage: { providerCalls: 0 }, review: { semantic: { performed: false } } });
+    expect(legacyFetch).not.toHaveBeenCalled();
+  });
+
+  it("records a completed reviewer transport before malformed DTO parsing and parses full content beyond the artifact excerpt", async () => {
+    const malformed = await semanticReviewFixture(["node --version"]); process.env.OPENROUTER_API_KEY = "test-key";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(openRouterResponse("not-json", "malformed-review", 13, 0.002)));
+    const failed = await runValidationOnlyExecutor({ spec: malformed.spec, executionAgreement: malformed.agreement });
+    expect(failed).toMatchObject({ status: "failed", review: { semantic: { performed: false, status: "unavailable" } }, providerCalls: [expect.objectContaining({ purpose: "semantic-review", invocationId: "malformed-review", success: true, exitCode: 0, tokenUsage: 13, costUsd: 0.002 })] });
+    expect(await readFile(join(malformed.artifacts, "provider", "semantic-review.json"), "utf8")).toContain("not-json");
+
+    const bounded = await semanticReviewFixture(["node --version"]);
+    const fullPayload = `${" ".repeat(17_000)}${JSON.stringify({ semanticReview: { confidence: "high", limitations: [], findings: [] } })}`;
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(openRouterResponse(fullPayload, "full-review", 15, 0.003)));
+    const completed = await runValidationOnlyExecutor({ spec: bounded.spec, executionAgreement: bounded.agreement });
+    expect(completed).toMatchObject({ status: "completed", review: { semantic: { performed: true, reviewer: { invocationId: "full-review" } } } });
+    expect(await readFile(join(bounded.artifacts, "provider", "semantic-review.json"), "utf8")).toContain("[TRUNCATED]");
+  });
+
+  it("blocks log compression before fetch when token or hard-cost allowance is unavailable", async () => {
+    const tokenFixture = await semanticReviewFixture(["node fail.cjs"], "optional"); await writeFile(join(tokenFixture.repository, "fail.cjs"), "process.stderr.write('failure'); process.exit(1);\n");
+    tokenFixture.spec.providerRouting.tokenBudget.perPhase.logCompression = 1;
+    process.env.OPENROUTER_API_KEY = "test-key"; const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const tokenResult = await runValidationOnlyExecutor({ spec: tokenFixture.spec, executionAgreement: tokenFixture.agreement });
+    expect(tokenResult).toMatchObject({ status: "failed", providerCalls: [], review: { semantic: { limitations: [expect.stringContaining("raw_log_compression_required")] } } }); expect(fetchMock).not.toHaveBeenCalled();
+
+    const costFixture = await semanticReviewFixture(["node fail.cjs"], "optional"); await writeFile(join(costFixture.repository, "fail.cjs"), "process.stderr.write('failure'); process.exit(1);\n"); costFixture.spec.providerRouting.costBudgetUsd = 1;
+    const costResult = await runValidationOnlyExecutor({ spec: costFixture.spec, executionAgreement: costFixture.agreement });
+    expect(costResult).toMatchObject({ status: "failed", providerCalls: [], review: { semantic: { limitations: [expect.stringContaining("raw_log_compression_required")] } } }); expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects symlink escapes, secret files, noisy files, empty subjects, and local host-shell execution before review", async () => {
+    const fixture = await semanticReviewFixture(["node --version"]);
+    const outside = join(fixture.root, "outside.ts"); await writeFile(outside, "export const outside = true;\n");
+    await symlink(outside, join(fixture.repository, "escape.ts"));
+    await writeFile(join(fixture.repository, ".env"), `API_KEY=sk-${"x".repeat(30)}\n`);
+    await writeFile(join(fixture.repository, "review.log"), "RAW_LOG_MUST_NOT_BE_REVIEWED\n");
+    fixture.spec.discovery.explicitFiles = ["escape.ts", ".env", "review.log"];
+    fixture.spec.discovery.maxFiles = 3;
+    process.env.OPENROUTER_API_KEY = "test-key"; const fetchMock = vi.fn(); vi.stubGlobal("fetch", fetchMock);
+    const result = await runValidationOnlyExecutor({ spec: fixture.spec, executionAgreement: fixture.agreement });
+    expect(result).toMatchObject({ status: "failed", providerCalls: [], review: { semantic: { status: "unavailable", performed: false, limitations: [expect.stringContaining("semantic_review_subject_unavailable")] } } });
+    expect(fetchMock).not.toHaveBeenCalled();
+    fixture.spec.runtime.preference = "local-disposable";
+    await expect(runValidationOnlyExecutor({ spec: fixture.spec, executionAgreement: fixture.agreement })).rejects.toThrow("requires Docker");
+  });
   it("creates clean non-main synthetic Git context without touching the source repository", async () => {
     const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-synthetic-validation-git-"))) - 1]!, source = join(root, "source"), workspace = join(root, "campaign-worktrees", "cmp_v1_fixture");
     await mkdir(source); await mkdir(join(workspace, "node_modules"), { recursive: true }); await mkdir(join(workspace, ".runforge-corepack")); await mkdir(join(workspace, ".runforge-tmp"));
@@ -175,3 +301,51 @@ for argument in "$@"; do case "$argument" in type=bind,src=*,dst=/workspace*) wo
     } finally { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; }
   });
 });
+
+async function semanticReviewFixture(commands: string[], acceptance: "required" | "optional" = "required", semantic = true) {
+  const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-semantic-"))) - 1]!;
+  const repository = join(root, "source"), artifacts = join(root, "artifacts"), bin = join(root, "bin");
+  await mkdir(join(repository, "src"), { recursive: true }); await mkdir(bin);
+  execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repository });
+  execFileSync("git", ["config", "user.name", "RunForge Test"], { cwd: repository }); execFileSync("git", ["config", "user.email", "runforge@example.invalid"], { cwd: repository });
+  await writeFile(join(repository, "src", "review.ts"), "export const reviewedValue = 1;\n");
+  execFileSync("git", ["add", "src/review.ts"], { cwd: repository }); execFileSync("git", ["commit", "-qm", "fixture"], { cwd: repository });
+  const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
+  const docker = join(bin, "docker"); await writeFile(docker, `#!/bin/sh
+if [ "$1" = "volume" ]; then for item in "$@"; do volume="$item"; done; [ "$2" != "create" ] || printf '%s\\n' "$volume"; exit 0; fi
+workspace=""; last=""
+for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace="\${item#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace*}";; esac; last="$item"; done
+[ -n "$workspace" ] || exit 97
+(cd "$workspace" && /bin/sh -lc "$last")
+`); await chmod(docker, 0o755); process.env.PATH = `${bin}:${originalPath ?? ""}`;
+  const specPath = join(root, "task-spec.json");
+  await writeFile(specPath, JSON.stringify({
+    schemaVersion: 2, taskId: `SEMANTIC-${Math.random().toString(16).slice(2)}`,
+    task: { text: "Review src/review.ts without modifying it.", goal: "Validate existing behavior.", acceptanceCriteria: ["Source remains unchanged", "Review is provider-backed"] },
+    target: { repository, workingDirectory: ".", expectedSha: head }, execution: { mode: "validation", timeoutMs: 30_000, maxProviderTokens: 4_000 },
+    executionAgreement: { schemaVersion: 1, profile: semantic ? "custom" : "assist-only", ...(semantic ? { phaseOwnership: { independentReview: "runforge", providerModelCalls: "runforge" } } : {}) },
+    discovery: { profile: "small-scope", explicitFiles: ["src/review.ts"], maxFiles: 2, maxBytes: 8_000, maxTokens: 2_000, stopCondition: "Review only explicit source." },
+    runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "disabled", externalNetwork: semantic ? "allowed" : "denied" },
+    validation: { mode: "explicit", commands, requirements: commands.map((command) => ({ command, capabilities: ["filesystem", "shell"], acceptance, evidenceRole: "product-validation", fallbacks: [] })) },
+    authority: { profile: "read-only", allowProviderCalls: semantic, allowNetwork: semantic },
+    providerRouting: { provider: semantic ? "openrouter" : "local", fallbackPolicy: "none", models: semantic ? { reviewer: "review/model", logCompression: "compress/model" } : {}, maxCalls: 3, tokenBudget: { total: 4_000, perPhase: { planner: 0, implementer: 0, repair: 0, reviewer: semantic ? 2_000 : 0, logCompression: semantic ? 1_000 : 0 } }, timeoutMs: 30_000, retry: { maxAttempts: 1 } },
+    git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" }, artifacts: { root: artifacts },
+  }));
+  const spec = await loadTaskSpecV2(specPath);
+  const enabled = { projectDiscovery: true, taskAnalysis: true, localValidation: true, independentReview: true, providerModelCalls: true };
+  const agreement = negotiateExecutionAgreement({ profile: semantic ? "custom" : "assist-only", requested: semantic ? enabled : { projectDiscovery: true, taskAnalysis: true, localValidation: true }, requestedOwnership: semantic ? { independentReview: "runforge", providerModelCalls: "runforge" } : undefined, technicalCapability: enabled, authority: enabled, policy: enabled });
+  return { root, repository, artifacts, specPath, spec, agreement };
+}
+
+function immutableSourceSnapshot(repository: string) {
+  return {
+    head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim(),
+    status: execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim(),
+    refs: execFileSync("git", ["for-each-ref", "--format=%(refname) %(objectname)"], { cwd: repository, encoding: "utf8" }).trim(),
+    content: readFileSync(join(repository, "src", "review.ts"), "utf8"),
+  };
+}
+
+function openRouterResponse(content: string, requestId: string, totalTokens: number, cost: number) {
+  return new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }], usage: { prompt_tokens: totalTokens - 2, completion_tokens: 2, total_tokens: totalTokens, cost } }), { status: 200, headers: { "x-request-id": requestId } });
+}

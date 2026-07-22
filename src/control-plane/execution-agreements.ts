@@ -98,6 +98,13 @@ function requestedPhasesForMode(spec: TaskSpecV2): PhaseBooleanMap | undefined {
   const allowed = new Set<ExecutionPhaseId>(spec.execution.mode === "inspection"
     ? ["projectDiscovery", "taskAnalysis"]
     : ["projectDiscovery", "taskAnalysis", "localValidation"]);
+  // The only validation exception is the explicit custom two-phase opt-in.
+  if (spec.execution.mode === "validation" && spec.executionAgreement.profile === "custom") {
+    const requested = spec.executionAgreement.phaseOwnership;
+    if (requested.independentReview === "runforge" && requested.providerModelCalls === "runforge") {
+      allowed.add("independentReview"); allowed.add("providerModelCalls");
+    }
+  }
   return Object.fromEntries(EXECUTION_PHASE_IDS.filter((phase) => !allowed.has(phase)).map((phase) => [phase, false])) as PhaseBooleanMap;
 }
 

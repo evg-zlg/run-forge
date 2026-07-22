@@ -4,7 +4,7 @@ import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneManager } from "../../src/control-plane/manager.js";
 import { startControlPlaneServer, type ControlPlaneServerInstance } from "../../src/control-plane/server.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
@@ -14,7 +14,7 @@ import { PreProviderSetupFailure } from "../../src/control-plane/http-task-prefl
 
 const roots: string[] = [];
 const servers: ControlPlaneServerInstance[] = [];
-afterEach(async () => { await Promise.all(servers.splice(0).map((item) => item.close())); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.unstubAllGlobals(); await Promise.all(servers.splice(0).map((item) => item.close())); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("local control-plane HTTP lifecycle", () => {
   it("publishes the validation/reviewer contract and a schema-valid multi-lane example", async () => {
@@ -681,7 +681,7 @@ for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace=
       expect(failed).toMatchObject({ status: "interrupted", outcome: "runtime_capability_mismatch", providerCalls: 0, recovery: { retryAvailable: true } });
       const corrected = await chunkedJson(`${instance.url}/v1/tasks/${id}/retry`, { runtime: { preference: "local-disposable" } });
       expect(corrected.status).toBe(202); const retryTask = JSON.parse(corrected.body) as Record<string, any>;
-      expect(retryTask).toMatchObject({ id, projectId: inspected.project.id, executionAgreement: { agreementId: created.executionAgreement.agreementId, phases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview" })]) } });
+      expect(retryTask).toMatchObject({ id, projectId: inspected.project.id, validationNegotiation: { runtime: "local-disposable" }, executionAgreement: { agreementId: created.executionAgreement.agreementId, phases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview" })]) } });
       await eventually(async () => (await instance.manager.getTask(id)).status === "interrupted");
       expect(JSON.parse(canonical).runtime).toMatchObject({ preference: "docker" });
       expect(await readFile(join(stateRoot, "tasks", id, "task-spec.json"), "utf8")).toBe(canonical);
@@ -691,6 +691,54 @@ for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace=
       const result = await json(await fetch(`${instance.url}/v1/tasks/${id}/result`));
       expect(result).toMatchObject({ status: "completed", safetyAssertions: { providerCalls: false } }); await expectValidPublicResult(result);
     } finally { if (priorPath === undefined) delete process.env.PATH; else process.env.PATH = priorPath; }
+  });
+
+  it("retries the same Docker validation task after pre-provider interruption and completes its explicit semantic review", { timeout: 15_000 }, async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-http-semantic-retry-"))) - 1]!;
+    const repository = await syntheticRepository(); const dockerBin = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-semantic-docker-"))) - 1]!;
+    const nestedWorkingDirectory = "packages/app";
+    await mkdir(join(repository, nestedWorkingDirectory, "src"), { recursive: true }); await writeFile(join(repository, nestedWorkingDirectory, "src", "review.ts"), "export const stable = true;\n");
+    await writeFile(join(repository, nestedWorkingDirectory, "package.json"), JSON.stringify({ packageManager: "pnpm@10.0.0" })); await writeFile(join(repository, nestedWorkingDirectory, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    execFileSync("git", ["add", nestedWorkingDirectory], { cwd: repository }); execFileSync("git", ["commit", "-qm", "review source"], { cwd: repository });
+    const sourceBefore = { head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim(), status: execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim(), refs: execFileSync("git", ["for-each-ref", "--format=%(refname) %(objectname)"], { cwd: repository, encoding: "utf8" }).trim() };
+    const marker = join(dockerBin, "failed-once"), preparationLog = join(dockerBin, "preparation.log"), docker = join(dockerBin, "docker"), priorPath = process.env.PATH, priorKey = process.env.OPENROUTER_API_KEY, nativeFetch = globalThis.fetch;
+    await writeFile(docker, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "Docker version 99.0.0"; exit 0; fi
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then echo "sha256:test amd64"; exit 0; fi
+if [ "$1" = "volume" ] && [ "$2" = "create" ]; then for item in "$@"; do volume="$item"; done; echo "$volume"; exit 0; fi
+if [ "$1" = "volume" ]; then exit 0; fi
+case "$*" in *runforge-prepare*)
+  printf 'prepared-attempt\\n' >> ${JSON.stringify(preparationLog)}
+  if [ ! -f ${JSON.stringify(marker)} ]; then touch ${JSON.stringify(marker)}; echo "transient failure after workspace preparation" >&2; exit 23; fi
+  exit 0;;
+esac
+workspace=""; last=""
+for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace="\${item#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace*}";; esac; last="$item"; done
+[ -n "$workspace" ] || exit 97
+(cd "$workspace" && /bin/sh -lc "$last")
+`); await chmod(docker, 0o755); process.env.PATH = `${dockerBin}:${priorPath ?? ""}`; process.env.OPENROUTER_API_KEY = "test-key";
+    const providerFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ semanticReview: { confidence: "high", limitations: [], findings: [{ severity: "low", file: "src/review.ts", location: "1", category: "coverage", evidence: "bounded source reviewed", recommendation: "retain test", blocking: false }] } }) }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14, cost: 0.002 } }), { status: 200, headers: { "x-request-id": "semantic-retry-review" } }));
+    vi.stubGlobal("fetch", ((input: string | URL | Request, init?: RequestInit) => String(input).startsWith("https://openrouter.ai/") ? providerFetch(input, init) : nativeFetch(input, init)) as typeof fetch);
+    const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
+    const id = "CONTROL-SEMANTIC-DOCKER-RETRY-1";
+    try {
+      const inspected = await json(await fetch(`${instance.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repository, workingDirectory: nestedWorkingDirectory, register: true }) }));
+      const taskSpec = { schemaVersion: 2, taskId: id, task: { text: "Review src/review.ts", goal: "Prove retry-bound semantic review", acceptanceCriteria: ["source unchanged"] }, target: { repository, workingDirectory: nestedWorkingDirectory, expectedSha: sourceBefore.head }, execution: { mode: "validation", timeoutMs: 30_000, maxProviderTokens: 4000 }, executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { independentReview: "runforge", providerModelCalls: "runforge" } }, discovery: { profile: "small-scope", explicitFiles: ["src/review.ts"], maxFiles: 2, maxBytes: 8000, maxTokens: 2000, stopCondition: "explicit source only" }, runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "required", externalNetwork: "allowed" }, validation: { mode: "explicit", commands: ["node --version"] }, authority: { profile: "read-only", allowProviderCalls: true, allowNetwork: true }, providerRouting: { provider: "openrouter", fallbackPolicy: "none", models: { reviewer: "review/model" }, maxCalls: 2, tokenBudget: { total: 4000, perPhase: { planner: 0, implementer: 0, repair: 0, reviewer: 2000, logCompression: 0 } }, timeoutMs: 30000, retry: { maxAttempts: 1 } }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } };
+      const submitted = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: inspected.project.id, taskSpec, authority: { inspect: true, providerCalls: true, network: true } }) });
+      expect(submitted.status).toBe(202); const created = await json(submitted); const canonical = await readFile(join(stateRoot, "tasks", id, "task-spec.json"), "utf8");
+      await eventually(async () => (await instance.manager.getTask(id)).status === "interrupted");
+      expect(await json(await fetch(`${instance.url}/v1/tasks/${id}/result`))).toMatchObject({ status: "interrupted", providerCalls: 0 }); expect(providerFetch).not.toHaveBeenCalled();
+      expect((await fetch(`${instance.url}/v1/tasks/${id}/retry`, { method: "POST" })).status).toBe(202);
+      await eventually(async () => (await instance.manager.getTask(id)).status === "completed");
+      const result = await json(await fetch(`${instance.url}/v1/tasks/${id}/result`));
+      expect(result).toMatchObject({ status: "completed", review: { semantic: { performed: true, reviewer: { provider: "openrouter", model: "review/model", invocationId: "semantic-retry-review" }, findings: [expect.objectContaining({ category: "coverage" })] } }, safetyAssertions: { providerCalls: true, targetUnchanged: true } });
+      expect(await instance.manager.getTask(id)).toMatchObject({ id, projectId: inspected.project.id, executionAgreement: { agreementId: created.executionAgreement.agreementId } });
+      expect(await readFile(join(stateRoot, "tasks", id, "task-spec.json"), "utf8")).toBe(canonical); expect(providerFetch).toHaveBeenCalledOnce();
+      expect((await readFile(preparationLog, "utf8")).trim().split("\n")).toEqual(["prepared-attempt", "prepared-attempt"]);
+      expect({ head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim(), status: execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim(), refs: execFileSync("git", ["for-each-ref", "--format=%(refname) %(objectname)"], { cwd: repository, encoding: "utf8" }).trim() }).toEqual(sourceBefore);
+      expect(result.providerCalls).toEqual([expect.objectContaining({ purpose: "semantic-review", phase: "reviewer", providerCalls: true, networkAuthorized: true, exitCode: 0 })]);
+      expect(result.git).toEqual({ branch: null, commit: null, pullRequest: null, merge: null });
+    } finally { if (priorPath === undefined) delete process.env.PATH; else process.env.PATH = priorPath; if (priorKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = priorKey; }
   });
 
   it("restores missing or corrupt continuation state and applies continuation once", async () => {
@@ -806,10 +854,14 @@ for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace=
   });
 
   it("classifies pre-provider setup recovery without inventing provider calls", async () => {
-    const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-pre-provider-recovery-"))) - 1]!; let attempts = 0;
-    const manager = new ControlPlaneManager(new ControlPlaneStore(root), { runTaskSpec: async (path) => { const spec = JSON.parse(await readFile(path, "utf8")); if (++attempts === 1) throw new PreProviderSetupFailure("dependency_setup", "workspace dependency preparation failed"); await mkdir(spec.artifacts.root, { recursive: true }); await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }); await manager.initialize();
+    const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-pre-provider-recovery-"))) - 1]!; let attempts = 0; const store = new ControlPlaneStore(root);
+    const manager = new ControlPlaneManager(store, { runTaskSpec: async (path) => { const spec = JSON.parse(await readFile(path, "utf8")); if (++attempts === 1) throw new PreProviderSetupFailure("dependency_setup", "workspace dependency preparation failed"); await mkdir(spec.artifacts.root, { recursive: true }); await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }); await manager.initialize();
     await manager.createTask({ taskSpec: taskSpec("CONTROL-SETUP-RETRY-1"), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); await eventually(async () => (await manager.getTask("CONTROL-SETUP-RETRY-1")).status === "interrupted");
-    const retryable = await manager.getTask("CONTROL-SETUP-RETRY-1"); expect(retryable.recovery).toMatchObject({ reason: "runtime_capability_mismatch", actions: ["retry", "retry_with_corrected_runtime"], retryAvailable: true, newTaskRequired: false }); expect(await manager.getResult(retryable.id)).toMatchObject({ outcome: "runtime_capability_mismatch", providerCalls: 0 }); await manager.retryTask(retryable.id); await eventually(async () => (await manager.getTask(retryable.id)).status === "completed"); expect(attempts).toBe(2); manager.close();
+    const retryable = await manager.getTask("CONTROL-SETUP-RETRY-1"); const canonicalBefore = JSON.stringify(await store.readSpec(retryable.id)); expect(retryable.recovery).toMatchObject({ reason: "runtime_capability_mismatch", actions: ["retry", "retry_with_corrected_runtime"], retryAvailable: true, newTaskRequired: false }); expect(await manager.getResult(retryable.id)).toMatchObject({ outcome: "runtime_capability_mismatch", providerCalls: 0 }); await manager.retryTask(retryable.id, { runtimePreference: "local-disposable" }); const corrected = await manager.getTask(retryable.id); expect(corrected.validationNegotiation).toMatchObject({ runtime: "local-disposable" }); expect(JSON.stringify(await store.readSpec(retryable.id))).toBe(canonicalBefore); expect(JSON.parse(await readFile(corrected.specPath, "utf8"))).toMatchObject({ runtime: { preference: "local-disposable" } }); await eventually(async () => (await manager.getTask(retryable.id)).status === "completed"); expect(attempts).toBe(2); manager.close();
+
+    const dockerRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-retry-docker-required-"))) - 1]!; const dockerStore = new ControlPlaneStore(dockerRoot); const dockerManager = new ControlPlaneManager(dockerStore, { runTaskSpec: async () => { throw new PreProviderSetupFailure("runtime_setup", "docker unavailable"); }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }); await dockerManager.initialize();
+    const dockerRequired = taskSpec("CONTROL-RETRY-DOCKER-REQUIRED-1"); dockerRequired.validation = { mode: "explicit", commands: ["docker version"], requirements: [{ command: "docker version", capabilities: ["docker"], acceptance: "required", evidenceRole: "environment-validation", fallbacks: [] }] };
+    await dockerManager.createTask({ taskSpec: dockerRequired, authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); await eventually(async () => (await dockerManager.getTask("CONTROL-RETRY-DOCKER-REQUIRED-1")).status === "interrupted"); await expect(dockerManager.retryTask("CONTROL-RETRY-DOCKER-REQUIRED-1", { runtimePreference: "local-disposable" })).rejects.toMatchObject({ code: "validation_capability_unavailable" }); expect((await dockerManager.getTask("CONTROL-RETRY-DOCKER-REQUIRED-1")).validationNegotiation).toMatchObject({ runtime: "docker" }); dockerManager.close();
 
     const conflictRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-workspace-conflict-"))) - 1]!; const conflict = new WorkspaceSetupError({ path: "/bounded/workspace/node_modules", expectedTarget: "/bounded/cache/node_modules", actualTarget: "/external/node_modules", owner: null }); const conflictManager = new ControlPlaneManager(new ControlPlaneStore(conflictRoot), { runTaskSpec: async () => { throw conflict; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }); await conflictManager.initialize(); await conflictManager.createTask({ taskSpec: taskSpec("CONTROL-WORKSPACE-CONFLICT-1"), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); await eventually(async () => (await conflictManager.getTask("CONTROL-WORKSPACE-CONFLICT-1")).status === "failed");
     const failed = await conflictManager.getResult("CONTROL-WORKSPACE-CONFLICT-1"); expect(failed).toMatchObject({ outcome: "workspace_setup_failed", providerCalls: 0, recovery: { code: "workspace_conflict_external", retryAvailable: false, actions: ["start_new_task", "cancel"], workspaceSetup: { path: "/bounded/workspace/node_modules", expectedTarget: "/bounded/cache/node_modules", actualTarget: "/external/node_modules", owner: null } } }); conflictManager.close();
