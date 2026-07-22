@@ -16,10 +16,92 @@ const here = dirname(fileURLToPath(import.meta.url));
 const fixture = resolve(here, "../fixtures/implementation/simple-js");
 const adapter = resolve(here, "../fixtures/implementation/coding-agent-adapter.mjs");
 const previousCommand = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+const runtimeEnvKeys = ["RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES", "RUNFORGE_EARLY_PROGRESS_DEADLINE_MS"] as const;
+const previousRuntimeEnv = Object.fromEntries(runtimeEnvKeys.map((key) => [key, process.env[key]]));
 
-afterEach(() => { if (previousCommand === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousCommand; });
+afterEach(() => {
+  if (previousCommand === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousCommand;
+  for (const key of runtimeEnvKeys) { const value = previousRuntimeEnv[key]; if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+});
 
 describe("implementation executor", () => {
+  it("rejects a provider that cannot guarantee a mandatory cap before invocation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-cap-rejection-")); const marker = join(root, "invoked");
+    const agent = await makeAgent(root, [`import { writeFileSync } from "node:fs";`, `writeFileSync(${JSON.stringify(marker)}, "called");`]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ guarantees: { inputTokens: true, outputTokens: false, reasoningTokens: true, wallClock: true, calls: true } });
+    await expect(execute(await repository(), "EXECUTOR-CAP-REJECT-1", "fix", ["node -e \"process.exit(0)\""])).rejects.toThrow(/mandatory.*output/i);
+    await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("publishes the effective envelope and truncates provider context", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-context-envelope-"));
+    const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `appendFileSync("calculator.js", "\\n// bounded candidate\\n");`,
+      `console.log(JSON.stringify({ type: "candidate_diff", message: JSON.stringify({ envelope: JSON.parse(process.env.RUNFORGE_EXECUTION_ENVELOPE), prompt: process.env.RUNFORGE_IMPLEMENTATION_PROMPT }) }));`,
+      `console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 20, output_tokens: 5, reasoning_tokens: 2, cost_usd: 0.01 } }));`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ maxInputContextTokens: 80 });
+    const result = await execute(await repository(), "EXECUTOR-CONTEXT-1", `bounded task ${"oversized-context ".repeat(400)}`, ["node -e \"process.exit(0)\""], [], (value) => { value.discovery = { profile: "small-scope", maxFiles: 3, maxBytes: 300000, maxTokens: 6000, explicitFiles: ["calculator.js"], stopCondition: "stop" }; value.execution.maxCallsPerPhase = 4; });
+    const call = result.providerCalls[0]; const summary = JSON.parse(call.stdout.split("\n").find((line: string) => line.includes("candidate_diff"))).message;
+    const published = JSON.parse(summary);
+    expect(published.envelope).toMatchObject({ profile: "small-scope", limits: { maxInputContextTokens: 80, maxCallsPerPhase: 4 }, phase: "implementation", taskId: "EXECUTOR-CONTEXT-1" });
+    expect(published.prompt.length).toBeLessThanOrEqual(320);
+    expect(call).toMatchObject({ executionEnvelope: { model: null, limits: { maxInputContextTokens: 80 } } });
+  });
+
+  it("fast-fails no-progress once without a hidden same-profile retry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-no-progress-")); const agent = await makeAgent(root, [`setInterval(() => {}, 1000);`]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "30";
+    const result = await execute(await repository(), "EXECUTOR-NO-PROGRESS-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls).toHaveLength(1);
+    expect(result.providerCalls[0]).toMatchObject({ failureReason: expect.stringContaining("no_progress"), noProgress: true });
+    expect(JSON.stringify(result.implementation)).toContain("no_progress");
+    expect(result.diagnostics.retryPlan).toMatchObject({ automatic: false, sameModelProfileAllowed: false, options: expect.arrayContaining([expect.stringContaining("smaller context"), expect.stringContaining("faster model")]) });
+  });
+
+  it("treats a streamed RED test as progress", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-red-progress-")); const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `console.log(JSON.stringify({ type: "test", status: "red", file: "calculator.test.js", line: 4, message: "RED test proves add is broken" }));`,
+      `setTimeout(() => { appendFileSync("calculator.js", "\\n// candidate after RED\\n"); console.log(JSON.stringify({ type: "turn.completed", usage: { total_tokens: 10 } })); }, 60);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500";
+    const result = await execute(await repository(), "EXECUTOR-RED-PROGRESS-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls[0]).toMatchObject({ noProgress: false, progressSignals: expect.objectContaining({ redTest: expect.any(String) }) });
+  });
+
+  it("preserves a streamed partial patch through provider timeout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-partial-timeout-")); const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `appendFileSync("calculator.js", "\\n// durable partial patch\\n");`,
+      `console.log(JSON.stringify({ type: "partial_patch", file: "calculator.js", message: "partial patch ready" }));`,
+      `setInterval(() => {}, 1000);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500"; process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ maxWallClockMs: 200 });
+    const result = await execute(await repository(), "EXECUTOR-PARTIAL-TIMEOUT-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls).toHaveLength(1); expect(result.providerCalls[0]).toMatchObject({ timedOut: true });
+    expect(result.artifact.checkpoints.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(result.implementation)).toContain("checkpoint_available");
+    expect(JSON.stringify(result.implementation)).toContain("durable partial patch");
+  });
+
+  it("stops after reported usage exhausts the phase budget before another call", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-post-response-budget-")); const counter = join(root, "calls");
+    const agent = await makeAgent(root, [
+      `import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";`,
+      `const path = ${JSON.stringify(counter)}; const calls = existsSync(path) ? Number(readFileSync(path, "utf8")) + 1 : 1; writeFileSync(path, String(calls));`,
+      `appendFileSync("calculator.js", "\\n// invalid candidate " + calls + "\\n");`,
+      `console.log(JSON.stringify({ type: "candidate_diff", message: "candidate", usage: { input_tokens: 70, output_tokens: 50 } }));`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    const result = await execute(await repository(), "EXECUTOR-POST-BUDGET-1", "fix", ["node -e \"process.exit(1)\""], [], (value) => { value.execution.phaseBudgets = { implementation: 100, repair: 100 }; });
+    expect(await readFile(counter, "utf8")).toBe("1"); expect(result.providerCalls).toHaveLength(1);
+    expect(result.implementation).toMatchObject({ status: "blocked_with_owner_gate" });
+  });
   it("preserves approved preset ownership through the shared resolver", () => {
     expect(executionPhaseOwner("assist-only", "localBranch")).toBe("external_session");
     expect(executionPhaseOwner("assist-only", "localCommit")).toBe("external_session");
@@ -62,6 +144,32 @@ describe("implementation executor", () => {
     expect(await readFile(String((result.implementation as Record<string, unknown>).patchPackage), "utf8")).toContain("added.test.js");
     expect(result.publication).toMatchObject({ status: "on_hold", performed: false });
   }, 20_000);
+
+  it("excludes RunForge dependency preparation artifacts from patches, checkpoints, and commits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-dependency-filter-"));
+    const agent = await makeAgent(root, [
+      `import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";`,
+      `appendFileSync("calculator.js", "\\n// bounded candidate\\n");`,
+      `mkdirSync(".pnpm-store/v11", { recursive: true }); writeFileSync(".pnpm-store/v11/index.db", "generated");`,
+      `mkdirSync("node_modules/pkg", { recursive: true }); writeFileSync("node_modules/pkg/index.js", "generated");`,
+      `mkdirSync("packages/pkg/node_modules/nested", { recursive: true }); writeFileSync("packages/pkg/node_modules/nested/index.js", "generated");`,
+      `console.log(JSON.stringify({ type: "candidate_diff", message: "candidate ready" }));`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    const repo = await repository();
+    const result = await execute(repo, "EXECUTOR-DEPENDENCY-FILTER-1", "fix add", ["node -e \"process.exit(0)\""]);
+    const patch = await readFile(String(result.implementation.patchPackage), "utf8");
+    expect(result.implementation).toMatchObject({ status: "implemented_and_validated", changedFiles: ["calculator.js"] });
+    expect(result.handoff.changedFiles).toEqual(["calculator.js"]);
+    expect(result.artifact.checkpoints.every((checkpoint: Record<string, any>) => !JSON.stringify(checkpoint).match(/(?:\.pnpm-store|node_modules)/))).toBe(true);
+    for (const checkpoint of result.artifact.checkpoints as Array<Record<string, any>>) {
+      const checkpointPatch = await readFile(join(dirname(String(result.implementation.patchPackage)), checkpoint.patchPath), "utf8");
+      expect(checkpointPatch).not.toMatch(/(?:\.pnpm-store|node_modules)/);
+    }
+    expect(patch).toContain("calculator.js");
+    expect(patch).not.toMatch(/(?:\.pnpm-store|node_modules)/);
+    expect(await git(repo, ["show", "--format=", "--name-only", String(result.git.commit)])).toBe("calculator.js\n");
+  });
 
   it("returns an assist-only patch without creating an externally owned branch or commit", async () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
@@ -397,7 +505,8 @@ describe("implementation executor", () => {
 async function repository(withSensitiveContext = false): Promise<string> { const repo = await mkdtemp(join(tmpdir(), "runforge-implementation-repo-")); await cp(fixture, repo, { recursive: true }); if (withSensitiveContext) { const path = join(repo, "calculator.js"); const source = await readFile(path, "utf8"); const context = ["// API", "_KEY=", "existingvalue", "\n"].join(""); await writeFile(path, context + source); } await git(repo, ["init", "-b", "main"]); await git(repo, ["add", "."]); await git(repo, ["-c", "user.name=Fixture", "-c", "user.email=fixture@localhost", "commit", "-m", "fixture"]); return repo; }
 async function git(cwd: string, args: string[]): Promise<string> { return (await exec("git", args, { cwd })).stdout; }
 function spec(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []) { return { schemaVersion: 2, taskId, task: { text, goal: "Make the deterministic fixture satisfy acceptance", acceptanceCriteria: ["validation is green", "local patch evidence exists"] }, target: { repository: repo, workingDirectory: "." }, execution: { mode: "implementation", maxRepairIterations: 2 }, runtime: { preference: "local-disposable", externalNetwork: "allowed", dependencyPreparation: "disabled" }, validation: { mode: "explicit", commands }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true, forbiddenAreas }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
-async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
+async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = [], configure?: (value: Record<string, any>) => void): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); configure?.(value); value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
+async function makeAgent(root: string, source: string[]): Promise<string> { const path = join(root, "agent.mjs"); await writeFile(path, source.join("\n") + "\n"); return path; }
 async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string, executionMode: "implementation" | "repair" = "implementation", attempt?: number, dirtyPolicy?: string): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.execution.mode = executionMode; value.executionAgreement = executionAgreement; if (dirtyPolicy) value.target.dirtyPolicy = dirtyPolicy; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId, attempt }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
 async function poll(url: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("task did not finish"); }
 async function pollPhase(url: string, phase: string): Promise<void> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (task.progress?.phase === phase) return; await new Promise((done) => setTimeout(done, 25)); } throw new Error(`task did not reach ${phase}`); }
