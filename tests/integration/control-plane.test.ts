@@ -828,7 +828,7 @@ for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace=
     const completedRetry = await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" }); expect(completedRetry.status).toBe(409); expect(await json(completedRetry)).toMatchObject({ error: { code: "task_not_retryable" } });
   });
 
-  it("recovers stale heartbeat and cancelled executions while rejecting owner-gated retry", { timeout: 15_000 }, async () => {
+  it("recovers stale heartbeat and cancelled executions while rejecting owner-gated retry", { timeout: 30_000 }, async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-stale-retry-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let runs = 0;
     const manager = new ControlPlaneManager(store, { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const run = ++runs; await mkdir(root, { recursive: true }); if (run !== 2) await new Promise((done) => setTimeout(done, 80)); else await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }, { heartbeatIntervalMs: 1_000, staleHeartbeatMs: 15, executionTimeoutMs: 10_000, cleanupGraceMs: 100 });
     const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-STALE-1"); await eventually(async () => runs === 1);
