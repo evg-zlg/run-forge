@@ -3,12 +3,15 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
-import { describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { ControlPlaneManager } from "../../src/control-plane/manager.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 import { planCampaignFromGoal } from "../../src/run/task-run-planner.js";
 
 const exec = promisify(execFile);
+let previousPricing: string | undefined;
+beforeEach(() => { previousPricing = process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON; process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = JSON.stringify({ "qwen/qwen3-coder-next": { inputUsdPerToken: .00000001, outputUsdPerToken: .000001 } }); });
+afterEach(() => { if (previousPricing === undefined) delete process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON; else process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = previousPricing; });
 
 function delegatedReviewFailure(): Record<string, unknown> {
   const reason = "Semantic reviewer invocation was unavailable: openrouter_max_calls_exceeded";

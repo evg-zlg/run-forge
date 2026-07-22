@@ -15,7 +15,7 @@ type Deps = {
   planCampaign: (record: CampaignRecord) => Promise<CampaignPlan | SemanticCampaignPlannerResult>;
   createTask: (input: { projectId?: string; taskSpec: Record<string, unknown>; authority: CampaignSpec["authority"]; publicationRequested: "none" | "draft-pr" }) => Promise<ControlTaskRecord>;
   getTask: (id: string) => Promise<ControlTaskRecord>;
-  getResult: (id: string) => Promise<Record<string, unknown>>;
+  getResult: (id: string) => Promise<Record<string, unknown>>; preflightCampaign?: (id: string, spec: CampaignSpec) => void;
   integration?: CampaignIntegration;
 };
 
@@ -40,7 +40,7 @@ export class CampaignCoordinator {
     if (spec.providerRouting.provider === "openrouter" && spec.providerRouting.fallbackPolicy && spec.providerRouting.fallbackPolicy !== "none") throw new ControlPlaneError(422, "invalid_campaign", "OpenRouter campaigns must set fallbackPolicy='none'.");
     if (spec.providerRouting.provider === "local" && spec.providerRouting.fallbackPolicy === "same_provider") throw new ControlPlaneError(422, "invalid_campaign", "Local campaigns do not support same-provider fallback semantics.");
     const now = new Date().toISOString();
-    const id = `cmp_v1_${randomUUID().replace(/-/g, "").slice(0, 24)}`;
+    const id = `cmp_v1_${randomUUID().replace(/-/g, "").slice(0, 24)}`; this.deps.preflightCampaign?.(id, spec);
     const record: CampaignRecord = { schemaVersion: 1, id, status: "planning", spec, plan: null, plannerEvidence: null, integration: null, children: {}, usage: { tokens: 0, costUsd: 0, tasks: 0 }, reserved: { tokens: 0, costUsd: 0 }, checkpoints: [], failures: [], result: null, createdAt: now, updatedAt: now };
     if (spec.authority.implementation && !spec.validationContract?.requiredCommands.length) {
       record.status = "on_hold";

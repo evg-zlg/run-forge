@@ -1,4 +1,5 @@
 import type { ImplementationExecutorCapability } from "../implementation/executor.js";
+import { openRouterPricingCatalogStatus } from "../providers/openrouter-pricing.js";
 
 type Executor = ImplementationExecutorCapability;
 
@@ -8,10 +9,10 @@ export function providerForExecutor(executor: unknown): "local" | "openrouter" |
   return value.provider === "openrouter" || value.id === "openrouter-coding-agent" ? "openrouter" : value.provider === "local" || typeof value.id === "string" ? "local" : null;
 }
 
-export function openRouterReadiness(): { configured: boolean; credentialReady: boolean; ready: boolean; noLocalFallback: true } {
+export function openRouterReadiness(): { configured: boolean; credentialReady: boolean; ready: boolean; noLocalFallback: true; pricingCatalog: ReturnType<typeof openRouterPricingCatalogStatus> } {
   // This intentionally returns only booleans. Do not reveal a reference, value, or header.
   const credentialReady = Boolean(process.env.OPENROUTER_API_KEY?.trim());
-  return { configured: credentialReady, credentialReady, ready: credentialReady, noLocalFallback: true };
+  return { configured: credentialReady, credentialReady, ready: credentialReady, noLocalFallback: true, pricingCatalog: openRouterPricingCatalogStatus() };
 }
 
 export function publicImplementationExecutors(executors: Executor[]): Record<string, unknown>[] {
