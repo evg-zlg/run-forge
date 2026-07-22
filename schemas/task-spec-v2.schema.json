@@ -18,10 +18,11 @@
       "type": "object", "additionalProperties": false, "required": ["provider", "maxCalls", "tokenBudget", "timeoutMs", "retry"],
       "properties": {
         "provider": { "enum": ["local", "openrouter"] }, "fallbackPolicy": { "enum": ["none", "same_provider"] },
-        "models": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "string", "minLength": 1 }, "implementer": { "type": "string", "minLength": 1 }, "repair": { "type": "string", "minLength": 1 }, "reviewer": { "type": "string", "minLength": 1 } } },
+        "models": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "string", "minLength": 1 }, "implementer": { "type": "string", "minLength": 1 }, "repair": { "type": "string", "minLength": 1 }, "reviewer": { "type": "string", "minLength": 1 }, "logCompression": { "type": "string", "minLength": 1 } } },
+        "modelPools": { "type": "object", "additionalProperties": false, "properties": { "planner": { "$ref": "#/$defs/modelPool" }, "implementer": { "$ref": "#/$defs/modelPool" }, "repair": { "$ref": "#/$defs/modelPool" }, "reviewer": { "$ref": "#/$defs/modelPool" }, "logCompression": { "$ref": "#/$defs/modelPool" } } },
         "reasoning": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "object", "additionalProperties": false, "properties": { "effort": { "type": "string", "minLength": 1 }, "maxTokens": { "type": "integer", "minimum": 1, "maximum": 200000 }, "exclude": { "type": "boolean" } } }, "reviewer": { "type": "object", "additionalProperties": false, "properties": { "effort": { "type": "string", "minLength": 1 }, "maxTokens": { "type": "integer", "minimum": 1, "maximum": 200000 }, "exclude": { "type": "boolean" } } } } },
         "maxCalls": { "type": "integer", "minimum": 1, "maximum": 32 },
-        "tokenBudget": { "type": "object", "additionalProperties": false, "required": ["total", "perPhase"], "properties": { "total": { "type": "integer", "minimum": 1000, "maximum": 200000 }, "perPhase": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "integer", "minimum": 0, "maximum": 200000 }, "implementer": { "type": "integer", "minimum": 0, "maximum": 200000 }, "repair": { "type": "integer", "minimum": 0, "maximum": 200000 }, "reviewer": { "type": "integer", "minimum": 0, "maximum": 200000 } } } } },
+        "tokenBudget": { "type": "object", "additionalProperties": false, "required": ["total", "perPhase"], "properties": { "total": { "type": "integer", "minimum": 1000, "maximum": 200000 }, "perPhase": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "integer", "minimum": 0, "maximum": 200000 }, "implementer": { "type": "integer", "minimum": 0, "maximum": 200000 }, "repair": { "type": "integer", "minimum": 0, "maximum": 200000 }, "reviewer": { "type": "integer", "minimum": 0, "maximum": 200000 }, "logCompression": { "type": "integer", "minimum": 0, "maximum": 200000 } } } } },
         "costBudgetUsd": { "type": "number", "minimum": 0, "maximum": 1000 }, "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 1800000 },
         "retry": { "type": "object", "additionalProperties": false, "required": ["maxAttempts"], "properties": { "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 3 } } }
       },
@@ -97,5 +98,8 @@
     "artifacts": { "type": "object", "additionalProperties": false, "properties": { "root": { "type": "string", "minLength": 1 }, "resultFormat": { "const": "normalized-v1" } } },
     "ownerGate": { "type": "object", "additionalProperties": false, "properties": { "policy": { "const": "stop-and-report" } } },
     "repair": { "type": "object", "additionalProperties": false, "properties": { "mode": { "enum": ["none", "disposable", "code"] }, "plan": { "type": ["string", "null"] } } }
+  },
+  "$defs": {
+    "modelPool": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
   }
 }

@@ -22,13 +22,16 @@ import {
   finalizeDelegatedImplementationArtifacts,
   finalizeImplementationArtifacts,
 } from "./task-spec-implementation-result.js";
+import type { LogCompressionInvoker } from "../implementation/raw-log-compressor.js";
+import { PreProviderSetupFailure } from "../control-plane/http-task-preflight.js";
 
 export type TaskSpecExecution =
   | { kind: "validation"; spec: TaskSpecV2; result: TaskRunResult | ValidationOnlyExecutorResult; summary: string; success: boolean }
   | { kind: "repair"; spec: TaskSpecV2; result: ExternalExecutionResult; summary: string; success: boolean }
   | { kind: "implementation"; spec: TaskSpecV2; result: ImplementationExecutorResult | AgreementHandoffResult; summary: string; success: boolean };
 type AgreementHandoffResult = { status: "delegated"; responsibleParty: "external_session" | "external_system"; selectedExecutor: { id: "agreement-handoff"; model: null }; providerCalls: []; publicationMutations: 0 };
-export async function runTaskSpecFile(path: string, context: { signal?: AbortSignal; attempt?: number; executionId?: string; executionAgreementId?: string; executionAgreement?: ExecutionAgreement; checkpointRepair?: { patchPath: string; checkpointId: string; checkpointDigest: string; repairIntent: string | null }; onProgress?: (phase: string, detail: string) => void | Promise<void> } = {}): Promise<TaskSpecExecution> {
+export type TaskSpecRunContext = { signal?: AbortSignal; attempt?: number; executionId?: string; executionAgreementId?: string; executionAgreement?: ExecutionAgreement; checkpointRepair?: { patchPath: string; checkpointId: string; checkpointDigest: string; repairIntent: string | null }; logCompressionInvoker?: LogCompressionInvoker; onProgress?: (phase: string, detail: string) => void | Promise<void> };
+export async function runTaskSpecFile(path: string, context: TaskSpecRunContext = {}): Promise<TaskSpecExecution> {
   const spec = await loadTaskSpecV2(path);
   const initialTarget = await inspectProject(spec.target.repository, spec.target.workingDirectory);
   await writeNormalizedSpec(spec);
@@ -44,7 +47,7 @@ export async function runTaskSpecFile(path: string, context: { signal?: AbortSig
       projectProfile: { runtime: spec.runtime.preference }, acceptanceCriteria: spec.task.acceptanceCriteria,
       authorityEnvelope: spec.authority, forbiddenZones: spec.authority.forbiddenAreas,
       runtimePolicy: spec.runtime, validationProfile: spec.validation, artifactRoot: spec.artifacts.root,
-      attempt: context.attempt ?? 1, generation: context.executionId ?? "standalone", executionAgreementId: context.executionAgreementId ?? `task-spec:${spec.executionAgreement.profile}`, signal: context.signal, checkpointRepair: context.checkpointRepair, onProgress: context.onProgress
+      attempt: context.attempt ?? 1, generation: context.executionId ?? "standalone", executionAgreementId: context.executionAgreementId ?? `task-spec:${spec.executionAgreement.profile}`, signal: context.signal, checkpointRepair: context.checkpointRepair, logCompressionInvoker: context.logCompressionInvoker, onProgress: context.onProgress
     }));
     clearRepairedFindings(result);
     const status = await finalizeImplementationArtifacts(spec, result, context.executionId !== undefined);
@@ -54,15 +57,19 @@ export async function runTaskSpecFile(path: string, context: { signal?: AbortSig
     if (spec.execution.mode === "validation") {
       const agreement = context.executionAgreement ?? validationExecutionAgreement(spec);
       const execute = async (tempVolume?: string): Promise<TaskSpecExecution> => {
-        const result = await preserveSpecOnFailure(spec, initialTarget, () => runValidationOnlyExecutor({
+        const result = await preserveSpecOnFailure(spec, initialTarget, async () => { try { return await runValidationOnlyExecutor({
           spec, executionAgreement: agreement, ...(tempVolume ? { tempVolume } : {}), ...(context.signal ? { signal: context.signal } : {}), ...(context.onProgress ? { onProgress: context.onProgress } : {}),
-        }));
+        }); } catch (error) { throw error instanceof PreProviderSetupFailure ? error : new PreProviderSetupFailure("runtime_setup", error instanceof Error ? error.message : String(error)); } });
         await writeNormalizedSpec(spec);
         await finalizeCapabilityAwareValidationArtifacts(spec, result, context.executionId !== undefined);
         return { kind: "validation", spec, result, summary: `TaskSpec ${spec.taskId}: ${result.status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: result.status === "completed" };
       };
       const volumeScope = context.executionId ? `${spec.taskId}-${context.executionId}` : spec.taskId;
-      return spec.runtime.preference === "docker" ? withDockerValidationTempVolume(volumeScope, execute) : execute();
+      if (spec.runtime.preference !== "docker") return execute();
+      // The Docker temp volume is created before the validation executor (and before
+      // any provider-capable work). Preserve that boundary for same-task recovery.
+      try { return await withDockerValidationTempVolume(volumeScope, execute); }
+      catch (error) { throw error instanceof PreProviderSetupFailure ? error : new PreProviderSetupFailure("runtime_setup", error instanceof Error ? error.message : String(error)); }
     }
     const result = await preserveSpecOnFailure(spec, initialTarget, () => runTaskRunHarness({
       taskId: spec.taskId,

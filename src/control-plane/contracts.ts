@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { ExecutionAgreement, ExecutionAgreementConflict, ExecutionParty, ExecutionPhaseId, ExecutionProfile } from "../product/execution-agreement.js";
+import { normalizeProviderModelPools, type ProviderModelPools, type ProviderRoutingPhase } from "../product/provider-routing.js";
 import type { ValidationCapabilityNegotiation } from "./validation-negotiation.js";
 export const controlPlaneApiVersion = "v1";
 export const defaultControlPlaneHost = "127.0.0.1";
@@ -17,14 +18,12 @@ export type ControlAuthority = {
   merge: boolean;
   deploy: boolean;
 };
-
 export type CheckpointResumeRequest = {
   artifactRoot: string; projectId: string; targetRepository: string; workingDirectory: string;
   expectedBaseSha: string; executionAgreementId: string; authoritySnapshot: Record<string, unknown>;
   candidateBinary: { path: string; sha256: string; sourceRunforgeSha: string; minimumCheckpointSchemaVersion: number; maximumCheckpointSchemaVersion: number; features: string[] };
   dependency: { strategy: "verified_read_only_cache" | "candidate_local_offline_install" | "no_dependencies"; cacheRoot?: string; cacheSha256?: string; packageManager?: "npm" | "pnpm" | "yarn" | "bun" };
 };
-
 export type ProjectRecord = {
   id: string;
   repository: string;
@@ -32,7 +31,6 @@ export type ProjectRecord = {
   createdAt: string;
   updatedAt: string;
 };
-
 export type ControlTaskStatus = "queued" | "running" | "awaiting_owner_decision" | "continuing" | "completed" | "failed" | "interrupted";
 
 export type DecisionRecord = {
@@ -42,7 +40,6 @@ export type DecisionRecord = {
   createdAt: string;
   response: Record<string, unknown>;
 };
-
 export type TaskProgress = {
   phase: string;
   operation: string;
@@ -58,7 +55,6 @@ export type TaskProgress = {
   diagnostic: string | null;
   agreement?: AgreementLifecycleProjection;
 };
-
 export type AgreementLifecycleProjection = {
   schemaVersion: 1;
   agreementId: string;
@@ -74,7 +70,6 @@ export type AgreementLifecycleProjection = {
   ownerGate: { required: boolean; status: string; reason?: string };
   publicationGate: { required: boolean; status: string; reason?: string };
 };
-
 export type TaskRecovery = {
   reason: string;
   lastPhase: string;
@@ -89,6 +84,8 @@ export type TaskRecovery = {
   newTaskRequired?: boolean;
   previousArtifactsReusable?: boolean;
   targetShaChanged?: boolean | null;
+  code?: string;
+  workspaceSetup?: { path: string; expectedTarget: string; actualTarget: string | null; owner: Record<string, unknown> | null };
 } | null;
 
 export type ExecutionLease = {
@@ -100,7 +97,6 @@ export type ExecutionLease = {
   revokedAt: string | null;
   cleanupDeadlineAt: string | null;
 };
-
 export type ExecutionAttempt = {
   executionId: string;
   attempt: number;
@@ -111,7 +107,6 @@ export type ExecutionAttempt = {
   finishedAt: string | null;
   outcome: "active" | "completed" | "failed" | "interrupted";
 };
-
 export type ControlTaskRecord = {
   id: string;
   projectId: string | null;
@@ -150,10 +145,13 @@ export type ControlTaskRecord = {
     /** Routing is declarative and intentionally excludes credential references and headers. */
     requestedProvider?: "local" | "openrouter" | null;
     effectiveProvider?: "local" | "openrouter" | null;
-    phaseModels?: Partial<Record<"planner" | "implementer" | "repair" | "reviewer", string>>;
+    phaseModels?: Partial<Record<ProviderRoutingPhase, string>>;
+    modelPools?: ProviderModelPools;
     fallbackPolicy?: "none" | "same_provider";
     noLocalFallback?: boolean;
-    budgets?: { maxCalls: number; tokenBudget: { total: number; perPhase: Record<"planner" | "implementer" | "repair" | "reviewer", number> }; costBudgetUsd?: number; timeoutMs: number; maxAttempts: number };
+    /** Provider-backed semantic review route reserved during task preflight. */
+    semanticReview?: { schemaVersion: 1; outcome: "preflight_contract_rejected" | "semantic_review_negotiated"; runtime: string; reviewer: { required: boolean; provider: "openrouter" | "local" | null; model: string | null } };
+    budgets?: { maxCalls: number; tokenBudget: { total: number; perPhase: Record<ProviderRoutingPhase, number> }; costBudgetUsd?: number; timeoutMs: number; maxAttempts: number };
   };
 };
 
@@ -161,14 +159,13 @@ export type CampaignStatus = "planning" | "queued" | "running" | "completed" | "
 export type CampaignProviderRouting = {
   provider: "openrouter" | "local";
   model?: string;
-  phaseModels?: Partial<Record<"planner" | "implementer" | "repair" | "reviewer", string>>;
+  /** Legacy phase-specific single-model configuration. */
+  phaseModels?: Partial<Record<ProviderRoutingPhase, string>>;
+  /** Ordered candidates chosen deterministically from a campaign-stable key. */
+  modelPools?: ProviderModelPools;
   fallbackPolicy?: "none" | "same_provider";
 };
-/**
- * The campaign caller supplies these checks from an already-known project
- * contract.  Campaign planning deliberately does not try to infer a complete
- * test suite from arbitrary repository contents.
- */
+/** Caller-supplied known checks; campaign planning never infers a complete arbitrary-project suite. */
 export type CampaignValidationContract = {
   source: "explicit" | "task_spec" | "doctor" | "project_profile";
   requiredCommands: string[];
@@ -237,9 +234,12 @@ export function parseCampaignRequest(value: unknown): CampaignSpec {
   const target = asObject(input.target, "target");
   rejectUnknown(target, ["projectId", "repository", "workingDirectory", "expectedSha"], "target");
   const routing = asObject(input.providerRouting, "providerRouting");
-  rejectUnknown(routing, ["provider", "model", "phaseModels", "fallbackPolicy"], "providerRouting");
+  rejectUnknown(routing, ["provider", "model", "phaseModels", "modelPools", "fallbackPolicy"], "providerRouting");
   const phaseModels = asObject(routing.phaseModels, "providerRouting.phaseModels", true);
-  rejectUnknown(phaseModels, ["planner", "implementer", "repair", "reviewer"], "providerRouting.phaseModels");
+  rejectUnknown(phaseModels, ["planner", "implementer", "repair", "reviewer", "logCompression"], "providerRouting.phaseModels");
+  let modelPools: ProviderModelPools;
+  try { modelPools = normalizeProviderModelPools(routing.modelPools, "providerRouting.modelPools"); }
+  catch (error) { throw new ControlPlaneError(400, "invalid_request", error instanceof Error ? error.message : "providerRouting.modelPools is invalid."); }
   const limits = asObject(input.limits, "limits");
   rejectUnknown(limits, ["maxCostUsd", "maxTokens", "maxTasks", "maxConcurrency"], "limits");
   const validation = asObject(input.validationContract, "validationContract", true);
@@ -252,7 +252,7 @@ export function parseCampaignRequest(value: unknown): CampaignSpec {
   const fallbackPolicy = routing.fallbackPolicy === undefined
     ? undefined
     : choice(routing.fallbackPolicy, ["none", "same_provider"] as const, "providerRouting.fallbackPolicy");
-  return { goal: string(input.goal, "goal"), target: { ...(target.projectId === undefined ? {} : { projectId: string(target.projectId, "target.projectId") }), ...(target.repository === undefined ? {} : { repository: string(target.repository, "target.repository") }), ...(target.workingDirectory === undefined ? {} : { workingDirectory: string(target.workingDirectory, "target.workingDirectory") }), ...(target.expectedSha === undefined ? {} : { expectedSha: string(target.expectedSha, "target.expectedSha") }) }, authority: defaultAuthority(input.authority), providerRouting: { provider: choice(routing.provider, ["openrouter", "local"] as const, "providerRouting.provider"), ...(routing.model === undefined ? {} : { model: string(routing.model, "providerRouting.model") }), ...(Object.keys(phaseModels).length ? { phaseModels: Object.fromEntries(Object.entries(phaseModels).map(([k, v]) => [k, string(v, `providerRouting.phaseModels.${k}`)])) as CampaignProviderRouting["phaseModels"] } : {}), ...(fallbackPolicy === undefined ? {} : { fallbackPolicy }) }, limits: { ...(limits.maxCostUsd === undefined ? {} : { maxCostUsd: decimal(limits.maxCostUsd, "limits.maxCostUsd", 0.000_001, 1_000_000) }), maxTokens: integer(limits.maxTokens, "limits.maxTokens", 1, 200_000), maxTasks: integer(limits.maxTasks, "limits.maxTasks", 1, 100), maxConcurrency: integer(limits.maxConcurrency, "limits.maxConcurrency", 1, 20) }, ...(validationContract ? { validationContract } : {}) };
+  return { goal: string(input.goal, "goal"), target: { ...(target.projectId === undefined ? {} : { projectId: string(target.projectId, "target.projectId") }), ...(target.repository === undefined ? {} : { repository: string(target.repository, "target.repository") }), ...(target.workingDirectory === undefined ? {} : { workingDirectory: string(target.workingDirectory, "target.workingDirectory") }), ...(target.expectedSha === undefined ? {} : { expectedSha: string(target.expectedSha, "target.expectedSha") }) }, authority: defaultAuthority(input.authority), providerRouting: { provider: choice(routing.provider, ["openrouter", "local"] as const, "providerRouting.provider"), ...(routing.model === undefined ? {} : { model: string(routing.model, "providerRouting.model") }), ...(Object.keys(phaseModels).length ? { phaseModels: Object.fromEntries(Object.entries(phaseModels).map(([k, v]) => [k, string(v, `providerRouting.phaseModels.${k}`)])) as CampaignProviderRouting["phaseModels"] } : {}), ...(Object.keys(modelPools).length ? { modelPools } : {}), ...(fallbackPolicy === undefined ? {} : { fallbackPolicy }) }, limits: { ...(limits.maxCostUsd === undefined ? {} : { maxCostUsd: decimal(limits.maxCostUsd, "limits.maxCostUsd", 0.000_001, 1_000_000) }), maxTokens: integer(limits.maxTokens, "limits.maxTokens", 1, 200_000), maxTasks: integer(limits.maxTasks, "limits.maxTasks", 1, 100), maxConcurrency: integer(limits.maxConcurrency, "limits.maxConcurrency", 1, 20) }, ...(validationContract ? { validationContract } : {}) };
 }
 export function defaultAuthority(value: unknown): ControlAuthority {
   const input = asObject(value, "authority", true);

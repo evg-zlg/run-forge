@@ -46,7 +46,7 @@ describe("bounded implementation context", () => {
     expect(result.plan).toMatchObject({ withinBounds: false, totalBytes: 2_000, reads: [expect.objectContaining({ status: "rejected", reason: "context byte limit exceeded" })] });
   });
 
-  it("deduplicates noisy evidence, retains critical lines, preserves source, telemetry has no content", async () => {
+  it("keeps raw command/provider evidence out of provider context while preserving its artifact metadata", async () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-noisy-context-"));
     const log = [
       "start",
@@ -69,12 +69,17 @@ describe("bounded implementation context", () => {
     await writeFile(join(root, "build.log"), log);
     await writeFile(join(root, "run.err"), err);
     await writeFile(join(root, "validation-result.json"), `${JSON.stringify({ status: "ok" })}\n`.repeat(80));
+    await writeFile(join(root, "stdout.txt"), "RAW_STDOUT_CANARY");
+    await writeFile(join(root, "stderr.txt"), "RAW_STDERR_CANARY");
+    await writeFile(join(root, "command-output.json"), JSON.stringify({ output: "RAW_COMMAND_CANARY" }));
+    await writeFile(join(root, "provider-response.json"), JSON.stringify({ output: "RAW_PROVIDER_CANARY" }));
+    await writeFile(join(root, "junit.xml"), "<testsuite>RAW_JUNIT_CANARY</testsuite>");
     const request = {
       spec: {
         task: { text: "bounded context" },
         discovery: {
-          explicitFiles: ["app.ts", "build.log", "run.err", "validation-result.json"],
-          maxFiles: 5,
+          explicitFiles: ["app.ts", "build.log", "run.err", "validation-result.json", "stdout.txt", "stderr.txt", "command-output.json", "provider-response.json", "junit.xml"],
+          maxFiles: 9,
           maxBytes: 100_000,
           maxTokens: 10_000,
           profile: "small-scope",
@@ -85,18 +90,26 @@ describe("bounded implementation context", () => {
     const result = await buildContextPlan(request, root);
 
     expect(result.implementationPrompt).toContain("--- BEGIN FILE app.ts ---\nexport const x = 1;");
-    expect(result.implementationPrompt).not.toContain("info\ninfo\ninfo");
-    expect(result.implementationPrompt).toContain("error: fail to parse");
-    expect(result.implementationPrompt).toContain("panic at line 10");
-    expect(result.implementationPrompt).toContain("err: file not found");
-    expect(result.implementationPrompt.match(/\{\"status\":\"ok\"\}/g)?.length).toBe(1);
+    expect(result.implementationPrompt).not.toContain("error: fail to parse");
+    expect(result.implementationPrompt).not.toContain("panic at line 10");
+    expect(result.implementationPrompt).not.toContain("err: file not found");
+    expect(result.implementationPrompt).not.toContain('{"status":"ok"}');
+    expect(result.implementationPrompt).not.toMatch(/RAW_(?:STDOUT|STDERR|COMMAND|PROVIDER|JUNIT)_CANARY/);
     const telemetry = (result.plan.compilerTelemetry as any);
     expect(JSON.stringify(telemetry)).not.toMatch(/start|fail to parse|panic at line/);
-    expect(telemetry.rawIncludedBytes).toBeGreaterThan(0);
+    expect(telemetry.rawIncludedBytes).toBe(Buffer.byteLength('export const x = 1;\n'));
     expect(telemetry.plannerPromptBytes).toBeGreaterThan(0);
-    expect(telemetry.implementationPromptBytes).toBeGreaterThan(0);
-    expect(telemetry.plannerPromptBytes).toBeGreaterThan(telemetry.implementationPromptBytes);
-    expect(result.implementationPrompt.split("\n").filter((l) => /panic|error/.test(l)).length).toBeGreaterThanOrEqual(2);
+    expect(telemetry.implementationPromptBytes).toBe(telemetry.plannerPromptBytes);
+    expect(result.plan.omitted).toEqual(expect.arrayContaining([
+      expect.objectContaining({ file: "build.log", status: "excluded_raw_log" }),
+      expect.objectContaining({ file: "run.err", status: "excluded_raw_log" }),
+      expect.objectContaining({ file: "validation-result.json", status: "excluded_raw_log" }),
+      expect.objectContaining({ file: "stdout.txt", status: "excluded_raw_log" }),
+      expect.objectContaining({ file: "stderr.txt", status: "excluded_raw_log" }),
+      expect.objectContaining({ file: "command-output.json", status: "excluded_raw_log" }),
+      expect.objectContaining({ file: "provider-response.json", status: "excluded_raw_log" }),
+      expect.objectContaining({ file: "junit.xml", status: "excluded_raw_log" }),
+    ]));
     const r2 = await buildContextPlan(request, root);
     expect(result.implementationPrompt).toBe(r2.implementationPrompt);
   });

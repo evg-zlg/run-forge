@@ -96,6 +96,17 @@ describe("OpenRouter executor safety", () => {
     expect(fetchMock).toHaveBeenCalledTimes(3);
   });
 
+  it("keeps the selected pool candidate stable across invocation iterations", async () => {
+    process.env.OPENROUTER_API_KEY = "test-key";
+    const fetchMock = vi.fn().mockResolvedValue(ok("planner output")); vi.stubGlobal("fetch", fetchMock);
+    const artifactRoot = await mkdtemp(join(tmpdir(), "runforge-openrouter-stable-model-"));
+    const request = { artifactRoot, signal: undefined, forbiddenZones: [], spec: { taskId: "POOL-STABLE-1", execution: { maxPatchBytes: 10_000, maxChangedFiles: 10 }, providerRouting: { models: {}, modelPools: { planner: ["model/one", "model/two", "model/three"] }, maxCalls: 2, retry: { maxAttempts: 1 }, timeoutMs: 100, tokenBudget: { total: 100, perPhase: { planner: 100 } } } } } as any;
+    const first = await runOpenRouterAgent(request, artifactRoot, "plan", "planner", [], "planner");
+    const second = await runOpenRouterAgent(request, artifactRoot, "plan again", "planner", [{ phase: "planner", tokenUsage: first.tokenUsage, attempts: first.attempts }], "retry-1");
+    expect(first.model).toBe(second.model);
+    expect(fetchMock.mock.calls.map((call) => JSON.parse(call[1].body).model)).toEqual([first.model, first.model]);
+  });
+
   it("persists only a bounded safe excerpt of provider output", async () => {
     process.env.OPENROUTER_API_KEY = "test-key";
     const raw = `API_KEY=sk-${"x".repeat(30)}`;

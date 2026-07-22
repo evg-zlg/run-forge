@@ -60,10 +60,11 @@ export const taskSpecV2Schema: Record<string, unknown> = {
       type: "object", additionalProperties: false, required: ["provider", "maxCalls", "tokenBudget", "timeoutMs", "retry"],
       properties: {
         provider: { enum: ["local", "openrouter"] }, fallbackPolicy: { enum: ["none", "same_provider"] },
-        models: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer"].map((phase) => [phase, { type: "string", minLength: 1 }])) },
+        models: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer", "logCompression"].map((phase) => [phase, { type: "string", minLength: 1 }])) },
+        modelPools: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer", "logCompression"].map((phase) => [phase, { $ref: "#/$defs/modelPool" }])) },
         reasoning: { type: "object", additionalProperties: false, properties: { planner: { type: "object", additionalProperties: false, properties: { effort: { type: "string", minLength: 1 }, maxTokens: { type: "integer", minimum: 1, maximum: 200000 }, exclude: { type: "boolean" } } }, reviewer: { type: "object", additionalProperties: false, properties: { effort: { type: "string", minLength: 1 }, maxTokens: { type: "integer", minimum: 1, maximum: 200000 }, exclude: { type: "boolean" } } } } },
         maxCalls: { type: "integer", minimum: 1, maximum: 32 },
-        tokenBudget: { type: "object", additionalProperties: false, required: ["total", "perPhase"], properties: { total: { type: "integer", minimum: 1000, maximum: 200000 }, perPhase: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer"].map((phase) => [phase, { type: "integer", minimum: 0, maximum: 200000 }])) } } },
+        tokenBudget: { type: "object", additionalProperties: false, required: ["total", "perPhase"], properties: { total: { type: "integer", minimum: 1000, maximum: 200000 }, perPhase: { type: "object", additionalProperties: false, properties: Object.fromEntries(["planner", "implementer", "repair", "reviewer", "logCompression"].map((phase) => [phase, { type: "integer", minimum: 0, maximum: 200000 }])) } } },
         costBudgetUsd: { type: "number", minimum: 0, maximum: 1000 }, timeoutMs: { type: "integer", minimum: 1000, maximum: 1800000 },
         retry: { type: "object", additionalProperties: false, required: ["maxAttempts"], properties: { maxAttempts: { type: "integer", minimum: 1, maximum: 3 } } }
       },
@@ -98,6 +99,9 @@ export const taskSpecV2Schema: Record<string, unknown> = {
     artifacts: { type: "object", additionalProperties: false, properties: { root: { type: "string", minLength: 1 }, resultFormat: { const: "normalized-v1" } } },
     ownerGate: { type: "object", additionalProperties: false, properties: { policy: { const: "stop-and-report" } } },
     repair: { type: "object", additionalProperties: false, properties: { mode: { enum: ["none", "disposable", "code"] }, plan: { type: ["string", "null"] } } }
+  },
+  $defs: {
+    modelPool: { type: "array", minItems: 1, uniqueItems: true, items: { type: "string", minLength: 1 } }
   }
 };
 

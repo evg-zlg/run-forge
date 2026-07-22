@@ -1,5 +1,5 @@
 import { lstat, open, realpath } from "node:fs/promises";
-import { relative, resolve } from "node:path";
+import { basename, relative, resolve } from "node:path";
 import { scanSecrets } from "../security/secret-scan.js";
 import type { ImplementationExecutorRequest } from "./executor.js";
 
@@ -33,10 +33,14 @@ function trimEvidence(text: string, maxLines = 28, maxBytes = 3072): string {
 // Detect noisy evidence files by extension
 function isNoisyEvidence(file: string): boolean {
   const lower = file.toLowerCase();
+  const name = basename(lower);
   return (
     lower.endsWith(".log") ||
     lower.endsWith(".out") ||
     lower.endsWith(".err") ||
+    /^(?:stdout|stderr)(?:\.[a-z0-9_-]+)?\.txt$/.test(name) ||
+    /^(?:command[-_.]?output|provider[^/]*)\.json$/.test(name) ||
+    /^(?:junit|test-results?)(?:[-_.][^/]*)?\.xml$/.test(name) ||
     (lower.endsWith(".json") && ["validation", "result", "diagnostic"].some((token) => lower.includes(token)))
   );
 }
@@ -93,6 +97,13 @@ export async function buildContextPlan(request: ImplementationExecutorRequest, r
     if (!metadata.isFile() || metadata.isSymbolicLink()) { reads.push({ file, status: "rejected", bytes: 0, reason: "non-regular file" }); continue; }
     const canonicalPath = await realpath(path).catch(() => null);
     if (!canonicalPath || !isInside(canonicalRoot, canonicalPath)) { reads.push({ file, status: "rejected", bytes: 0, reason: "resolved path escapes workspace" }); continue; }
+    const classification = isNoisyEvidence(file) ? "noisy-evidence" : isReferenceText(file) ? "reference-text" : "source";
+    // This text is rendered into provider prompts. Command/provider evidence
+    // must remain an artifact reference until the dedicated digest stage.
+    if (classification === "noisy-evidence") {
+      reads.push({ file, status: "excluded_raw_log", bytes: metadata.size, reason: "raw command/provider evidence is excluded from provider context" });
+      continue;
+    }
     const bytes = metadata.size, remainingBytes = request.spec.discovery.maxBytes - plannedBytes;
     plannedBytes += bytes;
     if (bytes > remainingBytes) { reads.push({ file, status: "rejected", bytes, reason: "context byte limit exceeded" }); continue; }
@@ -102,7 +113,6 @@ export async function buildContextPlan(request: ImplementationExecutorRequest, r
     if (value.includes(0)) { reads.push({ file, status: "rejected", bytes, reason: "binary content" }); continue; }
     if (scanSecrets(text).status === "failed") { reads.push({ file, status: "rejected", bytes, reason: "secret-like content" }); continue; }
     reads.push({ file, status: "planned", bytes, reason: "explicit task scope" });
-    const classification = isNoisyEvidence(file) ? "noisy-evidence" : isReferenceText(file) ? "reference-text" : "source";
     sections.push({ file, text, classification });
     const rawLines = text.split(/\r?\n/);
     const beforeDedup = rawLines.length;
@@ -112,8 +122,8 @@ export async function buildContextPlan(request: ImplementationExecutorRequest, r
       const normalized = l.replace(/\s+/g, " ");
       if (deduped.length === 0 || deduped.at(-1)! !== normalized) deduped.push(normalized);
     }
-    const plannerText = classification === "noisy-evidence" ? trimEvidence(text, 120, 12_288) : classification === "reference-text" ? trimReferenceText(text, 96, 12_288) : text;
-    const implementationText = classification === "noisy-evidence" ? trimEvidence(text, 28, 3_072) : classification === "reference-text" ? trimReferenceText(text, 64, 6_144) : text;
+    const plannerText = classification === "reference-text" ? trimReferenceText(text, 96, 12_288) : text;
+    const implementationText = classification === "reference-text" ? trimReferenceText(text, 64, 6_144) : text;
     const truncated = classification !== "source" && (plannerText !== text || implementationText !== text);
     const hasCritical = (l: string) =>
       /\berr(?:or)?\b|fail|exception|stack|diagnostic|traceback|panic|fatal|assert/i.test(l);
