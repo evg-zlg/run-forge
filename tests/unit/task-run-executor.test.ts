@@ -20,7 +20,7 @@ describe("DockerShellExecutor policy", () => {
 
     await prepareUnpreparedExternalWorkspace(source, workspace, "frontend");
 
-    await expect(access(join(workspace, "frontend", ".runforge-tmp"))).resolves.toBeUndefined();
+    await expect(access(join(workspace, "frontend"))).resolves.toBeUndefined();
   });
 
   it("builds an offline, read-only, capability-dropped container command", async () => {

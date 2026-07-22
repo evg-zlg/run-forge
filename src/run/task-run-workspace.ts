@@ -1,5 +1,6 @@
-import { access, cp, lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from "node:fs/promises";
+import { access, cp, lstat, mkdir, mkdtemp, readFile, readlink, realpath, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
 export type WorkspaceLinkManifest = {
@@ -10,6 +11,7 @@ export type WorkspaceLinkPreparation = {
   outcome: "workspace_ready"; classification: "absent" | "created" | "reused" | "repaired";
   path: string; expectedTarget: string | null; owned: boolean; manifest: string;
 };
+const privateDependencyCapabilities = new Map<string, { workspaceRoot: string; manifestPath: string; taskId: string }>();
 export class WorkspaceSetupError extends Error {
   readonly outcome = "workspace_setup_failed" as const;
   readonly code = "workspace_conflict_external" as const;
@@ -51,24 +53,23 @@ export async function prepareUnpreparedExternalWorkspace(sourceRepo: string, wor
   const manifestPath = join(executionRoot, ".runforge-workspace-link-owner.json");
   const owner = await readManifest(manifestPath), ownerState = await lstat(manifestPath).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? null : Promise.reject(error));
   const taskId = identity?.taskId ?? "unscoped-task", workspaceId = identity?.workspaceId ?? resolve(workspace);
-  await mkdir(join(workspace, ".runforge-tmp"), { recursive: true });
-  await mkdir(join(executionRoot, ".runforge-tmp"), { recursive: true });
-  const dependenciesExist = await access(join(sourceRepo, workingDirectory, "node_modules")).then(() => true, () => false);
+  const canonicalExecutionRoot = await verifiedExecutionRoot(executionRoot, target, owner);
+  const sourceDependenciesPath = resolve(sourceRepo, workingDirectory, "node_modules");
+  const dependenciesExist = await access(sourceDependenciesPath).then(() => true, () => false);
   if (!dependenciesExist) return { outcome: "workspace_ready", classification: "absent", path: target, expectedTarget: null, owned: false, manifest: manifestPath };
-  const expectedTarget = "/source/node_modules", existing = await lstat(target).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? null : Promise.reject(error));
+  const expectedTarget = owner?.expectedTarget ?? "", existing = await lstat(target).catch((error: NodeJS.ErrnoException) => error.code === "ENOENT" ? null : Promise.reject(error));
   const actualTarget = existing?.isSymbolicLink() ? await readlink(target) : null;
-  if (existing && actualTarget === expectedTarget) {
-    const owned = Boolean(owner && owner.taskId === taskId && owner.path === target && owner.expectedTarget === expectedTarget);
-    if (!owned) throw new WorkspaceSetupError({ path: target, expectedTarget, actualTarget, owner });
+  const capability = privateDependencyCapabilities.get(expectedTarget);
+  const owned = Boolean(owner && owner.taskId === taskId && owner.path === target && owner.expectedTarget === expectedTarget && capability?.workspaceRoot === canonicalExecutionRoot && capability.manifestPath === manifestPath && capability.taskId === taskId);
+  const privateReady = expectedTarget ? owned && await trustedPrivateDirectory(expectedTarget) : false;
+  if (existing?.isSymbolicLink() && linkTargetMatches(target, actualTarget, expectedTarget) && owned && privateReady) {
     if (owner!.workspaceId !== workspaceId) await writeOwner(manifestPath, { ...owner!, workspaceId, createdAt: new Date().toISOString() });
     return { outcome: "workspace_ready", classification: "reused", path: target, expectedTarget, owned: true, manifest: manifestPath };
   }
-  if (!existing && ownerState && (!owner || owner.taskId !== taskId || owner.path !== target || owner.expectedTarget !== expectedTarget)) {
-    throw new WorkspaceSetupError({ path: target, expectedTarget, actualTarget, owner });
-  }
-  const taskOwned = Boolean(owner && owner.taskId === taskId && owner.path === target && owner.expectedTarget === expectedTarget);
+  const taskOwned = owned;
   if (existing && !taskOwned) throw new WorkspaceSetupError({ path: target, expectedTarget, actualTarget, owner });
-  const nextOwner: WorkspaceLinkManifest = { schemaVersion: 1, kind: "workspace-link", taskId, workspaceId, path: target, expectedTarget, createdAt: new Date().toISOString() };
+  const privateDependenciesPath = await mkdtemp(join(tmpdir(), `runforge-dependencies-${taskRunSlug(taskId)}-`));
+  const nextOwner: WorkspaceLinkManifest = { schemaVersion: 1, kind: "workspace-link", taskId, workspaceId, path: target, expectedTarget: privateDependenciesPath, createdAt: new Date().toISOString() };
   let quarantine: string | null = null;
   if (existing) {
     await hooks.beforeOwnedPathMutation?.();
@@ -79,21 +80,21 @@ export async function prepareUnpreparedExternalWorkspace(sourceRepo: string, wor
       throw error;
     }
     const quarantined = await lstat(quarantine).catch(() => null), quarantinedTarget = quarantined?.isSymbolicLink() ? await readlink(quarantine) : null;
-    const currentOwner = await readManifest(manifestPath), stillOwned = Boolean(quarantined?.isSymbolicLink() && quarantinedTarget === actualTarget && currentOwner && currentOwner.taskId === taskId && currentOwner.path === target && currentOwner.expectedTarget === expectedTarget);
+    const currentOwner = await readManifest(manifestPath), stillOwned = Boolean(quarantined?.isSymbolicLink() && quarantinedTarget === actualTarget && currentOwner && currentOwner.taskId === taskId && currentOwner.path === target);
     if (!stillOwned) {
       await restoreQuarantine(quarantine, target);
       throw new WorkspaceSetupError({ path: target, expectedTarget, actualTarget: quarantinedTarget, owner: currentOwner, ...(await pathExists(quarantine) ? { quarantinePath: quarantine } : {}) });
     }
   }
-  try { await symlink(expectedTarget, target, "dir"); }
+  try { await cp(sourceDependenciesPath, privateDependenciesPath, { recursive: true, dereference: true }); await symlink(privateDependenciesPath, target, "dir"); }
   catch (error) {
     if (quarantine) await restoreQuarantine(quarantine, target);
     if ((error as NodeJS.ErrnoException).code === "EEXIST") throw await workspaceConflict(target, expectedTarget, manifestPath, quarantine ?? undefined);
     throw error;
   }
-  if (quarantine) await rm(quarantine, { force: true });
+  if (quarantine) await rm(quarantine, { force: true }); privateDependencyCapabilities.set(privateDependenciesPath, { workspaceRoot: canonicalExecutionRoot, manifestPath, taskId });
   await writeOwner(manifestPath, nextOwner);
-  return { outcome: "workspace_ready", classification: existing ? "repaired" : "created", path: target, expectedTarget, owned: true, manifest: manifestPath };
+  return { outcome: "workspace_ready", classification: existing ? "repaired" : "created", path: target, expectedTarget: privateDependenciesPath, owned: true, manifest: manifestPath };
 }
 
 async function readManifest(path: string): Promise<WorkspaceLinkManifest | null> { try { const value = JSON.parse(await readFile(path, "utf8")) as WorkspaceLinkManifest; return value?.schemaVersion === 1 && value.kind === "workspace-link" ? value : null; } catch { return null; } }
@@ -101,6 +102,16 @@ async function writeOwner(path: string, value: WorkspaceLinkManifest): Promise<v
 async function pathExists(path: string): Promise<boolean> { return lstat(path).then(() => true, (error: NodeJS.ErrnoException) => error.code === "ENOENT" ? false : Promise.reject(error)); }
 async function restoreQuarantine(quarantine: string, target: string): Promise<void> { if (!(await pathExists(target))) await rename(quarantine, target).catch(() => undefined); }
 async function workspaceConflict(target: string, expectedTarget: string, manifestPath: string, quarantinePath?: string): Promise<WorkspaceSetupError> { return new WorkspaceSetupError({ path: target, expectedTarget, actualTarget: await readlink(target).catch(() => null), owner: await readManifest(manifestPath), ...(quarantinePath && await pathExists(quarantinePath) ? { quarantinePath } : {}) }); }
+async function verifiedExecutionRoot(executionRoot: string, target: string, owner: WorkspaceLinkManifest | null): Promise<string> { await mkdir(executionRoot, { recursive: true }); const state = await lstat(executionRoot), canonical = await realpath(executionRoot); if (!state.isDirectory() || state.isSymbolicLink()) throw new WorkspaceSetupError({ path: executionRoot, expectedTarget: executionRoot, actualTarget: state.isSymbolicLink() ? await readlink(executionRoot).catch(() => null) : null, owner }); return canonical; }
+async function trustedPrivateDirectory(path: string): Promise<boolean> { const canonicalTemp = await realpath(tmpdir()).catch(() => ""), canonical = await realpath(path).catch(() => ""); return Boolean(canonicalTemp && canonical && dirname(canonical) === canonicalTemp && /^runforge-dependencies-[a-z0-9-]+[A-Za-z0-9]+$/.test(canonical.split("/").at(-1) ?? "") && (await lstat(canonical)).isDirectory()); }
+export async function cleanupPreparedExternalWorkspace(workspace: string, workingDirectory = "."): Promise<void> { const executionRoot = resolve(workspace, workingDirectory), manifestPath = join(executionRoot, ".runforge-workspace-link-owner.json"), manifest = await readManifest(manifestPath); if (!manifest) return; const capability = privateDependencyCapabilities.get(manifest.expectedTarget), target = join(executionRoot, "node_modules"), actualTarget = await readlink(target).catch(() => null), canonicalRoot = await realpath(executionRoot).catch(() => ""); if (capability && capability.workspaceRoot === canonicalRoot && capability.manifestPath === manifestPath && capability.taskId === manifest.taskId && linkTargetMatches(target, actualTarget, manifest.expectedTarget) && await trustedPrivateDirectory(manifest.expectedTarget)) { await rm(manifest.expectedTarget, { recursive: true, force: true }); privateDependencyCapabilities.delete(manifest.expectedTarget); } }
+
+function linkTargetMatches(linkPath: string, actualTarget: string | null, expectedTarget: string): boolean {
+  if (!actualTarget) return false;
+  if (actualTarget === expectedTarget) return true;
+  return resolve(dirname(linkPath), actualTarget) === expectedTarget;
+}
+function inside(root: string, path: string): boolean { const value = relative(root, path); return value === "" || (!value.startsWith("..") && !value.startsWith("/")); }
 
 export function taskRunSlug(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");

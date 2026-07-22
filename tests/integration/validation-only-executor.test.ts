@@ -213,7 +213,9 @@ printf 'package validation executed\\n'
         expect.objectContaining({ command: "corepack pnpm test", outcome: "passed", lane: "docker-validation", stdout: expect.stringContaining("package validation executed") }),
       ]);
       if (!("productWorkspace" in execution.result)) throw new Error("Expected the capability-aware validation-only executor result.");
-      expect(await readlink(join(execution.result.productWorkspace, "node_modules"))).toBe("/source/node_modules");
+      const dependencyTarget = await readlink(join(execution.result.productWorkspace, "node_modules"));
+      expect(dependencyTarget).toContain("runforge-dependencies-");
+      expect(dependencyTarget).not.toBe(join(repository, "node_modules"));
       expect(dockerLifecycle).toContain("corepack pnpm test");
       expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim()).toBe(head);
       expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim()).toBe("");

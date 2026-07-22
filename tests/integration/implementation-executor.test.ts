@@ -78,6 +78,16 @@ describe("implementation executor", () => {
     await expect(access(marker)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it.each(["required", "reuse-existing"] as const)("prepares %s dependencies before provider execution and re-plans required package validation", async (dependencyPreparation) => {
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
+    const repo = await repository(), root = await mkdtemp(join(tmpdir(), "runforge-executor-dependencies-")), marker = join(root, `${dependencyPreparation}.validated`), specPath = join(root, "task.json");
+    await mkdir(join(repo, "node_modules"));
+    const value: Record<string, any> = spec(repo, `EXECUTOR-DEPENDENCY-${dependencyPreparation}`, "fix add", [`npm exec -- node -e "require('node:fs').writeFileSync('${marker}', 'validated')"`]); value.runtime.dependencyPreparation = dependencyPreparation; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" };
+    await writeFile(specPath, JSON.stringify(value)); await runTaskSpecFile(specPath, { logCompressionInvoker: testLogCompressionInvoker });
+    const result = JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); const readiness = JSON.parse(await readFile(join(root, "artifacts", "dependency-readiness.json"), "utf8"));
+    expect(readiness).toMatchObject({ policy: dependencyPreparation, ready: true }); expect(result.validationPlan.commands).toEqual([expect.objectContaining({ disposition: "execute", supported: true, availableCapabilities: expect.arrayContaining(["dependencies"]) })]); expect(result.validation).toEqual([expect.objectContaining({ outcome: "passed" })]); expect(await readFile(marker, "utf8")).toBe("validated");
+  });
+
   it("implements, repairs, validates, adds a test, commits locally, and preserves the source checkout", async () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const repo = await repository(); const before = await git(repo, ["rev-parse", "HEAD"]); const beforeStatus = await git(repo, ["status", "--porcelain"]);
