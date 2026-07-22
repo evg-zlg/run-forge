@@ -9,6 +9,7 @@ import {
 import { detectCycle } from "./campaign-validation.js";
 import { planCampaignFromGoal } from "./task-run-planner.js";
 import { defaultOpenRouterModelPools, providerRoutingPhases, selectProviderModel } from "../product/provider-routing.js";
+import { trustedOpenRouterModelPricing } from "../providers/openrouter-pricing.js";
 
 type DraftNode = {
   id: string;
@@ -48,7 +49,7 @@ const maxProviderCallsPerChild = 7;
 
 export async function planSemanticCampaign(campaignId: string, spec: CampaignSpec, options: Options = {}): Promise<SemanticCampaignPlannerResult> {
   if (spec.providerRouting.provider === "local") return { plan: planCampaignFromGoal(campaignId, spec), evidence: emptyEvidence("deterministic-local", null) };
-  const model = selectCampaignModel(spec, "planner", campaignId);
+  const model = selectCampaignPlannerModel(spec, campaignId);
   const chat = options.chatCompletion ?? executeOpenRouterChatCompletion;
   const manifest = options.repositoryManifest ?? await buildRepositoryManifest(spec);
   const prompt = planningPrompt(spec, manifest);
@@ -56,10 +57,6 @@ export async function planSemanticCampaign(campaignId: string, spec: CampaignSpe
   const first = await invoke(chat, model, prompt, spec, usage, 1, false);
   const checked = validateDraft(first.content, spec);
   if (checked.nodes) return { plan: trustedPlan(campaignId, spec, checked.nodes), evidence: { mode: "semantic-openrouter", model, attempts: 1, repaired: false, usage, validationCodes: checked.notices ?? [] } };
-  // maxCostUsd is a hard cap, but today the campaign contract has no
-  // enforceable per-attempt price quote. A second provider call therefore
-  // cannot be proven safe even when the first call happened to be under cap.
-  if (spec.limits.maxCostUsd !== undefined) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: 1, repaired: false, usage, validationCodes: [...new Set([...checked.codes, "PLANNER_REPAIR_COST_UNPROVEN"])].sort() });
   const repair = repairPrompt(checked.codes, first.content, spec);
   const second = await invoke(chat, model, repair, spec, usage, 2, true);
   const repaired = validateDraft(second.content, spec);
@@ -72,8 +69,20 @@ async function invoke(chat: Chat, model: string, content: string, spec: Campaign
   // One token per UTF-8 byte plus a fixed chat-framing margin is intentionally
   // conservative: it never assumes ASCII text or a favorable tokenizer ratio.
   const promptTokens = Buffer.byteLength(plannerSystemPrompt, "utf8") + Buffer.byteLength(content, "utf8") + plannerFramingTokenMargin;
-  const completionBudget = Math.min(12_000, Math.floor(spec.limits.maxTokens / 3), remaining - promptTokens);
+  let completionBudget = Math.min(12_000, Math.floor(spec.limits.maxTokens / 3), remaining - promptTokens);
   if (completionBudget < minimumPlannerCompletionTokens) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: attempts - 1, repaired, usage, validationCodes: ["PLANNER_TOKEN_BUDGET_EXHAUSTED"] });
+  if (spec.limits.maxCostUsd !== undefined) {
+    const pricing = trustedOpenRouterModelPricing(model);
+    if (!pricing || !validPrice(pricing.inputUsdPerToken) || !validPrice(pricing.outputUsdPerToken)) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: attempts - 1, repaired, usage, validationCodes: ["PLANNER_COST_ACCOUNTING_UNAVAILABLE"] });
+    // The first call reserves enough of the remaining authority for a repair.
+    // Subsequent calls reserve all remaining authority because no further call is allowed.
+    const reservedAttempts = attempts === 1 ? 2 : 1;
+    const reservedCost = (spec.limits.maxCostUsd - usage.costUsd) / reservedAttempts;
+    const inputCost = promptTokens * pricing.inputUsdPerToken;
+    if (reservedCost <= inputCost) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: attempts - 1, repaired, usage, validationCodes: ["PLANNER_COST_BUDGET_EXCEEDED"] });
+    if (pricing.outputUsdPerToken > 0) completionBudget = Math.min(completionBudget, Math.floor((reservedCost - inputCost) / pricing.outputUsdPerToken));
+    if (completionBudget < minimumPlannerCompletionTokens) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts: attempts - 1, repaired, usage, validationCodes: ["PLANNER_COST_BUDGET_EXCEEDED"] });
+  }
   try {
     const result = await chat({ model, messages: [{ role: "system", content: plannerSystemPrompt }, { role: "user", content }], timeoutMs: 300_000, maxCalls: 1, temperature: 0, maxTokens: completionBudget, reasoning: { effort: "low", exclude: true } });
     if (result.usage.totalTokens === null) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_TOKEN_ACCOUNTING_UNAVAILABLE"] });
@@ -82,13 +91,15 @@ async function invoke(chat: Chat, model: string, content: string, spec: Campaign
     usage.tokens += consumed;
     usage.costUsd += result.usage.costUsd ?? 0;
     if (consumed > remaining) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_TOKEN_BUDGET_EXCEEDED"] });
-    if (spec.limits.maxCostUsd !== undefined && usage.costUsd >= spec.limits.maxCostUsd) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_COST_BUDGET_EXCEEDED"] });
+    if (spec.limits.maxCostUsd !== undefined && usage.costUsd > spec.limits.maxCostUsd) throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["PLANNER_COST_BUDGET_EXCEEDED"] });
     return result;
   } catch (error) {
     if (error instanceof SemanticCampaignPlannerError) throw error;
     throw new SemanticCampaignPlannerError({ mode: "semantic-openrouter", model, attempts, repaired, usage, validationCodes: ["MODEL_CALL_FAILED"] });
   }
 }
+
+function validPrice(value: number): boolean { return Number.isFinite(value) && value >= 0; }
 
 function validateDraft(content: string, spec: CampaignSpec): { nodes?: DraftNode[]; codes: string[]; notices?: string[] } {
   let value: unknown;
@@ -189,6 +200,10 @@ function scopeOverlap(left: string, right: string): boolean { const a = left.rep
 function normalizeEstimates(nodes: DraftNode[], spec: CampaignSpec, notices: string[]): void { const tokenCap = Math.floor(spec.limits.maxTokens * .8), tokenTotal = nodes.reduce((sum, node) => sum + node.estimatedTokens, 0); if (tokenTotal > tokenCap) { const room = tokenCap - nodes.length * 1_000, weights = nodes.map((node) => Math.max(0, node.estimatedTokens - 1_000)), rawWeightTotal = weights.reduce((sum, value) => sum + value, 0), equal = rawWeightTotal === 0, denominator = equal ? nodes.length : rawWeightTotal; let assigned = 0; nodes.forEach((node, index) => { const extra = index === nodes.length - 1 ? room - assigned : Math.floor(room * (equal ? 1 : weights[index]!) / denominator); node.estimatedTokens = 1_000 + Math.max(0, extra); assigned += Math.max(0, extra); }); notices.push("TOKEN_ESTIMATES_NORMALIZED"); } const costCap = spec.limits.maxCostUsd === undefined ? null : spec.limits.maxCostUsd * .8, costTotal = nodes.reduce((sum, node) => sum + (node.estimatedCostUsd ?? 0), 0); if (costCap !== null && costTotal > costCap) { const ratio = costCap / costTotal; for (const node of nodes) if (node.estimatedCostUsd !== undefined) node.estimatedCostUsd = Number((node.estimatedCostUsd * ratio).toFixed(6)); notices.push("COST_ESTIMATES_NORMALIZED"); } }
 function phaseBudget(total: number): Record<string, number> { return { startup: Math.floor(total * .03), analysis: Math.floor(total * .12), implementation: Math.floor(total * .55), validation: Math.floor(total * .1), repair: Math.floor(total * .12), review: Math.floor(total * .05), publication: 0 }; }
 function providerBudget(total: number): Record<string, number> { const planner = Math.max(100, Math.floor(total * .2)), repair = Math.max(100, Math.floor(total * .15)), reviewer = Math.max(100, Math.floor(total * .1)), logCompression = Math.max(100, Math.floor(total * .1)); return { planner, implementer: Math.max(400, total - planner - repair - reviewer - logCompression), repair, reviewer, logCompression }; }
+export function selectCampaignPlannerModel(spec: CampaignSpec, campaignId: string): string {
+  return selectCampaignModel(spec, "planner", campaignId);
+}
+
 function selectCampaignModel(spec: CampaignSpec, phase: typeof providerRoutingPhases[number], stableKey: string): string {
   const fallback = phase === "logCompression"
     ? defaultOpenRouterModelPools.logCompression[0]

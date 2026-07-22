@@ -1,9 +1,13 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CampaignSpec } from "../../src/control-plane/contracts.js";
 import type { OpenRouterExecutionResult } from "../../src/providers/openrouter-execution-provider.js";
 import { planSemanticCampaign } from "../../src/run/semantic-campaign-planner.js";
 
 const authority = { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false };
+const defaultPricing = JSON.stringify(Object.fromEntries(["qwen/qwen3-coder-next", "z-ai/glm-5.2", "moonshotai/kimi-k3"].map((model) => [model, { inputUsdPerToken: .00000001, outputUsdPerToken: .000001 }])));
+let previousPricing: string | undefined;
+beforeEach(() => { previousPricing = process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON; process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = defaultPricing; });
+afterEach(() => { if (previousPricing === undefined) delete process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON; else process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = previousPricing; });
 const spec = (provider: "openrouter" | "local" = "openrouter"): CampaignSpec => ({ goal: "Add arbitrary feature", target: { repository: ".", workingDirectory: ".", expectedSha: "abcdef1234567" }, authority, providerRouting: { provider, model: "qwen/qwen3-coder-next", fallbackPolicy: provider === "openrouter" ? "none" : "same_provider" }, limits: { maxTokens: 20_000, maxCostUsd: 1, maxTasks: 4, maxConcurrency: 2 }, validationContract: { source: "doctor", requiredCommands: ["corepack pnpm test", "corepack pnpm run typecheck"] } });
 const uncappedSpec = (): CampaignSpec => { const value = spec(); delete value.limits.maxCostUsd; return value; };
 const response = (content: string, tokens = 100, costUsd = .001): OpenRouterExecutionResult => ({ content, usage: { inputTokens: 40, cachedInputTokens: 0, outputTokens: 60, reasoningTokens: 0, totalTokens: tokens, costUsd }, requestId: "request", finishReason: "stop", attempts: 1 });
@@ -118,11 +122,11 @@ describe("semantic campaign planner", () => {
     expect(result.evidence.validationCodes).toEqual(["TOKEN_ESTIMATES_NORMALIZED", "COST_ESTIMATES_NORMALIZED"]);
   });
 
-  it("rejects missing node cost estimates without an unpriced repair call", async () => {
+  it("repairs missing node cost estimates when both planner attempts are pre-reserved", async () => {
     const missingCosts = structuredClone(valid); missingCosts.nodes.forEach((node) => { delete (node as { estimatedCostUsd?: number }).estimatedCostUsd; });
     const chat = vi.fn().mockResolvedValueOnce(response(JSON.stringify(missingCosts))).mockResolvedValueOnce(response(JSON.stringify(valid)));
-    await expect(planSemanticCampaign("cmp_v1_723456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: {} })).rejects.toThrow(/PLANNER_REPAIR_COST_UNPROVEN/);
-    expect(chat).toHaveBeenCalledTimes(1);
+    await expect(planSemanticCampaign("cmp_v1_723456789012345678901234", spec(), { chatCompletion: chat, repositoryManifest: {} })).resolves.toMatchObject({ evidence: { attempts: 2, repaired: true, usage: { costUsd: .002 } } });
+    expect(chat).toHaveBeenCalledTimes(2);
   });
 
   it("does not start or retry planner calls when prompt plus minimum completion cannot fit", async () => {
@@ -145,10 +149,35 @@ describe("semantic campaign planner", () => {
     expect(chat).toHaveBeenCalledTimes(1);
   });
 
-  it("does not repair an invalid under-cap response without an enforceable attempt price", async () => {
+  it("rejects an unpriced capped planner before its first provider call", async () => {
     const capped = spec(); capped.limits.maxCostUsd = .01;
+    delete process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON;
     const chat = vi.fn(async () => response("not json", 100, .009));
-    await expect(planSemanticCampaign("cmp_v1_d23456789012345678901234", capped, { chatCompletion: chat, repositoryManifest: {} })).rejects.toThrow(/PLANNER_REPAIR_COST_UNPROVEN/);
+    await expect(planSemanticCampaign("cmp_v1_d23456789012345678901234", capped, { chatCompletion: chat, repositoryManifest: {} })).rejects.toThrow(/PLANNER_COST_ACCOUNTING_UNAVAILABLE/);
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it("rejects a dynamic planner alias before provider transport even when catalogued", async () => {
+    const capped = spec(); capped.providerRouting.model = "openrouter/auto";
+    process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = JSON.stringify({ "openrouter/auto": { inputUsdPerToken: .00000001, outputUsdPerToken: .000001 } });
+    const chat = vi.fn(async () => response(JSON.stringify(valid)));
+    await expect(planSemanticCampaign("cmp_v1_dynamicalias1234567890", capped, { chatCompletion: chat, repositoryManifest: {} })).rejects.toThrow(/PLANNER_COST_ACCOUNTING_UNAVAILABLE/);
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it("rejects an insufficient pre-reservation before the provider call", async () => {
+    const capped = spec(); capped.limits.maxCostUsd = .01;
+    process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = JSON.stringify({ "qwen/qwen3-coder-next": { inputUsdPerToken: .001, outputUsdPerToken: .001 } });
+    const chat = vi.fn(async () => response(JSON.stringify(valid)));
+    await expect(planSemanticCampaign("cmp_v1_e23456789012345678901234", capped, { chatCompletion: chat, repositoryManifest: {} })).rejects.toThrow(/PLANNER_COST_BUDGET_EXCEEDED/);
+    expect(chat).not.toHaveBeenCalled();
+  });
+
+  it("records an actual provider cost overrun and makes no repair call", async () => {
+    process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = JSON.stringify({ "qwen/qwen3-coder-next": { inputUsdPerToken: .00000001, outputUsdPerToken: .000001 } });
+    const capped = spec(); capped.limits.maxCostUsd = .01;
+    const chat = vi.fn(async () => response("not json", 100, .011));
+    await expect(planSemanticCampaign("cmp_v1_f23456789012345678901234", capped, { chatCompletion: chat, repositoryManifest: {} })).rejects.toMatchObject({ evidence: { usage: { costUsd: .011 }, validationCodes: ["PLANNER_COST_BUDGET_EXCEEDED"] } });
     expect(chat).toHaveBeenCalledTimes(1);
   });
 

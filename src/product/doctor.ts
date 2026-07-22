@@ -4,6 +4,7 @@ import { runForgeVersion } from "../core/version.js";
 import { runningInContainer, unsafeMountWarnings } from "../security/docker-policy.js";
 import { commandVersion, defaultArtifactRoot, inspectProject, isPathInside, type ReadinessCheck } from "./project-inspection.js";
 import { discoverImplementationExecutors, type ImplementationExecutorCapability } from "../implementation/executor.js";
+import { openRouterPricingCatalogStatus, type OpenRouterPricingCatalogStatus } from "../providers/openrouter-pricing.js";
 
 export type DoctorOptions = { repo?: string; workingDirectory?: string; artifactRoot?: string; runtime?: "local" | "docker"; dependencyPreparation?: "required" | "if-needed" | "disabled" | "reuse-existing"; dockerImage?: string; publication?: "none" | "draft-pr" };
 export type DoctorReport = {
@@ -16,6 +17,7 @@ export type DoctorReport = {
   artifactRoot: { path: string | null; outsideTargetRepository: boolean | null };
   integrations: { dockerRequired: boolean; githubRequired: boolean; databaseRequired: false; productionRequired: false; secretsRequired: false };
   implementationExecutors: ImplementationExecutorCapability[];
+  openRouterPricingCatalog: OpenRouterPricingCatalogStatus;
   checks: ReadinessCheck[];
   nextAction: { command: string | null; reason: string };
 };
@@ -34,6 +36,8 @@ export async function buildDoctorReport(options: DoctorOptions): Promise<DoctorR
   checks.push(implementationExecutors.some((item) => item.status === "ready")
     ? check("implementation_executor", true, false, `Ready implementation executor(s): ${implementationExecutors.filter((item) => item.status === "ready").map((item) => item.id).join(", ")}.`)
     : { id: "implementation_executor", status: "warning", required: false, summary: `Implementation tasks are unavailable: ${implementationExecutors.flatMap((item) => item.limitations).join("; ")}` });
+  const openRouterPricingCatalog = openRouterPricingCatalogStatus();
+  checks.push({ id: "openrouter_capped_campaign_pricing", status: openRouterPricingCatalog.catalogValid ? "passed" : "not_required", required: false, summary: openRouterPricingCatalog.message });
   const target = options.repo ? await inspectProject(options.repo, options.workingDirectory ?? ".") : null;
   if (target) {
     checks.push(check("target_path", target.exists, true, target.exists ? `Target path exists: ${target.path}` : `Target path does not exist: ${target.requestedPath}`));
@@ -82,7 +86,7 @@ export async function buildDoctorReport(options: DoctorOptions): Promise<DoctorR
     runtime: { node: process.version, pnpm, docker, os: platform(), insideContainer: runningInContainer() },
     targetRepository: target,
     artifactRoot: { path: artifactPath, outsideTargetRepository: outside },
-    integrations: { dockerRequired, githubRequired, databaseRequired: false, productionRequired: false, secretsRequired: false }, implementationExecutors,
+    integrations: { dockerRequired, githubRequired, databaseRequired: false, productionRequired: false, secretsRequired: false }, implementationExecutors, openRouterPricingCatalog,
     checks,
     nextAction: { command: nextCommand, reason: nextCommand ? "Create a TaskSpec v2 using the discovered repository contract." : "Resolve blocking readiness checks first." }
   };
@@ -92,6 +96,7 @@ export function renderDoctor(report: DoctorReport): string {
   const lines = [`RunForge doctor: ${report.status}`, `Version: ${report.runforgeVersion}`, `Node: ${report.runtime.node}`, `pnpm: ${report.runtime.pnpm ?? "not available"}`];
   if (report.targetRepository) lines.push(`Repository root: ${report.targetRepository.repositoryRoot ?? report.targetRepository.requestedPath}`, `Execution root: ${report.targetRepository.executionRoot ?? "not resolved"}`, `Git: ${report.targetRepository.isGitRepository ? `${report.targetRepository.branch ?? "detached"} @ ${report.targetRepository.head}` : "not a repository"}`, `Worktree: ${report.targetRepository.worktree.clean === false ? "dirty (preserved; warning)" : report.targetRepository.worktree.clean === true ? "clean" : "unknown"}`, `Package manager: ${report.targetRepository.packageManager ?? "not detected"}`, `Lockfile: ${report.targetRepository.dependencyPreparation.lockfile ?? "not detected"}`, `Validation: ${report.targetRepository.validationCommands.join(", ") || "provide explicitly"}`, `Artifacts: ${report.artifactRoot.path ?? "not resolved"}`);
   lines.push(`Implementation executors: ${report.implementationExecutors.map((item) => `${item.id}=${item.status}`).join(", ")}`);
+  lines.push(`OpenRouter capped campaigns: ${report.openRouterPricingCatalog.message}`);
   for (const item of report.checks.filter((value) => ["warning", "blocked"].includes(value.status))) lines.push(`${item.status.toUpperCase()}: ${item.summary}`);
   if (report.nextAction.command) lines.push(`Next: ${report.nextAction.command}`);
   return lines.join("\n");

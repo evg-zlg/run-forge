@@ -9,7 +9,7 @@ import type { ExecutionAgreement } from "../product/execution-agreement.js";
 import { inspectProject } from "../product/project-inspection.js";
 import { assertAgreementAccepted, assertAgreementMatchesTask, negotiateControlPlaneAgreement, negotiateTaskAgreement, technicalCapabilitiesForExecutor, type ExecutionAgreementNegotiationRequest } from "./execution-agreements.js";
 import { boundPublicResult, normalizedSemanticReview, projectAgreementLifecycle, publicResultLimits, redactPublicValue, settleAcceptedAgreement } from "./manager-results.js";
-import { planSemanticCampaign } from "../run/semantic-campaign-planner.js";
+import { planSemanticCampaign } from "../run/semantic-campaign-planner.js"; import { assertCappedCampaignPricingReady } from "./campaign-pricing-preflight.js";
 import { assertAgreementProjectBinding, buildExecutionAgreementContext } from "./manager-project-context.js";
 import { CampaignCoordinator } from "./campaign-coordinator.js";
 import { listDurableCheckpoints } from "../implementation/durable-checkpoint.js"; import { resumeDurableCheckpoint } from "../implementation/checkpoint-resume.js";
@@ -26,7 +26,7 @@ export class ControlPlaneManager {
   private readonly locks = new Map<string, Promise<void>>(); private readonly journalHeartbeats = new Map<string, number>();
   private readonly campaigns: CampaignCoordinator; private watchdog: NodeJS.Timeout | null = null;
   constructor(public readonly store: ControlPlaneStore, private readonly operations: { runTaskSpec: typeof runTaskSpecFile; recordOwnerDecision: typeof recordOwnerDecision; continueExecution: typeof continueExternalExecution } = { runTaskSpec: runTaskSpecFile, recordOwnerDecision, continueExecution: continueExternalExecution }, private readonly timing: { heartbeatIntervalMs: number; staleHeartbeatMs: number; executionTimeoutMs: number; cleanupGraceMs?: number } = { heartbeatIntervalMs, staleHeartbeatMs, executionTimeoutMs, cleanupGraceMs }, private readonly taskSpecContext: Pick<TaskSpecRunContext, "logCompressionInvoker"> = {}) {
-    this.campaigns = new CampaignCoordinator({ root: this.store.root, planCampaign: (record) => this.planCampaign(record), createTask: (input) => this.createTask(input), getTask: (id) => this.getTask(id), getResult: (id) => this.getResult(id) });
+    this.campaigns = new CampaignCoordinator({ root: this.store.root, preflightCampaign: assertCappedCampaignPricingReady, planCampaign: (record) => this.planCampaign(record), createTask: (input) => this.createTask(input), getTask: (id) => this.getTask(id), getResult: (id) => this.getResult(id) });
   }
   async initialize(): Promise<void> { await this.store.initialize(); await this.campaigns.initialize(); this.watchdog ??= setInterval(() => void this.watchdogTick(), Math.min(this.timing.staleHeartbeatMs, 5_000)); this.watchdog.unref(); }
   async createCampaign(spec: CampaignSpec): Promise<CampaignRecord> { return this.campaigns.createCampaign(spec); }

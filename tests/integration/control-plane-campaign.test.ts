@@ -1,7 +1,7 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 import { ControlPlaneManager } from "../../src/control-plane/manager.js";
 import { startControlPlaneServer, type ControlPlaneServerInstance } from "../../src/control-plane/server.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
@@ -9,7 +9,13 @@ import type { CampaignPlan, ControlTaskRecord } from "../../src/control-plane/co
 import { planCampaignFromGoal } from "../../src/run/task-run-planner.js";
 
 const cleanup: Array<() => Promise<void>> = [];
-afterEach(async () => { while (cleanup.length) await cleanup.pop()!(); });
+const defaultPricing = JSON.stringify({ "qwen/qwen3-coder-next": { inputUsdPerToken: .00000001, outputUsdPerToken: .000001 } });
+let previousPricing: string | undefined;
+beforeEach(() => { previousPricing = process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON; process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = defaultPricing; });
+afterEach(async () => {
+  while (cleanup.length) await cleanup.pop()!();
+  if (previousPricing === undefined) delete process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON; else process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = previousPricing;
+});
 
 function fakeTask(id: string, status: ControlTaskRecord["status"], error: string | null = null): ControlTaskRecord {
   const now = new Date().toISOString();
@@ -255,9 +261,73 @@ describe("control plane campaign integration", () => {
     expect(plannerCalls).toBe(0);
   });
 
+  test("publishes valid trusted-pricing readiness without exposing rates", async () => {
+    process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = JSON.stringify({ "qwen/qwen3-coder-next": { inputUsdPerToken: .123456789, outputUsdPerToken: .987654321 } });
+    const { server } = await createHarness();
+    const response = await fetch(`${server.url}/v1/capabilities`);
+    expect(response.status).toBe(200);
+    const payload = await response.json();
+    expect(payload).toMatchObject({ providerRouting: { providers: { openrouter: { pricingCatalog: { configured: true, catalogValid: true, code: "ready", message: expect.stringContaining("exact quote") } } } } });
+    expect(payload.providerRouting.providers.openrouter.pricingCatalog.cappedCampaignsReady).toBeUndefined();
+    const ready = await fetch(`${server.url}/readyz`).then((item) => item.json());
+    expect(ready).toMatchObject({ service: { status: "healthy" }, readiness: { acceptingNewTasks: true, openrouter: { pricingCatalog: { configured: true, catalogValid: true, code: "ready" } } } });
+    expect(JSON.stringify(payload)).not.toContain(".123456789");
+    expect(JSON.stringify(payload)).not.toContain(".987654321");
+    expect(JSON.stringify(ready)).not.toContain(".123456789");
+  });
+
+  test("publishes missing and empty catalog limitations without degrading general task readiness", async () => {
+    delete process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON;
+    const { server } = await createHarness();
+    const missing = await fetch(`${server.url}/readyz`).then((item) => item.json());
+    expect(missing).toMatchObject({ service: { status: "healthy" }, readiness: { acceptingNewTasks: true, openrouter: { pricingCatalog: { configured: false, catalogValid: false, code: "not_configured", message: expect.stringContaining("require RUNFORGE_OPENROUTER_MODEL_PRICING_JSON") } } } });
+
+    process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = "{}";
+    const empty = await fetch(`${server.url}/readyz`).then((item) => item.json());
+    expect(empty).toMatchObject({ readiness: { acceptingNewTasks: true, openrouter: { pricingCatalog: { configured: true, catalogValid: false, code: "empty", message: expect.stringContaining("no trusted model quotes") } } } });
+    expect(empty.readiness.openrouter.pricingCatalog.cappedCampaignsReady).toBeUndefined();
+    const rejected = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal: "Inspect a bounded change", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: true, network: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" }, limits: { maxTokens: 2_000, maxCostUsd: 1, maxTasks: 1, maxConcurrency: 1 } }) });
+    expect(rejected.status).toBe(422);
+    expect(await rejected.json()).toMatchObject({ error: { code: "openrouter_pricing_catalog_invalid", message: expect.stringContaining("no trusted model quotes") } });
+  });
+
+  test("rejects malformed capped-campaign pricing synchronously but preserves uncapped compatibility", async () => {
+    process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = "{not-json";
+    const { server, manager } = await createHarness();
+    let plannerCalls = 0;
+    (manager as any).planCampaign = async () => { plannerCalls += 1; throw new Error("planner transport placeholder"); };
+    const base = { goal: "Inspect a bounded change", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: true, network: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" }, limits: { maxTokens: 2_000, maxTasks: 1, maxConcurrency: 1 } };
+    const readiness = await fetch(`${server.url}/readyz`).then((item) => item.json());
+    expect(readiness).toMatchObject({ readiness: { acceptingNewTasks: true, openrouter: { pricingCatalog: { configured: true, catalogValid: false, code: "invalid", message: expect.stringContaining("not valid JSON") } } } });
+    const capped = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...base, limits: { ...base.limits, maxCostUsd: 1 } }) });
+    expect(capped.status).toBe(422);
+    expect(await capped.json()).toMatchObject({ error: { code: "openrouter_pricing_catalog_invalid", message: expect.stringContaining("not valid JSON"), details: { catalog: { configured: true, catalogValid: false }, selectedPlannerModel: "qwen/qwen3-coder-next", selectedModelPricingReady: false } } });
+    expect(plannerCalls).toBe(0);
+
+    const uncapped = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(base) });
+    expect(uncapped.status).toBe(202);
+    expect((await uncapped.json()).status).toBe("failed");
+    expect(plannerCalls).toBe(1);
+  });
+
+  test("rejects the exact deterministically selected unquoted model from a multi-model planner pool", async () => {
+    process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = JSON.stringify({ "catalogued/other": { inputUsdPerToken: .00000001, outputUsdPerToken: .000001 } });
+    const { server, manager } = await createHarness();
+    let plannerCalls = 0;
+    (manager as any).planCampaign = async () => { plannerCalls += 1; throw new Error("planner must not run"); };
+    const models = ["pool/model-a", "pool/model-b"];
+    const response = await fetch(`${server.url}/v1/campaigns`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ goal: "Inspect a bounded change", target: { repository: process.cwd(), workingDirectory: "." }, authority: { inspect: true, implementation: false, providerCalls: true, network: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", modelPools: { planner: models }, fallbackPolicy: "none" }, limits: { maxTokens: 2_000, maxCostUsd: 1, maxTasks: 1, maxConcurrency: 1 } }) });
+    expect(response.status).toBe(422);
+    const payload = await response.json();
+    expect(payload).toMatchObject({ error: { code: "openrouter_model_pricing_unavailable", message: expect.stringContaining("trusted exact quote"), details: { catalog: { configured: true, catalogValid: true }, selectedPlannerModel: expect.any(String), selectedModelPricingReady: false } } });
+    expect(models).toContain(payload.error.details.selectedPlannerModel);
+    expect(payload.error.message).toContain(payload.error.details.selectedPlannerModel);
+    expect(plannerCalls).toBe(0);
+  });
+
   test("rejects an invalid custom implementation sink before creating its worktree", async () => {
     const { manager } = await createHarness();
     (manager as any).planCampaign = async (record: any) => ({ schemaVersion: 1, campaignId: record.id, estimatedTokens: 1_000, estimatedCostUsd: .1, nodes: [{ id: "unsafe-sink", dependsOn: [], writeScopes: ["src/a.ts"], estimatedTokens: 1_000, estimatedCostUsd: .1, taskSpec: { execution: { mode: "implementation" }, authority: { profile: "bounded-implementation", allowProviderCalls: false, allowNetwork: false }, discovery: { writeScopes: ["src/a.ts"] }, validation: { mode: "explicit", commands: ["node --version", "git diff --check __CAMPAIGN_BASE__...HEAD"] }, providerRouting: { provider: "openrouter", fallbackPolicy: "none", costBudgetUsd: .1 }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } } }] });
-    await expect(manager.createCampaign({ goal: "Invalid custom plan", target: { repository: "/definitely/missing/runforge-campaign-repo" }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", fallbackPolicy: "none" }, limits: { maxTokens: 2_000, maxCostUsd: 1, maxTasks: 1, maxConcurrency: 1 }, validationContract: { source: "explicit", requiredCommands: ["node --version"] } })).rejects.toThrow(/implementation campaign plan requires|terminal node.*validation-only/i);
+    await expect(manager.createCampaign({ goal: "Invalid custom plan", target: { repository: "/definitely/missing/runforge-campaign-repo" }, authority: { inspect: true, implementation: true, providerCalls: true, network: true, localBranch: true, localCommit: true, remotePush: false, draftPublication: false, merge: false, deploy: false }, providerRouting: { provider: "openrouter", model: "qwen/qwen3-coder-next", fallbackPolicy: "none" }, limits: { maxTokens: 2_000, maxCostUsd: 1, maxTasks: 1, maxConcurrency: 1 }, validationContract: { source: "explicit", requiredCommands: ["node --version"] } })).rejects.toThrow(/implementation campaign plan requires|terminal node.*validation-only/i);
   });
 });
