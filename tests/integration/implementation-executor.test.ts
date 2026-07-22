@@ -53,7 +53,10 @@ describe("implementation executor", () => {
   });
 
   it("fast-fails no-progress once without a hidden same-profile retry", async () => {
-    const root = await mkdtemp(join(tmpdir(), "runforge-no-progress-")); const agent = await makeAgent(root, [`setInterval(() => {}, 1000);`]);
+    const root = await mkdtemp(join(tmpdir(), "runforge-no-progress-")); const agent = await makeAgent(root, [
+      `console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "I am investigating and will edit the implementation soon" } }));`,
+      `setInterval(() => {}, 1000);`,
+    ]);
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
     process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "30";
     const result = await execute(await repository(), "EXECUTOR-NO-PROGRESS-1", "fix", ["node -e \"process.exit(0)\""]);
@@ -72,6 +75,30 @@ describe("implementation executor", () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500";
     const result = await execute(await repository(), "EXECUTOR-RED-PROGRESS-1", "fix", ["node -e \"process.exit(0)\""]);
     expect(result.providerCalls[0]).toMatchObject({ noProgress: false, progressSignals: expect.objectContaining({ redTest: expect.any(String) }) });
+  });
+
+  it("treats a nested Codex file_change as progress and streams a checkpoint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-nested-file-change-")); const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `appendFileSync("calculator.js", "\\n// nested Codex file change\\n");`,
+      `console.log(JSON.stringify({ type: "item.completed", item: { id: "item_1", type: "file_change", changes: [{ path: "calculator.js", kind: "update" }], status: "completed" } }));`,
+      `setTimeout(() => console.log(JSON.stringify({ type: "turn.completed", usage: { total_tokens: 10 } })), 80);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "30";
+    const result = await execute(await repository(), "EXECUTOR-NESTED-FILE-CHANGE-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls[0]).toMatchObject({ noProgress: false, progressSignals: expect.objectContaining({ filesChanged: ["calculator.js"], candidateDiff: "calculator.js" }) });
+    expect(result.artifact.checkpoints).toEqual(expect.arrayContaining([expect.objectContaining({ id: expect.stringContaining("stream") })]));
+  });
+
+  it("treats nested Codex RED command output as progress", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-nested-red-command-")); const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `console.log(JSON.stringify({ type: "item.completed", item: { id: "item_1", type: "command_execution", command: "corepack pnpm vitest run tests/calculator.test.ts", aggregated_output: "FAIL tests/calculator.test.ts\\nexpected 3, received 2", exit_code: 1, status: "failed" } }));`,
+      `setTimeout(() => { appendFileSync("calculator.js", "\\n// candidate after nested RED\\n"); console.log(JSON.stringify({ type: "turn.completed", usage: { total_tokens: 10 } })); }, 80);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "30";
+    const result = await execute(await repository(), "EXECUTOR-NESTED-RED-COMMAND-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls[0]).toMatchObject({ noProgress: false, progressSignals: expect.objectContaining({ redTest: expect.stringContaining("FAIL tests/calculator.test.ts"), tests: expect.arrayContaining([expect.stringContaining("vitest")]) }) });
   });
 
   it("preserves a streamed partial patch through provider timeout", async () => {

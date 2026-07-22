@@ -39,7 +39,7 @@ type ExecutionEnvelope = {
   limits: { maxInputContextTokens: number; maxOutputTokens: number; maxReasoningTokens: number; maxWallClockMs: number; maxCallsPerPhase: number; maxPhaseTokens: number; maxTaskTokens: number; maxCostUsd: number | null };
   remaining: { phaseTokens: number; taskTokens: number; taskTimeMs: number; costUsd: number | null };
 };
-type ProgressSignals = { filesInspected: string[]; exactDiagnosis: string | null; redTest: string | null; candidateDiff: string | null; partialPatch: string | null; tests: string[]; lastMeaningfulOutput: string | null; usage: { tokens: number | null; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; costUsd: number | null } };
+type ProgressSignals = { filesInspected: string[]; filesChanged: string[]; exactDiagnosis: string | null; redTest: string | null; candidateDiff: string | null; partialPatch: string | null; tests: string[]; lastMeaningfulOutput: string | null; usage: { tokens: number | null; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; costUsd: number | null } };
 export type CommandDiagnostic = {
   command: string; cwd: string; startedAt: string; finishedAt: string; durationMs: number;
   executor: string; runtime: string;
@@ -351,7 +351,7 @@ async function runAgent(commandText: string, model: string | null, cwd: string, 
   const argv = splitCommand(commandText); const command = argv.shift()!; const isCodex = /(?:^|\/)codex$/.test(command);
   const args = isCodex ? [...argv, "exec", "--ephemeral", "--json", "--sandbox", "workspace-write", "--cd", cwd, ...(model ? ["--model", model] : []), prompt] : argv;
   const started = Date.now(), startedAt = new Date(started).toISOString(); let stdout = "", stderr = "", timedOut = false, cancelled = false, noProgress = false, pendingLine = "";
-  const signals: ProgressSignals = { filesInspected: [], exactDiagnosis: null, redTest: null, candidateDiff: null, partialPatch: null, tests: [], lastMeaningfulOutput: null, usage: { tokens: null, inputTokens: null, outputTokens: null, reasoningTokens: null, costUsd: null } };
+  const signals: ProgressSignals = { filesInspected: [], filesChanged: [], exactDiagnosis: null, redTest: null, candidateDiff: null, partialPatch: null, tests: [], lastMeaningfulOutput: null, usage: { tokens: null, inputTokens: null, outputTokens: null, reasoningTokens: null, costUsd: null } };
   let progressWork = Promise.resolve(); let useful = false;
   const stdoutArtifact = `provider/iteration-${iteration}.stdout.log`, stderrArtifact = `provider/iteration-${iteration}.stderr.log`;
   await mkdir(join(root, "provider"), { recursive: true });
@@ -366,22 +366,49 @@ async function runAgent(commandText: string, model: string | null, cwd: string, 
     const consume = (line: string) => {
       if (!line.trim()) return;
       let item: Record<string, any>; try { item = JSON.parse(line); } catch { return; }
-      const message = String(item.msg?.message ?? item.message ?? item.text ?? item.item?.text ?? ""); const type = String(item.type ?? item.event ?? "").toLowerCase();
-      const file = typeof item.file === "string" ? item.file : null;
-      if (file && /inspect|read|file/.test(type)) signals.filesInspected = [...new Set([...signals.filesInspected, file])];
-      if ((file && Number.isFinite(item.line) && /diagnos|root.?cause|exact/.test(`${type} ${message}`)) || /(?:src|tests?)\/[\w./-]+:\d+.*(?:diagnos|cause|fails?)/i.test(message)) signals.exactDiagnosis = message || `${file}:${item.line}`;
-      if ((item.status === "red" || /\bred test\b/i.test(message)) && /test|red/.test(type + " " + message.toLowerCase())) signals.redTest = message || `${file ?? "test"}:${item.line ?? "?"}`;
-      if (/candidate[_ .-]?(?:diff|change)|file_change/.test(type + " " + message.toLowerCase())) signals.candidateDiff = message || file || type;
-      if (/partial[_ .-]?patch/.test(type + " " + message.toLowerCase())) signals.partialPatch = message || file || type;
-      if (/test/.test(type) && message) signals.tests = [...new Set([...signals.tests, message])];
+      const nested = item.item && typeof item.item === "object" ? item.item as Record<string, any> : item;
+      const type = String(nested.type ?? item.type ?? item.event ?? "").toLowerCase();
+      const message = String(nested.aggregated_output ?? nested.output ?? nested.msg?.message ?? nested.message ?? nested.text ?? item.msg?.message ?? item.message ?? item.text ?? "");
+      const file = typeof nested.file === "string" ? nested.file : typeof nested.path === "string" ? nested.path : null;
+      const isAgentMessage = type === "agent_message";
+      const isCommand = type === "command_execution";
+      const exactDiagnosis = exactFileLineDiagnosis(message) || Boolean(file && Number.isFinite(nested.line) && /\b(?:diagnos|root.?cause|exact|fail(?:s|ed|ure)?|error)\b/i.test(`${type} ${message}`));
+      if (exactDiagnosis) signals.exactDiagnosis = message || `${file}:${nested.line}`;
+      if (!isAgentMessage) {
+        const changedPaths = type === "file_change" ? pathsFromChanges(nested.changes) : [];
+        if (changedPaths.length) {
+          signals.filesChanged = [...new Set([...signals.filesChanged, ...changedPaths])];
+          signals.candidateDiff = changedPaths.join(", ");
+        }
+        const inspectedPaths = isCommand ? commandInspectedPaths(nested, String(nested.command ?? "")) : file && /inspect|read|file/.test(type) ? [file] : [];
+        if (inspectedPaths.length) signals.filesInspected = [...new Set([...signals.filesInspected, ...inspectedPaths])];
+        const commandText = String(nested.command ?? "");
+        const testEvidence = `${commandText}\n${message}`;
+        const exitCode = nested.exit_code ?? nested.exitCode;
+        if (isCommand && /\b(?:test|tests|vitest|jest|pytest|rspec|spec)\b/i.test(testEvidence)) {
+          signals.tests = [...new Set([...signals.tests, commandText || message])];
+          if ((Number.isFinite(exitCode) && Number(exitCode) !== 0) || /\b(?:fail(?:ed|ure)?|error|red)\b/i.test(message)) signals.redTest = message || commandText;
+        } else if ((nested.status === "red" || /\bred test\b/i.test(message)) && /test|red/.test(`${type} ${message.toLowerCase()}`)) signals.redTest = message || `${file ?? "test"}:${nested.line ?? "?"}`;
+        if (/candidate[_ .-]?(?:diff|change)|file_change/.test(`${type} ${message.toLowerCase()}`)) signals.candidateDiff ??= message || file || type;
+        if (/partial[_ .-]?patch/.test(`${type} ${message.toLowerCase()}`)) signals.partialPatch = message || file || type;
+        if (!isCommand && /test/.test(type) && message) signals.tests = [...new Set([...signals.tests, message])];
+      }
       const usage = usageFromEvent(item); for (const key of ["tokens", "inputTokens", "outputTokens", "reasoningTokens", "costUsd"] as const) if (usage[key] !== null) signals.usage[key] = Math.max(signals.usage[key] ?? 0, usage[key]);
-      const isUseful = Boolean(signals.filesInspected.length || signals.exactDiagnosis || signals.redTest || signals.candidateDiff || signals.partialPatch || signals.tests.length);
+      const isUseful = Boolean(signals.filesInspected.length || signals.filesChanged.length || signals.exactDiagnosis || signals.redTest || signals.candidateDiff || signals.partialPatch || signals.tests.length);
       if (isUseful) { useful = true; signals.lastMeaningfulOutput = message || line.slice(0, 2_000); clearTimeout(earlyTimer); progressWork = progressWork.then(() => onUsefulProgress(structuredClone(signals))); }
     };
     child.stdout?.on("data", (chunk) => { const text = String(chunk); if (Buffer.byteLength(stdout) < 2_000_000) stdout += text; const complete = (pendingLine + text).split(/\r?\n/); pendingLine = complete.pop() ?? ""; for (const line of complete) consume(line); }); child.stderr?.on("data", (chunk) => { if (Buffer.byteLength(stderr) < 2_000_000) stderr += chunk; });
     child.on("error", reject);
     child.on("close", (exitCode, childSignal) => { clearTimeout(timer); clearTimeout(earlyTimer); if (pendingLine) consume(pendingLine); signal?.removeEventListener("abort", stop); const finishedAt = new Date().toISOString(); const safeStdout = redactProviderOutput(stdout), safeStderr = redactProviderOutput(stderr); const normalizedExit = timedOut || noProgress ? null : exitCode; const failureReason = normalizedExit === 0 ? null : noProgress ? `no_progress: no useful provider signal before ${Math.min(configuredEarly, envelope.limits.maxWallClockMs)}ms.` : timedOut ? `Implementation provider timed out after ${envelope.limits.maxWallClockMs}ms.` : cancelled ? "Implementation provider was cancelled." : safeStdout.trim() || safeStderr.trim() ? `Implementation provider exited with code ${normalizedExit ?? "signal"}.` : "Implementation provider exited non-zero without stdout or stderr."; void progressWork.then(() => Promise.all([writeFile(join(root, stdoutArtifact), safeStdout), writeFile(join(root, stderrArtifact), safeStderr)])).then(() => resolveRun({ startedAt, finishedAt, durationMs: Date.now() - started, exitCode: normalizedExit, signal: childSignal, summary: extractSummary(safeStdout, safeStderr), cancelled, timedOut, noProgress, stdout: safeStdout, stderr: safeStderr, truncation: { stdout: Buffer.byteLength(stdout) >= 2_000_000, stderr: Buffer.byteLength(stderr) >= 2_000_000, limitBytes: 2_000_000 }, failureReason, tokenUsage: signals.usage.tokens ?? extractTokenUsage(safeStdout), costUsd: signals.usage.costUsd, progressSignals: signals, stdoutArtifact, stderrArtifact }), reject); });
   });
+}
+function exactFileLineDiagnosis(message: string): boolean { return /(?:src|tests?|scripts|schemas|docs|config)\/[\w./-]+:\d+/.test(message) && /\b(?:diagnos|cause|fail(?:s|ed|ure)?|error|expected|actual)\b/i.test(message); }
+function pathsFromChanges(changes: unknown): string[] { return Array.isArray(changes) ? changes.flatMap((change) => change && typeof change === "object" && typeof (change as Record<string, unknown>).path === "string" ? [(change as Record<string, string>).path] : []) : []; }
+function commandInspectedPaths(item: Record<string, any>, command: string): string[] {
+  const explicit = [item.file, item.path, ...(Array.isArray(item.files) ? item.files : [])].filter((path): path is string => typeof path === "string");
+  if (!/(?:^|[\s'"/])(?:cat|sed|rg|grep|head|tail|less|bat)\b/.test(command)) return explicit;
+  const fromCommand = command.match(/(?:src|tests?|scripts|schemas|docs|config)\/[A-Za-z0-9._/-]+/g) ?? [];
+  return [...new Set([...explicit, ...fromCommand])];
 }
 function usageFromEvent(item: Record<string, any>): ProgressSignals["usage"] { const usage = item.usage ?? item.token_usage ?? item.item?.usage; if (!usage) return { tokens: null, inputTokens: null, outputTokens: null, reasoningTokens: null, costUsd: null }; const input = usage.input_tokens ?? usage.inputTokens, cached = usage.cached_input_tokens ?? usage.cachedInputTokens ?? 0, output = usage.output_tokens ?? usage.outputTokens, reasoning = usage.reasoning_tokens ?? usage.reasoningTokens; const explicit = usage.total_tokens ?? usage.totalTokens ?? item.total_tokens; const tokens = Number.isFinite(input) && Number.isFinite(output) && Number.isFinite(cached) ? Math.max(0, Number(input) - Number(cached)) + Number(output) : Number.isFinite(explicit) ? Number(explicit) : null; const cost = usage.cost_usd ?? usage.costUsd ?? item.cost_usd; return { tokens, inputTokens: Number.isFinite(input) ? Math.max(0, Number(input) - Number(cached)) : null, outputTokens: Number.isFinite(output) ? Number(output) : null, reasoningTokens: Number.isFinite(reasoning) ? Number(reasoning) : null, costUsd: Number.isFinite(cost) ? Number(cost) : null }; }
 function extractSummary(stdout: string, stderr: string): string { const finals = stdout.split(/\r?\n/).flatMap((line) => { try { const item = JSON.parse(line) as Record<string, any>; const text = item.msg?.message ?? item.message ?? item.text ?? item.item?.text; return typeof text === "string" ? [text] : []; } catch { return []; } }); return (finals.at(-1) ?? stdout ?? stderr).slice(-20_000); }
