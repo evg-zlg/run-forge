@@ -72,6 +72,12 @@ describe("semantic review adapter", () => {
       .resolves.toMatchObject({ status: "completed", confidence: "medium" });
   });
 
+  it("preserves direct JSON compatibility when transport appends an NDJSON event", async () => {
+    const review = JSON.stringify({ semanticReview: { confidence: "high", limitations: [], findings: [] } });
+    await expect(runSemanticReview({ ...base, allowed: true, invoke: async () => ({ provider: "local-coding-agent", model: null, invocationId: "ndjson", stdout: `${review}\n${JSON.stringify({ type: "turn.completed" })}`, stderr: "", evidence: [] }) }))
+      .resolves.toMatchObject({ status: "completed", confidence: "high" });
+  });
+
   it("rejects fenced prose, malformed JSON, and non-semantic-review envelopes", async () => {
     const valid = JSON.stringify({ semanticReview: { confidence: "high", limitations: [], findings: [] } });
     for (const stdout of [

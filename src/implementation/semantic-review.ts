@@ -223,10 +223,18 @@ export function normalizeSemanticReviewResult(value: SemanticReviewResult): Sema
 }
 
 function parsePayload(stdout: string, stderr: string): Record<string, unknown> {
-  const candidates = [stdout.trim(), stderr.trim()].filter(Boolean);
+  const candidates = [stdout.trim(), stderr.trim()].flatMap((output) => {
+    if (!output) return [];
+    const fenced = fencedJsonBody(output);
+    if (fenced !== null) return [fenced];
+    // A fence anywhere else is malformed or surrounded by prose; never fall
+    // back to parsing its interior line-by-line.
+    if (output.includes("```")) return [];
+    return [output, ...output.split(/\r?\n/).reverse()];
+  });
   for (const candidate of candidates) {
     try {
-      const parsed = JSON.parse(fencedJsonBody(candidate) ?? candidate) as Record<string, unknown>;
+      const parsed = JSON.parse(candidate) as Record<string, unknown>;
       if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
       if (Object.keys(parsed).length !== 1 || !("semanticReview" in parsed)) continue;
       const review = parsed.semanticReview;
