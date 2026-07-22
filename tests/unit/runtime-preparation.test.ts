@@ -25,6 +25,15 @@ describe("external runtime preparation policy", () => {
     expect(args).toContain("COREPACK_HOME=/workspace/frontend/.runforge-corepack");
   });
 
+  it("rejects mount-grammar delimiters and control characters before required dependency preparation", () => {
+    for (const unsafeWorkspace of ["/tmp/prepared,readonly", "/tmp/prepared=dst", "/tmp/prepared\n--mount"]) {
+      expect(() => preparationDockerArgs(unsafeWorkspace, "runforge:local", "prepare-test", "npm ci", "packages/app")).toThrow(/mount grammar/i);
+    }
+    for (const unsafePackage of ["packages/app,readonly", "packages/app=dst", "packages/app\n--mount"]) {
+      expect(() => preparationDockerArgs("/tmp/prepared", "runforge:local", "prepare-test", "npm ci", unsafePackage)).toThrow(/mount grammar/i);
+    }
+  });
+
   it("persists Corepack only in the disposable workspace for offline validation", () => {
     const previous = process.env.COREPACK_HOME; process.env.COREPACK_HOME = "/host/private/corepack-cache";
     try {

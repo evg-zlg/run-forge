@@ -1,13 +1,14 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { access, chmod, mkdir, mkdtemp, readFile, readlink, rm, symlink, writeFile } from "node:fs/promises";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { negotiateExecutionAgreement, type ExecutionParty } from "../../src/product/execution-agreement.js";
 import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
 import { loadTaskSpecV2 } from "../../src/product/task-spec-v2.js";
-import { createSyntheticValidationGitContext, runValidationOnlyExecutor } from "../../src/validation/validation-only-executor.js";
+import { materializeAutonomousGitSnapshot } from "../../src/run/task-run-workspace.js";
+import { runValidationOnlyExecutor } from "../../src/validation/validation-only-executor.js";
 
 const roots: string[] = [];
 const originalPath = process.env.PATH;
@@ -137,20 +138,26 @@ describe("validation-only multi-lane execution", () => {
     fixture.spec.runtime.preference = "local-disposable";
     await expect(runValidationOnlyExecutor({ spec: fixture.spec, executionAgreement: fixture.agreement })).rejects.toThrow("requires Docker");
   });
-  it("creates clean non-main synthetic Git context without touching the source repository", async () => {
+  it("creates a clean autonomous Git snapshot at the exact source HEAD without touching the source", async () => {
     const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-synthetic-validation-git-"))) - 1]!, source = join(root, "source"), workspace = join(root, "campaign-worktrees", "cmp_v1_fixture");
     await mkdir(source); await mkdir(join(workspace, "node_modules"), { recursive: true }); await mkdir(join(workspace, ".runforge-corepack")); await mkdir(join(workspace, ".runforge-tmp"));
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: source }); execFileSync("git", ["config", "user.name", "Source"], { cwd: source }); execFileSync("git", ["config", "user.email", "source@example.invalid"], { cwd: source });
-    await writeFile(join(source, "README.md"), "source\n"); execFileSync("git", ["add", "README.md"], { cwd: source }); execFileSync("git", ["commit", "-qm", "source"], { cwd: source });
+    await writeFile(join(source, "README.md"), "source\n"); await writeFile(join(source, ".gitignore"), "ignored-cache/\n"); execFileSync("git", ["add", "README.md", ".gitignore"], { cwd: source }); execFileSync("git", ["commit", "-qm", "source"], { cwd: source });
     const sourceHead = execFileSync("git", ["rev-parse", "HEAD"], { cwd: source, encoding: "utf8" }).trim();
-    await writeFile(join(workspace, "package.json"), "{}\n"); await writeFile(join(workspace, "node_modules", "dependency.js"), "module.exports = true;\n"); await writeFile(join(workspace, ".runforge-corepack", "cache"), "offline\n");
-    await createSyntheticValidationGitContext(workspace);
+    await writeFile(join(workspace, "package.json"), "{}\n"); await writeFile(join(workspace, "node_modules", "dependency.js"), "module.exports = true;\n"); await writeFile(join(workspace, ".runforge-corepack", "cache"), "offline\n"); await mkdir(join(workspace, "ignored-cache")); await writeFile(join(workspace, "ignored-cache", "stale.bin"), "stale\n");
+    await materializeAutonomousGitSnapshot(source, workspace, sourceHead);
     expect(execFileSync("git", ["rev-parse", "--is-inside-work-tree"], { cwd: workspace, encoding: "utf8" }).trim()).toBe("true");
     expect(execFileSync("git", ["branch", "--show-current"], { cwd: workspace, encoding: "utf8" }).trim()).toBe("runforge-validation-snapshot");
     expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: workspace, encoding: "utf8" }).trim()).toBe("");
     expect(execFileSync("git", ["config", "--get", "core.hooksPath"], { cwd: workspace, encoding: "utf8" }).trim()).toBe("/dev/null");
-    expect(execFileSync("git", ["ls-files"], { cwd: workspace, encoding: "utf8" })).toContain("package.json");
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: workspace, encoding: "utf8" }).trim()).toBe(sourceHead);
+    expect(execFileSync("git", ["rev-parse", "--git-common-dir"], { cwd: workspace, encoding: "utf8" }).trim()).toBe(".git");
+    await expect(access(join(workspace, ".git", "objects", "info", "alternates"))).rejects.toThrow();
+    for (const stale of ["package.json", "node_modules", ".runforge-corepack", ".runforge-tmp", "ignored-cache"]) await expect(access(join(workspace, stale))).rejects.toThrow();
+    expect(execFileSync("git", ["ls-files"], { cwd: workspace, encoding: "utf8" })).toContain("README.md");
     expect(execFileSync("git", ["ls-files"], { cwd: workspace, encoding: "utf8" })).not.toContain("node_modules");
+    execFileSync("git", ["worktree", "add", "--quiet", "--detach", join(workspace, "nested-worktree"), "HEAD"], { cwd: workspace });
+    expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: join(workspace, "nested-worktree"), encoding: "utf8" }).trim()).toBe(sourceHead);
     expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: source, encoding: "utf8" }).trim()).toBe(sourceHead);
     expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: source, encoding: "utf8" }).trim()).toBe("");
   });
@@ -158,13 +165,16 @@ describe("validation-only multi-lane execution", () => {
   it("executes package validation when if-needed can reuse source dependencies", async () => {
     const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-dependencies-"))) - 1]!;
     const repository = join(root, "source"); const artifacts = join(root, "artifacts"); const bin = join(root, "bin");
-    await mkdir(repository); await mkdir(bin); await mkdir(join(repository, "node_modules"));
+    await mkdir(join(repository, "packages", "app", "node_modules", ".bin"), { recursive: true }); await mkdir(bin);
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repository });
     execFileSync("git", ["config", "user.name", "RunForge Test"], { cwd: repository });
     execFileSync("git", ["config", "user.email", "runforge@example.invalid"], { cwd: repository });
-    await writeFile(join(repository, "package.json"), JSON.stringify({ packageManager: "pnpm@10.0.0", scripts: { test: "node --version" } }));
+    await writeFile(join(repository, ".gitignore"), "node_modules/\n");
+    await writeFile(join(repository, "packages", "app", "package.json"), JSON.stringify({ packageManager: "pnpm@10.0.0", scripts: { test: "fixture-check" } }));
     await writeFile(join(repository, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
-    execFileSync("git", ["add", "package.json", "pnpm-lock.yaml"], { cwd: repository });
+    const fixtureExecutable = join(repository, "packages", "app", "node_modules", ".bin", "fixture-check");
+    await writeFile(fixtureExecutable, "#!/bin/sh\nprintf 'fixture dependency executable ran\\n'\n"); await chmod(fixtureExecutable, 0o755);
+    execFileSync("git", ["add", ".gitignore", "packages/app/package.json", "pnpm-lock.yaml"], { cwd: repository });
     execFileSync("git", ["commit", "-q", "-m", "fixture"], { cwd: repository });
     const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
     const dockerLog = join(root, "docker.log"); const docker = join(bin, "docker");
@@ -178,19 +188,21 @@ workspace=""; dependencies=""; last=""
 for argument in "$@"; do
   case "$argument" in
     type=bind,src=*,dst=/workspace) workspace="\${argument#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace}" ;;
-    type=bind,src=*/source/node_modules,dst=/source/node_modules,readonly) dependencies="available" ;;
+    type=bind,src=*,dst=/workspace/packages/app/node_modules) dependencies="\${argument#type=bind,src=}"; dependencies="\${dependencies%%,dst=*}" ;;
   esac
   last="$argument"
 done
 test "$last" = "corepack pnpm test" || exit 91
-test "$dependencies" = "available" || exit 92
-printf 'package validation executed\\n'
+test -x "$dependencies/.bin/fixture-check" || exit 92
+test -x "$workspace/packages/app/node_modules/.bin/fixture-check" || exit 94
+"$dependencies/.bin/fixture-check"
+printf '{"tampered":true}\n' > "$workspace/packages/app/.runforge-workspace-link-owner.json"
 `); await chmod(docker, 0o755);
     const specPath = join(root, "task-spec.json");
     await writeFile(specPath, JSON.stringify({
       schemaVersion: 2, taskId: "VALIDATION-DEPENDENCY-CAPABILITY-1",
       task: { text: "Run package validation with reusable dependencies.", goal: "Prove dependency capability planning.", acceptanceCriteria: ["Package validation executes"] },
-      target: { repository, workingDirectory: ".", expectedSha: head }, execution: { mode: "validation", timeoutMs: 30_000 },
+      target: { repository, workingDirectory: "packages/app", expectedSha: head }, execution: { mode: "validation", timeoutMs: 30_000 },
       executionAgreement: { schemaVersion: 1, profile: "assist-only" },
       runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "if-needed", externalNetwork: "denied" },
       validation: { mode: "explicit", commands: ["corepack pnpm test"] }, authority: { profile: "read-only", allowProviderCalls: false, allowNetwork: false },
@@ -203,19 +215,22 @@ printf 'package validation executed\\n'
       expect(dockerLifecycle).toContain("volume create --driver local --opt type=tmpfs");
       expect(dockerLifecycle).toContain("type=volume,src=runforge-validation-tmp-validation-dependency-capability-1-");
       expect(dockerLifecycle.trim().split("\n").at(-1)).toMatch(/^volume rm -f runforge-validation-tmp-validation-dependency-capability-1-[a-f0-9]{16}$/);
-      expect(dockerLifecycle).toContain("/source/node_modules,dst=/source/node_modules,readonly");
+      expect(dockerLifecycle).toMatch(/type=bind,src=\/[^ ]*runforge-dependencies-[^, ]+,dst=\/workspace\/packages\/app\/node_modules(?: |$)/);
+      expect(dockerLifecycle).not.toContain("/source/node_modules");
       expect(execution).toMatchObject({ kind: "validation", success: true, result: { validationAggregate: "passed", source: { unchanged: true } } });
       const result = JSON.parse(await readFile(join(artifacts, "results.json"), "utf8"));
       expect(result.validationPlan.commands).toEqual([
         expect.objectContaining({ command: "corepack pnpm test", disposition: "execute", availableCapabilities: expect.arrayContaining(["package-manager", "dependencies"]) }),
       ]);
       expect(result.validation).toEqual([
-        expect.objectContaining({ command: "corepack pnpm test", outcome: "passed", lane: "docker-validation", stdout: expect.stringContaining("package validation executed") }),
+        expect.objectContaining({ command: "corepack pnpm test", outcome: "passed", lane: "docker-validation", stdout: expect.stringContaining("fixture dependency executable ran") }),
       ]);
       if (!("productWorkspace" in execution.result)) throw new Error("Expected the capability-aware validation-only executor result.");
-      const dependencyTarget = await readlink(join(execution.result.productWorkspace, "node_modules"));
-      expect(dependencyTarget).toContain("runforge-dependencies-");
-      expect(dependencyTarget).not.toBe(join(repository, "node_modules"));
+      await expect(access(join(execution.result.productWorkspace, "packages", "app", "node_modules"))).rejects.toThrow();
+      expect(await readFile(join(execution.result.productWorkspace, "packages", "app", ".runforge-workspace-link-owner.json"), "utf8")).toContain("tampered");
+      const dependencyMount = dockerLifecycle.match(/type=bind,src=([^, ]*runforge-dependencies-[^, ]+),dst=\/workspace\/packages\/app\/node_modules/)?.[1];
+      expect(dependencyMount).toBeTruthy();
+      await expect(access(dependencyMount!)).rejects.toThrow();
       expect(dockerLifecycle).toContain("corepack pnpm test");
       expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim()).toBe(head);
       expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim()).toBe("");
@@ -225,31 +240,32 @@ printf 'package validation executed\\n'
   it("runs product checks in Docker, Git evidence in its bound lane, and never spawns unsupported commands", async () => {
     const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-only-"))) - 1]!;
     const repository = join(root, "source"); const artifacts = join(root, "artifacts"); const bin = join(root, "bin");
-    await mkdir(repository); await mkdir(bin);
+    await mkdir(join(repository, "packages", "app"), { recursive: true }); await mkdir(bin);
     execFileSync("git", ["init", "-q", "-b", "main"], { cwd: repository });
     execFileSync("git", ["config", "user.name", "RunForge Test"], { cwd: repository });
     execFileSync("git", ["config", "user.email", "runforge@example.invalid"], { cwd: repository });
-    await writeFile(join(repository, "README.md"), "# fixture\n"); execFileSync("git", ["add", "README.md"], { cwd: repository }); execFileSync("git", ["commit", "-q", "-m", "fixture"], { cwd: repository });
+    await writeFile(join(repository, "packages", "app", "README.md"), "# fixture\n"); execFileSync("git", ["add", "packages/app/README.md"], { cwd: repository }); execFileSync("git", ["commit", "-q", "-m", "fixture"], { cwd: repository });
     const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim();
+    const workspaceGitCommand = `root="$(git rev-parse --show-toplevel)" && test "$(git rev-parse HEAD)" = "${head}" && test -z "$(git status --porcelain=v1 -uall)" && git -C "$root" worktree add --quiet --detach "$root/.nested-validation" HEAD && test "$(git -C "$root/.nested-validation" rev-parse HEAD)" = "${head}"`;
     const dockerLog = join(root, "docker.log"); const docker = join(bin, "docker");
     await writeFile(docker, `#!/bin/sh
 printf '%s\\n' "$*" >> "${dockerLog}"
 test "$1" = "volume" && exit 0
-workspace=""; last=""
-for argument in "$@"; do case "$argument" in type=bind,src=*,dst=/workspace*) workspace="\${argument#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace*}" ;; esac; last="$argument"; done
-(cd "$workspace" && /bin/sh -lc "$last")
+workspace=""; workdir="/workspace"; last=""; next_workdir=0
+for argument in "$@"; do if test "$next_workdir" = 1; then workdir="$argument"; next_workdir=0; fi; case "$argument" in --workdir) next_workdir=1 ;; type=bind,src=*,dst=/workspace*) workspace="\${argument#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace*}" ;; esac; last="$argument"; done
+relative="\${workdir#/workspace}"; (cd "$workspace$relative" && /bin/sh -lc "$last")
 `); await chmod(docker, 0o755);
     const databaseCommand = "runforge-database-probe --read-only";
     const specPath = join(root, "task-spec.json");
     await writeFile(specPath, JSON.stringify({
       schemaVersion: 2, taskId: "VALIDATION-ONLY-REGRESSION-1",
       task: { text: "Run exact validation dogfood.", goal: "Prove multi-lane routing.", acceptanceCriteria: ["All supported evidence passes"] },
-      target: { repository, workingDirectory: ".", expectedSha: head }, execution: { mode: "validation", timeoutMs: 30_000 },
+      target: { repository, workingDirectory: "packages/app", expectedSha: head }, execution: { mode: "validation", timeoutMs: 30_000 },
       executionAgreement: { schemaVersion: 1, profile: "local-ready" },
       runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "disabled", externalNetwork: "denied" },
-      validation: { mode: "explicit", commands: ["node --version", "test ! -d .git", "git diff --check", databaseCommand], requirements: [
+      validation: { mode: "explicit", commands: ["node --version", workspaceGitCommand, "git diff --check", databaseCommand], requirements: [
         { command: "node --version", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation" },
-        { command: "test ! -d .git", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation" },
+        { command: workspaceGitCommand, capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation" },
         { command: "git diff --check", capabilities: ["git-read-only-evidence"], acceptance: "evidence-only", evidenceRole: "git-evidence" },
         { command: databaseCommand, capabilities: ["database"], acceptance: "optional", evidenceRole: "database-evidence" },
       ] }, authority: { profile: "read-only", allowProviderCalls: false, allowNetwork: false }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" }, artifacts: { root: artifacts },
@@ -277,13 +293,14 @@ for argument in "$@"; do case "$argument" in type=bind,src=*,dst=/workspace*) wo
       expect(result.review.semantic.delegation.reason).not.toContain("assigns independent review to runforge");
       expect(result.validation).toEqual(expect.arrayContaining([
         expect.objectContaining({ command: "node --version", outcome: "passed", lane: "docker-validation", executor: "docker-shell" }),
-        expect.objectContaining({ command: "test ! -d .git", outcome: "passed", lane: "docker-validation", executor: "docker-shell" }),
+        expect.objectContaining({ command: workspaceGitCommand, outcome: "passed", lane: "docker-validation", executor: "docker-shell" }),
         expect.objectContaining({ command: "git diff --check", outcome: "passed", lane: "git-evidence", boundSha: head, safetyAssertions: expect.arrayContaining(["argv_only_no_shell", "source_state_immutable"]) }),
         expect.objectContaining({ command: databaseCommand, outcome: "capability_unsupported", exitCode: null, missingCapabilities: ["database"] }),
       ]));
       const product = result.validation.find((item: { command: string }) => item.command === "node --version");
-      await expect(access(join(product.cwd, ".git"))).rejects.toThrow();
+      await expect(access(join(product.cwd, "..", "..", ".git"))).resolves.toBeUndefined();
       const spawned = await readFile(dockerLog, "utf8"); expect(spawned).not.toContain("git diff --check"); expect(spawned).not.toContain(databaseCommand);
+      expect(spawned).toContain("dst=/workspace --workdir /workspace/packages/app");
       for (const responsibleParty of ["owner", "external_session", "external_system"] satisfies ExecutionParty[]) {
         const executionAgreement = negotiateExecutionAgreement({
           profile: "custom",

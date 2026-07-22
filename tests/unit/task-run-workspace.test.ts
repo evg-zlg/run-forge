@@ -96,6 +96,16 @@ describe("external workspace link lifecycle", () => {
     expect(await readFile(join(external, "sentinel"), "utf8")).toBe("preserve\n"); await expect(access(join(external, "task-temp-node_modules"))).rejects.toMatchObject({ code: "ENOENT" });
   });
 
+  it("revokes and removes a private dependency lease when preparation fails after allocation", async () => {
+    const { source, workspace } = await fixture("preparation-failure"); let allocated: string | undefined;
+    await expect(prepareUnpreparedExternalWorkspace(source, workspace, ".", { taskId: "TASK-FAIL", workspaceId: "attempt-1" }, {
+      onPrivateDependenciesCreated: (lease) => { allocated = lease.path; throw new Error("injected preparation failure"); },
+    })).rejects.toThrow("injected preparation failure");
+    expect(allocated).toContain("runforge-dependencies-task-fail-");
+    await expect(access(allocated!)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(access(join(workspace, "node_modules"))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
   it("quarantines and restores an external directory swapped in after ownership validation", async () => {
     const { source, workspace } = await fixture("toctou");
     const identity = { taskId: "TASK-RACE", workspaceId: "generation-1" }, target = join(workspace, "node_modules");
