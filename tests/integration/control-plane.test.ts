@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { ControlPlaneManager } from "../../src/control-plane/manager.js";
 import { startControlPlaneServer, type ControlPlaneServerInstance } from "../../src/control-plane/server.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
+import { persistDurableCheckpoint } from "../../src/implementation/durable-checkpoint.js";
 import { validateTaskResultContract } from "../../src/product/task-result-contract.js";
 
 const roots: string[] = [];
@@ -491,7 +492,7 @@ describe("local control-plane HTTP lifecycle", () => {
   it("recovers a deadline interruption through HTTP without allowing a late worker to overwrite the retry", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-interrupted-retry-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let runs = 0; let releaseFirstRun!: () => void; const firstRunBlocked = new Promise<void>((resolve) => { releaseFirstRun = resolve; });
     const manager = new ControlPlaneManager(store, {
-      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const run = ++runs; await mkdir(root, { recursive: true }); if (run === 1) await firstRunBlocked; await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", marker: run === 1 ? "late-old" : "new-attempt", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
+      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const run = ++runs; await mkdir(root, { recursive: true }); if (run === 1) { await writeFile(join(root, "results.json"), JSON.stringify({ providerCalls: [{ stdout: "RAW_PROVIDER_OUTPUT_MUST_NOT_ESCAPE" }] })); await firstRunBlocked; } await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", marker: run === 1 ? "late-old" : "new-attempt", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
       recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never)
     }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 30, cleanupGraceMs: 2_000 });
     const repository = await syntheticRepository(); const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-DEADLINE-RETRY-1", repository);
@@ -501,7 +502,8 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(interrupted.recovery).toMatchObject({ reason: "execution_deadline_exceeded", retryAvailable: false, cleanupStatus: "pending" }); expect(interrupted.recovery.operation).toBeUndefined();
     expect(await json(await fetch(`${instance.url}/healthz`))).toMatchObject({ tasks: { active: 0, cleanupPending: 1 } });
     const interruptedResult = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/result`));
-    expect(interruptedResult).toMatchObject({ status: "interrupted", interruption: { originalExecutionId: oldExecutionId }, targetMutation: { status: "not_inferred" }, safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true } });
+    expect(interruptedResult).toMatchObject({ status: "interrupted", interruption: { originalExecutionId: oldExecutionId }, targetMutation: { status: "not_inferred" }, receipt: { filesChanged: [], patchAvailable: false, checkpointId: null, testsStarted: 0, testsCompleted: 0, outcome: "no_progress", stopReason: "deadline_exceeded", failureClassification: "deadline_exceeded", lastCompletedStage: "provider", nextSafeAction: "retry_with_bounded_deadline" }, safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true } });
+    expectCompleteReceipt(interruptedResult.receipt); expect(interruptedResult.receipt.totalDuration).toBe(interruptedResult.receipt.queueDuration + interruptedResult.receipt.providerExecutionDuration); expect(JSON.stringify(interruptedResult)).not.toContain("RAW_PROVIDER_OUTPUT_MUST_NOT_ESCAPE");
     await expectValidPublicResult(interruptedResult);
     const pendingRetry = await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" }); expect(pendingRetry.status).toBe(409); expect(await json(pendingRetry)).toMatchObject({ error: { code: "recovery_pending", retryable: true } });
     releaseFirstRun();
@@ -513,6 +515,25 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(await json(await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/result`))).toMatchObject({ status: "completed", marker: "new-attempt" }); expect(runs).toBe(2);
     const finalTask = await manager.getTask("CONTROL-DEADLINE-RETRY-1"); expect(finalTask.execution.attempts).toHaveLength(2); expect(new Set(finalTask.execution.attempts.map((attempt) => attempt.artifactRoot)).size).toBe(2);
     const completedRetry = await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" }); expect(completedRetry.status).toBe(409); expect(await json(completedRetry)).toMatchObject({ error: { code: "task_not_retryable" } });
+  });
+
+  it("publishes a cancellation receipt from a durable checkpoint without exposing provider output", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-cancel-receipt-"))) - 1]!; let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; }); let checkpointReady!: () => void; const ready = new Promise<void>((resolve) => { checkpointReady = resolve; });
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await persistDurableCheckpoint(root, { checkpointId: "checkpoint-cancel-1", iteration: 1, kind: "implementation", baseSha: "base-sha", workspaceSha: null, workspaceState: "dirty", patch: "diff --git a/src/a.ts b/src/a.ts\n", changedFiles: ["src/a.ts"], validation: [], usage: { inputTokens: null, outputTokens: null, cost: null }, executor: { provider: "synthetic-provider", model: "synthetic-model", calls: 1, stdout: "RAW_CHECKPOINT_PROVIDER_OUTPUT" }, safetyAssertions: {}, unresolvedFindings: [] }); checkpointReady(); await blocked; return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 10_000, cleanupGraceMs: 100 });
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-CANCEL-CHECKPOINT-1"); await ready;
+    expect((await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-CHECKPOINT-1/cancel`, { method: "POST" })).status).toBe(200);
+    const result = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-CHECKPOINT-1/result`));
+    expect(result).toMatchObject({ status: "interrupted", interruption: { reason: "cancelled_by_operator" }, receipt: { provider: "synthetic-provider", model: "synthetic-model", calls: 1, filesChanged: ["src/a.ts"], patchAvailable: true, checkpointId: "checkpoint-cancel-1", testsStarted: 0, testsCompleted: 0, outcome: "checkpoint_available", stopReason: "cancellation", failureClassification: "validation_not_started", lastCompletedStage: "checkpoint", nextSafeAction: "review_checkpoint" } });
+    expectCompleteReceipt(result.receipt); expect(result.receipt.inputTokens).toBeNull(); expect(result.receipt.availability.inputTokens).toBe("not_reported"); expect(JSON.stringify(result)).not.toContain("RAW_CHECKPOINT_PROVIDER_OUTPUT"); await expectValidPublicResult(result); release();
+  });
+
+  it("publishes a complete infrastructure-failure receipt over public HTTP", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-infrastructure-receipt-"))) - 1]!;
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async () => { throw new Error("synthetic infrastructure failure"); }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) });
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-INFRASTRUCTURE-RECEIPT-1"); await eventually(async () => (await manager.getTask("CONTROL-INFRASTRUCTURE-RECEIPT-1")).status === "failed");
+    const result = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-INFRASTRUCTURE-RECEIPT-1/result`));
+    expect(result).toMatchObject({ status: "failed", error: "synthetic infrastructure failure", receipt: { filesChanged: [], patchAvailable: false, checkpointId: null, testsStarted: 0, testsCompleted: 0, outcome: "no_progress", stopReason: "infrastructure_failure", failureClassification: "infrastructure_failure", lastCompletedStage: "queued", nextSafeAction: "repair_infrastructure_then_retry" } });
+    expectCompleteReceipt(result.receipt); for (const field of ["inputTokens", "cachedTokens", "outputTokens", "reasoningTokens", "billedTokens", "cost"]) { expect(result.receipt[field]).toBeNull(); expect(result.receipt.availability[field]).toBe("not_reported"); } await expectValidPublicResult(result);
   });
 
   it("recovers stale heartbeat and cancelled executions while rejecting owner-gated retry", { timeout: 15_000 }, async () => {
@@ -547,7 +568,7 @@ describe("local control-plane HTTP lifecycle", () => {
   it("persists an inferred expected SHA and blocks restart retry after source advances", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-source-bound-retry-"))) - 1]!; const repository = await syntheticRepository(); const store = new ControlPlaneStore(stateRoot); let executions = 0;
     const operations = { runTaskSpec: async () => { executions += 1; await new Promise<never>(() => undefined); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) };
-    const before = new ControlPlaneManager(store, operations as never); await before.initialize(); await before.createTask({ taskSpec: taskSpec("CONTROL-SOURCE-BOUND-RETRY-1", repository), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" });
+    const before = new ControlPlaneManager(store, operations as never); await before.initialize(); await before.createTask({ taskSpec: taskSpec("CONTROL-SOURCE-BOUND-RETRY-1", repository), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); await eventually(async () => executions === 1);
     const acceptedSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim(); expect((await store.readSpec("CONTROL-SOURCE-BOUND-RETRY-1"))?.target).toMatchObject({ expectedSha: acceptedSha }); before.close();
     await writeFile(join(repository, "advance.txt"), "advance\n"); execFileSync("git", ["add", "advance.txt"], { cwd: repository }); execFileSync("git", ["commit", "-q", "-m", "advance source"], { cwd: repository });
     const after = new ControlPlaneManager(store, operations as never); await after.initialize(); await expect(after.retryTask("CONTROL-SOURCE-BOUND-RETRY-1")).rejects.toMatchObject({ code: "target_sha_changed", retryable: false }); const blocked = await after.getTask("CONTROL-SOURCE-BOUND-RETRY-1"); expect(blocked).toMatchObject({ status: "interrupted", recovery: { reason: "target_sha_changed", retryAvailable: false, targetShaChanged: true, newTaskRequired: true, operation: "start_new_task" } }); expect(executions).toBe(1); expect((await store.readSpec(blocked.id))?.target).toMatchObject({ expectedSha: acceptedSha }); after.close();
@@ -580,6 +601,14 @@ async function settlementScenario(taskId: string, input: { requestedOwnership: R
   return { manager, agreement, task: await manager.getTask(taskId), result: await manager.getResult(taskId) };
 }
 async function expectValidPublicResult(result: Record<string, unknown>): Promise<void> { validateTaskResultContract(result); const schema = JSON.parse(await readFile("schemas/task-result-v1.schema.json", "utf8")); const validate = new Ajv2020({ strict: true }).compile(schema); expect(validate(result), JSON.stringify(validate.errors)).toBe(true); }
+function expectCompleteReceipt(receipt: Record<string, any>): void {
+  expect(receipt).toEqual(expect.objectContaining({
+    queueDuration: expect.any(Number), providerExecutionDuration: expect.any(Number), totalDuration: expect.any(Number), provider: expect.any(String),
+    phase: expect.stringMatching(/^(implementation|repair)$/), calls: expect.any(Number), availability: expect.objectContaining({ queueDuration: expect.any(String), inputTokens: expect.any(String), cachedTokens: expect.any(String), outputTokens: expect.any(String), reasoningTokens: expect.any(String), billedTokens: expect.any(String), cost: expect.any(String) }),
+    filesRead: expect.any(Array), filesChanged: expect.any(Array), patchAvailable: expect.any(Boolean), testsStarted: expect.any(Number), testsCompleted: expect.any(Number), outcome: expect.any(String), stopReason: expect.any(String), lastCompletedStage: expect.any(String), nextSafeAction: expect.any(String),
+  }));
+  for (const field of ["model", "inputTokens", "cachedTokens", "outputTokens", "reasoningTokens", "billedTokens", "cost", "checkpointId", "failureClassification"]) expect(receipt).toHaveProperty(field);
+}
 async function eventually(check: () => Promise<boolean>): Promise<void> { for (let attempt = 0; attempt < 1_500; attempt += 1) { if (await check()) return; await new Promise((done) => setTimeout(done, 10)); } throw new Error("timed out"); }
 async function submit(base: string, taskId: string, repository = process.cwd()): Promise<void> { const response = await fetch(`${base}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: taskSpec(taskId, repository), authority: { implementation: true } }) }); if (response.status !== 202) throw new Error(`Task submission failed (${response.status}): ${JSON.stringify(await json(response))}`); }
 function taskSpec(taskId: string, repository = process.cwd()): Record<string, unknown> { return { schemaVersion: 2, taskId, task: { text: "Synthetic lifecycle", goal: "Exercise control plane", acceptanceCriteria: ["formal result"] }, target: { repository, workingDirectory: "." }, execution: { mode: "validation" }, authority: { profile: "read-only", allowProviderCalls: false }, validation: { mode: "explicit", commands: ["git status --short"] }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }

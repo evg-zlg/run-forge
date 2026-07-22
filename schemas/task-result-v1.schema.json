@@ -7,7 +7,10 @@
   "allOf": [
     {
       "if": { "required": ["actualExecutorMode"], "properties": { "actualExecutorMode": { "const": "implementation" } } },
-      "then": { "required": ["receipt"] }
+      "then": {
+        "required": ["receipt"],
+        "properties": { "receipt": { "$ref": "#/$defs/implementationReceipt" } }
+      }
     }
   ],
   "anyOf": [

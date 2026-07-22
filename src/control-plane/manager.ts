@@ -208,7 +208,7 @@ export class ControlPlaneManager {
   private async heartbeat(id: string, executionId: string): Promise<void> { await this.withLock(id, async () => { const worker = this.active.get(id); if (!worker || worker.executionId !== executionId || worker.cancelled) return; const task = await this.readTask(id); if (!["running", "continuing"].includes(task.status) || !this.executionIsCurrent(task, executionId)) return; const now = new Date().toISOString(); task.updatedAt = now; task.progress.updatedAt = now; task.progress.lastHeartbeatAt = now; task.progress.workerStatus = "active"; task.progress.summary = `${task.progress.operation} worker active`; await this.store.saveTask(task); const last = this.journalHeartbeats.get(id) ?? 0; if (Date.now() - last >= 30_000) { await this.store.appendEvent(id, { at: now, type: "heartbeat", detail: task.progress.phase, executionId }); this.journalHeartbeats.set(id, Date.now()); } }); }
   private async updateProgress(id: string, executionId: string, phase: string, detail: string): Promise<void> { await this.withLock(id, async () => { const task = await this.readTask(id); if (!this.executionIsCurrent(task, executionId)) return; const now = new Date().toISOString(); task.progress = { ...task.progress, phase, updatedAt: now, lastHeartbeatAt: now, summary: detail, diagnostic: null }; task.updatedAt = now; await this.persist(task, "phase_started", `${phase}: ${detail}`); }); }
   private async refreshFromResult(task: ControlTaskRecord, executionId: string): Promise<void> { const rawResult = await this.store.readResult(task); if (!rawResult) return this.failTask(task.id, executionId, new Error("RunForge execution finished without results.json.")); const result = task.executionAgreement ? settleAcceptedAgreement(rawResult, task.executionAgreement) : rawResult; const status = String(result.status ?? "failed"); const successful = ["completed", "workflow_completed", "runforge_scope_completed", "awaiting_external_session"].includes(status); const gate = object(result.ownerGate); task.status = gate.required === true || status === "awaiting_owner_decision" || status === "awaiting_owner" || status === "blocked" ? "awaiting_owner_decision" : successful ? "completed" : "failed"; task.ownerGate = { required: gate.required === true, status: String(gate.status ?? "unknown"), ...(typeof gate.reason === "string" ? { reason: gate.reason } : {}) }; if (task.status === "awaiting_owner_decision") await this.ensureContinuationSnapshot(task); if (task.status === "completed" && task.continuation.decisionId) task.continuation.state = "consumed"; if (task.status === "completed" && task.publicationRequested === "draft-pr") task.publicationGate = { required: true, status: "awaiting_owner_decision", reason: "Remote publication requires a separate decision." }; task.finishedAt = new Date().toISOString(); task.updatedAt = task.finishedAt; task.progress = { ...task.progress, updatedAt: task.updatedAt, lastHeartbeatAt: task.updatedAt, workerStatus: "finished", summary: `Task ${task.status}.`, diagnostic: "Worker completed and generation-matched results.json was accepted." }; task.progress.agreement = projectAgreementLifecycle(task, result); this.finishAttempt(task, task.status === "completed" ? "completed" : task.status === "failed" ? "failed" : "completed"); if (task.execution.lease) task.execution.lease.state = "finished"; await this.store.writePublishedResult(task.id, executionId, result); await this.persist(task, task.status === "completed" ? "task_completed" : task.status === "awaiting_owner_decision" ? "owner_gate_created" : "task_failed", task.status); }
-  private async failTask(id: string, executionId: string, error: unknown): Promise<void> { const task = await this.readTask(id); if (!this.executionIsCurrent(task, executionId)) return; task.status = "failed"; task.error = safeMessage(error); task.finishedAt = new Date().toISOString(); task.updatedAt = task.finishedAt; task.progress = { ...task.progress, updatedAt: task.updatedAt, workerStatus: "failed", diagnostic: task.error, summary: "Worker failed." }; task.recovery = { reason: "worker_failed", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, originalExecutionId: executionId, actions: ["start_new_task", "cancel"], retryAvailable: false, cleanupStatus: "completed" }; this.finishAttempt(task, "failed"); if (task.execution.lease) task.execution.lease.state = "finished"; await this.store.writePublishedResult(task.id, executionId, { schemaVersion: 1, taskId: task.id, status: "failed", lastCompletedPhase: task.progress.phase, error: task.error, execution: { id: executionId, attempt: task.progress.attempt, operation: task.progress.operation }, artifacts: { root: task.artifactRoot }, recovery: task.recovery, safetyAssertions: { successNotInferred: true, lateWorkerResultIgnored: true }, nextAction: "Inspect the failed attempt evidence and start a new task." }); await this.persist(task, "task_failed", task.error); }
+  private async failTask(id: string, executionId: string, error: unknown): Promise<void> { const task = await this.readTask(id); if (!this.executionIsCurrent(task, executionId)) return; task.status = "failed"; task.error = safeMessage(error); task.finishedAt = new Date().toISOString(); task.updatedAt = task.finishedAt; task.progress = { ...task.progress, updatedAt: task.updatedAt, workerStatus: "failed", diagnostic: task.error, summary: "Worker failed." }; task.recovery = { reason: "worker_failed", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, originalExecutionId: executionId, actions: ["start_new_task", "cancel"], retryAvailable: false, cleanupStatus: "completed" }; this.finishAttempt(task, "failed"); if (task.execution.lease) task.execution.lease.state = "finished"; const receipt = await this.reconstructTerminalReceipt(task); await this.store.writePublishedResult(task.id, executionId, { schemaVersion: 1, taskId: task.id, status: "failed", actualExecutorMode: "implementation", receipt, lastCompletedPhase: task.progress.phase, error: task.error, execution: { id: executionId, attempt: task.progress.attempt, operation: task.progress.operation }, artifacts: { root: task.artifactRoot }, recovery: task.recovery, safetyAssertions: { successNotInferred: true, lateWorkerResultIgnored: true }, nextAction: "Inspect the failed attempt evidence and start a new task." }); await this.persist(task, "task_failed", task.error); }
   private async interrupt(task: ControlTaskRecord, reason: string, actions: string[]): Promise<void> {
     const now = new Date(); const executionId = task.progress.executionId; const live = this.liveWorker(task); const pending = Boolean(live && !this.settledExecutions.has(executionId ?? ""));
     if (live) { live.cancelled = true; live.controller.abort(); this.active.delete(task.id); }
@@ -243,8 +243,9 @@ export class ControlPlaneManager {
     const artifacts = await readdir(task.artifactRoot, { recursive: true }).catch(() => [] as string[]); const checkpoints = await listDurableCheckpoints(task.artifactRoot);
     const spec = await this.store.readSpec(task.id); const criteria = object(object(spec).task).acceptanceCriteria;
     const incomplete = Array.isArray(criteria) ? criteria.map(String) : ["Execution did not reach a trusted terminal result."];
+    const receipt = await this.reconstructTerminalReceipt(task, checkpoints);
     await this.store.writePublishedResult(task.id, executionId, {
-      schemaVersion: 1, taskId: task.id, status: "interrupted", lastCompletedPhase: task.recovery?.lastPhase ?? task.progress.phase,
+      schemaVersion: 1, taskId: task.id, status: "interrupted", actualExecutorMode: "implementation", receipt, lastCompletedPhase: task.recovery?.lastPhase ?? task.progress.phase,
       interruption: { reason: task.recovery?.reason, originalExecutionId: executionId, lastHeartbeatAt: task.progress.lastHeartbeatAt, deadlineAt: task.progress.deadlineAt },
       execution: { id: executionId, attempt: task.progress.attempt, operation: task.progress.operation },
       targetMutation: { status: "not_inferred", assertion: "Interrupted execution never implies that target mutations completed." },
@@ -252,6 +253,48 @@ export class ControlPlaneManager {
       safetyAssertions: { staleLeaseRevoked: task.execution.lease?.state !== "active", lateWorkerResultIgnored: true, attemptArtifactsIsolated: task.execution.attempts.filter((attempt) => attempt.artifactRoot === task.artifactRoot).length === 1, providerCallsInferred: false },
       nextAction: task.recovery?.retryAvailable ? task.recovery.operation : { poll: `/v1/tasks/${task.id}`, retryAfter: task.recovery?.retryAfter }
     });
+  }
+  private async reconstructTerminalReceipt(task: ControlTaskRecord, knownCheckpoints?: Awaited<ReturnType<typeof listDurableCheckpoints>>): Promise<Record<string, unknown>> {
+    const persisted = object(await this.store.readResult(task)); const previous = object(persisted.receipt);
+    const checkpoints = knownCheckpoints ?? await listDurableCheckpoints(task.artifactRoot); const checkpoint = checkpoints.at(-1) ?? null;
+    const checkpointChanged = checkpoint ? await readJsonArray(join(checkpoint.path, "changed-files.json")) : [];
+    const checkpointValidation = checkpoint ? await readJsonArray(join(checkpoint.path, "validation.json")) : [];
+    const checkpointUsage = checkpoint ? await readJsonObject(join(checkpoint.path, "usage.json")) : {};
+    const checkpointExecutor = checkpoint ? await readJsonObject(join(checkpoint.path, "executor.json")) : {};
+    const persistedValidation = Array.isArray(persisted.validation) ? persisted.validation : Array.isArray(persisted.validations) ? persisted.validations : [];
+    const validation = checkpointValidation.length ? checkpointValidation : persistedValidation;
+    const filesChanged = uniqueStrings(checkpointChanged.length ? checkpointChanged : previous.filesChanged);
+    const filesRead = uniqueStrings(previous.filesRead ?? checkpointExecutor.filesRead);
+    const patchAvailable = Boolean(checkpoint || previous.patchAvailable === true);
+    const testsStarted = nonnegativeInteger(previous.testsStarted) ?? validation.length;
+    const testsCompleted = nonnegativeInteger(previous.testsCompleted) ?? validation.filter((item) => validationCompleted(item)).length;
+    const attempt = task.execution.attempts.find((item) => item.executionId === (task.progress.executionId ?? task.recovery?.originalExecutionId)) ?? task.execution.attempts.at(-1);
+    const lastRetry = task.execution.lastRetry;
+    let queuedAt = task.createdAt;
+    if (lastRetry && lastRetry.executionId === attempt?.executionId) queuedAt = lastRetry.requestedAt;
+    const startedAt = attempt?.startedAt ?? task.progress.startedAt ?? queuedAt; const finishedAt = attempt?.finishedAt ?? task.finishedAt ?? task.updatedAt;
+    const queueDuration = duration(queuedAt, startedAt); const providerExecutionDuration = duration(startedAt, finishedAt); const totalDuration = duration(queuedAt, finishedAt);
+    const reason = task.recovery?.cleanupStatus === "detached" ? "worker_cleanup_failed" : task.recovery?.reason ?? "worker_failed";
+    const persistedStop = receiptOutcome(previous.stopReason); const stopReason = persistedStop ?? terminalStopReason(reason, task.progress.phase);
+    const checkpointWithoutValidation = Boolean(checkpoint && testsStarted === 0);
+    const outcome = checkpoint ? "checkpoint_available" : filesChanged.length || patchAvailable ? "validation_not_started" : "no_progress";
+    const failureClassification = checkpointWithoutValidation ? "validation_not_started" : stopReason === "cancellation" ? null : stopReason;
+    const metric = (name: string): number | null => nonnegativeNumber(previous[name] ?? checkpointUsage[name]);
+    const availability = (name: string, value: number | null): string => metricAvailability(object(previous.availability)[name]) ?? (value === null ? "not_reported" : "reported");
+    const inputTokens = metric("inputTokens"); const cachedTokens = metric("cachedTokens"); const outputTokens = metric("outputTokens"); const reasoningTokens = metric("reasoningTokens"); const billedTokens = metric("billedTokens"); const cost = metric("cost");
+    const calls = nonnegativeInteger(previous.calls ?? checkpointExecutor.calls ?? (Array.isArray(persisted.providerCalls) ? persisted.providerCalls.length : undefined)) ?? 0;
+    const phase = checkpoint?.manifest.kind ?? (previous.phase === "repair" ? "repair" : "implementation");
+    const lastCompletedStage = testsCompleted ? "validation" : checkpoint ? "checkpoint" : filesChanged.length || patchAvailable ? "implementation" : calls ? "provider" : "queued";
+    const nextSafeAction = checkpoint ? "review_checkpoint" : stopReason === "deadline_exceeded" ? "retry_with_bounded_deadline" : stopReason === "cancellation" ? "preserve_cancellation" : stopReason === "infrastructure_failure" ? "repair_infrastructure_then_retry" : "inspect_diagnostics_then_retry";
+    const selection = task.selection;
+    return {
+      queueDuration, providerExecutionDuration, totalDuration,
+      provider: stringEvidence(previous.provider, checkpointExecutor.provider, selection?.provider, selection?.selectedExecutor, "control-plane"), model: nullableString(previous.model ?? checkpointExecutor.model ?? selection?.model), phase, calls,
+      inputTokens, cachedTokens, outputTokens, reasoningTokens, billedTokens, cost,
+      availability: { queueDuration: "derived", inputTokens: availability("inputTokens", inputTokens), cachedTokens: availability("cachedTokens", cachedTokens), outputTokens: availability("outputTokens", outputTokens), reasoningTokens: availability("reasoningTokens", reasoningTokens), billedTokens: availability("billedTokens", billedTokens), cost: availability("cost", cost) },
+      filesRead, filesChanged, patchAvailable, checkpointId: checkpoint?.id ?? nullableString(previous.checkpointId), testsStarted, testsCompleted,
+      outcome, stopReason, failureClassification, lastCompletedStage, nextSafeAction
+    };
   }
   private async ensureContinuationSnapshot(task: ControlTaskRecord): Promise<void> {
     if (task.continuation.state === "available") {
@@ -323,6 +366,23 @@ function nativeMatchesContinuationContext(native: Record<string, unknown>, bindi
 }
 function decisionRecord(decisionId: string, kind: "owner" | "publication", decision: string, response: Record<string, unknown>): DecisionRecord { return { decisionId, kind, decision, response, createdAt: new Date().toISOString() }; }
 function safeMessage(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return redactPublicValue(message).slice(0, 500); }
+function duration(from: string | null | undefined, to: string | null | undefined): number { const start = from ? Date.parse(from) : NaN; const end = to ? Date.parse(to) : NaN; return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.round(end - start)) : 0; }
+function nonnegativeNumber(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null; }
+function nonnegativeInteger(value: unknown): number | null { return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null; }
+function nullableString(value: unknown): string | null { return typeof value === "string" && value.trim() ? value : null; }
+function stringEvidence(...values: unknown[]): string { return values.find((value): value is string => typeof value === "string" && Boolean(value.trim())) ?? "control-plane"; }
+function uniqueStrings(value: unknown): string[] { return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())))].sort() : []; }
+function metricAvailability(value: unknown): "reported" | "partially_reported" | "not_reported" | "derived" | null { return ["reported", "partially_reported", "not_reported", "derived"].includes(String(value)) ? value as "reported" | "partially_reported" | "not_reported" | "derived" : null; }
+function receiptOutcome(value: unknown): string | null { return ["completed", "no_progress", "budget_exhausted", "deadline_exceeded", "provider_failed", "implementation_failed", "checkpoint_available", "validation_not_started", "cancellation", "infrastructure_failure"].includes(String(value)) ? String(value) : null; }
+function terminalStopReason(reason: string, phase: string): string {
+  if (reason === "execution_deadline_exceeded") return "deadline_exceeded";
+  if (reason === "cancelled_by_operator") return "cancellation";
+  if (reason.includes("provider") || phase.toLowerCase().includes("provider")) return "provider_failed";
+  return "infrastructure_failure";
+}
+function validationCompleted(value: unknown): boolean { const status = String(object(value).status ?? object(value).result ?? "").toLowerCase(); return Boolean(status) && !["running", "started", "pending", "not_started", "not_run", "skipped"].includes(status); }
+async function readJsonArray(path: string): Promise<unknown[]> { try { const value = JSON.parse(await readFile(path, "utf8")); return Array.isArray(value) ? value : []; } catch { return []; } }
+async function readJsonObject(path: string): Promise<Record<string, unknown>> { try { return object(JSON.parse(await readFile(path, "utf8"))); } catch { return {}; } }
 function preflightError(code: string, message: string, spec: Awaited<ReturnType<typeof loadTaskSpecV2>>, authority: ControlAuthority): ControlPlaneError {
   return new ControlPlaneError(403, code, message, {
     requestedMode: spec.execution.mode,
