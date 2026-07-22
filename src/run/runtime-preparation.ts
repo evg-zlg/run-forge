@@ -133,12 +133,14 @@ export function preparationDockerArgs(workspace: string, image: string, containe
     "--cpus", "2",
     "--user", "0",
     "--env", `COREPACK_HOME=${dockerWorkspace.workdir}/.runforge-corepack`,
+    "--env", `RUNFORGE_EXECUTION_ROOT=${dockerWorkspace.workdir}`,
+    "--env", "npm_config_store_dir=/workspace/.runforge-pnpm-store",
     "--mount", `type=bind,src=${dockerWorkspace.root},dst=${mountDestination}`,
     "--workdir", dockerWorkspace.workdir,
     "--entrypoint", "/bin/sh",
     image,
     "-lc",
-    `${command} && mkdir -p /workspace/.runforge-tmp && chmod -R a+rwX /workspace`
+    `${command} && mkdir -p "$RUNFORGE_EXECUTION_ROOT/.runforge-corepack" /workspace/.runforge-tmp /workspace/.runforge-pnpm-store && find /workspace -type d -name node_modules -prune -exec chmod -R a+rwX {} + && chmod -R a+rwX "$RUNFORGE_EXECUTION_ROOT/.runforge-corepack" /workspace/.runforge-tmp /workspace/.runforge-pnpm-store`
   ];
 }
 
