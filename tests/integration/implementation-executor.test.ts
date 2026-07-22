@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
 import { discoverImplementationExecutors } from "../../src/implementation/executor.js";
 import { executionPhaseOwner } from "../../src/product/execution-agreement.js";
@@ -19,6 +19,15 @@ const previousCommand = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
 const runtimeEnvKeys = ["RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES", "RUNFORGE_EARLY_PROGRESS_DEADLINE_MS"] as const;
 const previousRuntimeEnv = Object.fromEntries(runtimeEnvKeys.map((key) => [key, process.env[key]]));
 
+const capableProvider = (overrides: Record<string, unknown> = {}) => JSON.stringify({
+  maxInputContextTokens: 200_000, maxOutputTokens: 200_000, maxReasoningTokens: 200_000,
+  maxWallClockMs: 300_000, maxCallsPerPhase: 3, maxCostUsd: 10,
+  guarantees: { inputTokens: true, outputTokens: true, reasoningTokens: true, wallClock: true, calls: true, cost: true },
+  ...overrides,
+});
+
+beforeEach(() => { process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider(); });
+
 afterEach(() => {
   if (previousCommand === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousCommand;
   for (const key of runtimeEnvKeys) { const value = previousRuntimeEnv[key]; if (value === undefined) delete process.env[key]; else process.env[key] = value; }
@@ -29,8 +38,27 @@ describe("implementation executor", () => {
     const root = await mkdtemp(join(tmpdir(), "runforge-cap-rejection-")); const marker = join(root, "invoked");
     const agent = await makeAgent(root, [`import { writeFileSync } from "node:fs";`, `writeFileSync(${JSON.stringify(marker)}, "called");`]);
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
-    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ guarantees: { inputTokens: true, outputTokens: false, reasoningTokens: true, wallClock: true, calls: true } });
+    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider({ guarantees: { inputTokens: true, outputTokens: false, reasoningTokens: true, wallClock: true, calls: true, cost: true } });
     await expect(execute(await repository(), "EXECUTOR-CAP-REJECT-1", "fix", ["node -e \"process.exit(0)\""])).rejects.toThrow(/mandatory.*output/i);
+    await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects an unqualified custom adapter before invocation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-unqualified-provider-")); const marker = join(root, "invoked");
+    const agent = await makeAgent(root, [`import { writeFileSync } from "node:fs";`, `writeFileSync(${JSON.stringify(marker)}, "called");`]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    delete process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES;
+    await expect(execute(await repository(), "EXECUTOR-UNQUALIFIED-1", "fix", ["node -e \"process.exit(0)\""])).rejects.toThrow(/mandatory.*input.*output.*reasoning.*wall-clock.*call/i);
+    await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects direct Codex even when configuration overclaims unenforceable guarantees", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-direct-codex-")); const marker = join(root, "provider-invoked"); const codex = join(root, "codex");
+    await writeFile(codex, `#!/bin/sh\nif [ "$1" = "login" ] && [ "$2" = "status" ]; then exit 0; fi\nprintf invoked > ${JSON.stringify(marker)}\nexit 0\n`);
+    await exec("chmod", ["+x", codex]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = codex;
+    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider();
+    await expect(execute(await repository(), "EXECUTOR-DIRECT-CODEX-1", "fix", ["node -e \"process.exit(0)\""])).rejects.toThrow(/mandatory.*input.*output.*reasoning/i);
     await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   });
 
@@ -43,12 +71,25 @@ describe("implementation executor", () => {
       `console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 20, output_tokens: 5, reasoning_tokens: 2, cost_usd: 0.01 } }));`,
     ]);
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
-    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ maxInputContextTokens: 80 });
-    const result = await execute(await repository(), "EXECUTOR-CONTEXT-1", `bounded task ${"oversized-context ".repeat(400)}`, ["node -e \"process.exit(0)\""], [], (value) => { value.discovery = { profile: "small-scope", maxFiles: 3, maxBytes: 300000, maxTokens: 6000, explicitFiles: ["calculator.js"], stopCondition: "stop" }; value.execution.maxCallsPerPhase = 4; });
+    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider({ maxInputContextTokens: 80 });
+    const result = await execute(await repository(), "EXECUTOR-CONTEXT-1", `bounded task ${"oversized-context ".repeat(400)}`, ["node -e \"process.exit(0)\""], [], (value) => { value.discovery = { profile: "small-scope", maxFiles: 3, maxBytes: 300000, maxTokens: 6000, explicitFiles: ["calculator.js"], stopCondition: "stop" }; value.execution.requestedProfile = "fast"; value.execution.maxCallsPerPhase = 4; value.execution.earlyProgressDeadlineMs = 60_000; });
     const call = result.providerCalls[0];
-    expect(call).toMatchObject({ executionEnvelope: { model: null, limits: { maxInputContextTokens: 80 } } });
+    expect(call).toMatchObject({ executionEnvelope: { profile: "fast", classification: "bounded-small", model: null, limits: { maxInputContextTokens: 80, earlyProgressDeadlineMs: 60_000 } } });
     expect(call).not.toHaveProperty("stdout"); expect(call).not.toHaveProperty("stderr");
     expectReceipt(result, { outcome: "completed", patchAvailable: true, inputTokens: 20, outputTokens: 5, reasoningTokens: 2, cost: 0.01 });
+  });
+
+  it("uses the normalized TaskSpec early-progress deadline for the actual gate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-task-spec-early-gate-")); const agent = await makeAgent(root, [
+      `console.log(JSON.stringify({ type: "usage", usage: { input_tokens: 7, output_tokens: 3, cost_usd: 0.001 } }));`,
+      `setInterval(() => {}, 1000);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "40";
+    const result = await execute(await repository(), "EXECUTOR-TASK-SPEC-EARLY-1", "fix", ["node -e \"process.exit(0)\""] , [], (value) => { value.execution.earlyProgressDeadlineMs = 60_000; });
+    expect(result.providerCalls[0]).toMatchObject({ durationMs: expect.any(Number), noProgress: true, tokenUsage: 10, executionEnvelope: { limits: { earlyProgressDeadlineMs: 40 } } });
+    expect(result.providerCalls[0].durationMs).toBeLessThan(500);
+    expectReceipt(result, { outcome: "no_progress", inputTokens: 7, outputTokens: 3, cost: 0.001 });
   });
 
   it("fast-fails no-progress once without a hidden same-profile retry", async () => {
@@ -122,7 +163,7 @@ describe("implementation executor", () => {
       `console.log(JSON.stringify({ type: "partial_patch", file: "calculator.js", message: "partial patch ready" }));`,
       `setInterval(() => {}, 1000);`,
     ]);
-    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500"; process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ maxWallClockMs: 200 });
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500"; process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider({ maxWallClockMs: 200 });
     const result = await execute(await repository(), "EXECUTOR-PARTIAL-TIMEOUT-1", "fix", ["node -e \"process.exit(0)\""]);
     expect(result.providerCalls).toHaveLength(1); expect(result.providerCalls[0]).toMatchObject({ timedOut: true });
     expect(result.artifact.checkpoints.length).toBeGreaterThanOrEqual(2);
@@ -136,7 +177,7 @@ describe("implementation executor", () => {
       `console.log(JSON.stringify({ type: "test", status: "red", file: "calculator.test.js", message: "RED before timeout" }));`,
       `setInterval(() => {}, 1000);`,
     ]);
-    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500"; process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ maxWallClockMs: 200 });
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500"; process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider({ maxWallClockMs: 200 });
     const result = await execute(await repository(), "EXECUTOR-EMPTY-TIMEOUT-1", "fix", ["node -e \"process.exit(0)\""]);
     expectReceipt(result, { outcome: "deadline_exceeded", failureClassification: "validation_not_started", patchAvailable: false, checkpointId: null, testsCompleted: 0 });
   });

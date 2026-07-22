@@ -35,8 +35,8 @@ type ProviderCapabilities = {
   guarantees: { inputTokens: boolean; outputTokens: boolean; reasoningTokens: boolean; wallClock: boolean; calls: boolean; cost: boolean };
 };
 type ExecutionEnvelope = {
-  profile: string; model: string | null; taskId: string; phase: "implementation" | "repair"; call: number;
-  limits: { maxInputContextTokens: number; maxOutputTokens: number; maxReasoningTokens: number; maxWallClockMs: number; maxCallsPerPhase: number; maxPhaseTokens: number; maxTaskTokens: number; maxCostUsd: number | null };
+  profile: string; classification: string; model: string | null; taskId: string; phase: "implementation" | "repair"; call: number;
+  limits: { maxInputContextTokens: number; maxOutputTokens: number; maxReasoningTokens: number; maxWallClockMs: number; earlyProgressDeadlineMs: number; maxCallsPerPhase: number; maxPhaseTokens: number; maxTaskTokens: number; maxCostUsd: number | null };
   remaining: { phaseTokens: number; taskTokens: number; taskTimeMs: number; costUsd: number | null };
 };
 type ProgressSignals = { filesInspected: string[]; filesChanged: string[]; exactDiagnosis: string | null; redTest: string | null; candidateDiff: string | null; partialPatch: string | null; tests: string[]; lastMeaningfulOutput: string | null; usage: { tokens: number | null; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; costUsd: number | null } };
@@ -97,7 +97,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   const executor = selection.selected;
   const executorCommand = executor.command!;
   const providerCapability = configuredProviderCapabilities(executor);
-  assertMandatoryProviderCaps(providerCapability, request);
+  assertMandatoryProviderCaps(providerCapability);
   const sourceBefore = await git(request.targetRepository, ["rev-parse", "HEAD"]);
   if (sourceBefore.trim() !== request.spec.target.expectedSha) throw new Error(`target_sha_mismatch: expected ${request.spec.target.expectedSha}, current ${sourceBefore.trim()}`);
   const sourceStatusBefore = await git(request.targetRepository, ["status", "--porcelain=v1"]);
@@ -311,6 +311,8 @@ function configuredProviderCapabilities(executor: ImplementationExecutorCapabili
   let configured: Record<string, any> = {};
   try { configured = JSON.parse(process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES ?? "{}"); } catch { throw new Error("invalid_provider_capabilities_json"); }
   const guarantees = configured.guarantees ?? {};
+  const command = splitCommand(executor.command ?? "")[0] ?? "";
+  const directCodex = /(?:^|\/)codex$/.test(command);
   return {
     maxInputContextTokens: optionalPositive(configured.maxInputContextTokens) ?? executor.maxLimits.providerTokens,
     maxOutputTokens: optionalPositive(configured.maxOutputTokens) ?? executor.maxLimits.providerTokens,
@@ -318,21 +320,37 @@ function configuredProviderCapabilities(executor: ImplementationExecutorCapabili
     maxWallClockMs: optionalPositive(configured.maxWallClockMs) ?? executor.maxLimits.timeoutMs,
     maxCallsPerPhase: optionalPositive(configured.maxCallsPerPhase) ?? Math.max(1, executor.maxLimits.repairIterations + 1),
     maxCostUsd: optionalPositive(configured.maxCostUsd),
-    guarantees: { inputTokens: guarantees.inputTokens !== false, outputTokens: guarantees.outputTokens !== false, reasoningTokens: guarantees.reasoningTokens !== false, wallClock: guarantees.wallClock !== false, calls: guarantees.calls !== false, cost: guarantees.cost !== false },
+    guarantees: {
+      inputTokens: !directCodex && guarantees.inputTokens === true,
+      outputTokens: !directCodex && guarantees.outputTokens === true,
+      reasoningTokens: !directCodex && guarantees.reasoningTokens === true,
+      wallClock: guarantees.wallClock === true,
+      calls: guarantees.calls === true,
+      cost: !directCodex && guarantees.cost === true,
+    },
   };
 }
-function assertMandatoryProviderCaps(capability: ProviderCapabilities, request: ImplementationExecutorRequest): void {
-  const mandatory: Array<[keyof ProviderCapabilities["guarantees"], string]> = [["inputTokens", "input"], ["outputTokens", "output"], ["reasoningTokens", "reasoning"], ["wallClock", "wall-clock"], ["calls", "call"]];
-  if (optionalPositive((request.spec.execution as unknown as Record<string, unknown>).maxCostUsd) !== null) mandatory.push(["cost", "cost"]);
+function assertMandatoryProviderCaps(capability: ProviderCapabilities): void {
+  const mandatory: Array<[keyof ProviderCapabilities["guarantees"], string]> = [["inputTokens", "input"], ["outputTokens", "output"], ["reasoningTokens", "reasoning"], ["wallClock", "wall-clock"], ["calls", "call"], ["cost", "cost"]];
   const missing = mandatory.filter(([key]) => !capability.guarantees[key]).map(([, name]) => name);
   if (missing.length) throw new Error(`provider_capability_rejected: mandatory ${missing.join(", ")} limits are not guaranteed`);
 }
 function deriveExecutionEnvelope(request: ImplementationExecutorRequest, executor: ImplementationExecutorCapability, capability: ProviderCapabilities, phase: "implementation" | "repair", call: number, phaseTokens: number, taskTokens: number, taskTimeMs: number, remainingCostUsd: number | null): ExecutionEnvelope {
   const execution = request.spec.execution as unknown as Record<string, unknown>;
+  const plan = execution.plan && typeof execution.plan === "object" ? execution.plan as Record<string, unknown> : {};
+  const profile = normalizedPlanValue(plan, "profile");
+  const classification = normalizedPlanValue(plan, "classification");
   const output = Math.min(optionalPositive(execution.maxOutputTokens) ?? phaseTokens, capability.maxOutputTokens, phaseTokens, taskTokens);
   const reasoning = Math.min(optionalPositive(execution.maxReasoningTokens) ?? output, capability.maxReasoningTokens, output);
-  return { profile: request.spec.discovery.profile, model: executor.model, taskId: request.spec.taskId, phase, call, limits: { maxInputContextTokens: Math.min(request.spec.discovery.maxTokens, capability.maxInputContextTokens), maxOutputTokens: output, maxReasoningTokens: reasoning, maxWallClockMs: Math.min(request.spec.execution.timeoutMs, capability.maxWallClockMs, taskTimeMs), maxCallsPerPhase: Math.min(optionalPositive(execution.maxCallsPerPhase) ?? 1, capability.maxCallsPerPhase), maxPhaseTokens: request.spec.execution.phaseBudgets[phase], maxTaskTokens: request.spec.execution.maxProviderTokens, maxCostUsd: remainingCostUsd === null ? null : Math.min(remainingCostUsd, capability.maxCostUsd ?? remainingCostUsd) }, remaining: { phaseTokens, taskTokens, taskTimeMs, costUsd: remainingCostUsd } };
+  const maxWallClockMs = Math.min(request.spec.execution.timeoutMs, capability.maxWallClockMs, taskTimeMs);
+  const taskSpecEarly = optionalPositive(execution.earlyProgressDeadlineMs) ?? maxWallClockMs;
+  const testOverride = process.env.NODE_ENV === "test" || process.env.VITEST
+    ? optionalPositive(process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS)
+    : null;
+  const earlyProgressDeadlineMs = Math.min(taskSpecEarly, testOverride ?? taskSpecEarly, maxWallClockMs);
+  return { profile, classification, model: executor.model, taskId: request.spec.taskId, phase, call, limits: { maxInputContextTokens: Math.min(optionalPositive(execution.maxInputContextTokens) ?? request.spec.discovery.maxTokens, request.spec.discovery.maxTokens, capability.maxInputContextTokens), maxOutputTokens: output, maxReasoningTokens: reasoning, maxWallClockMs, earlyProgressDeadlineMs, maxCallsPerPhase: Math.min(optionalPositive(execution.maxCallsPerPhase) ?? 1, capability.maxCallsPerPhase), maxPhaseTokens: request.spec.execution.phaseBudgets[phase], maxTaskTokens: request.spec.execution.maxProviderTokens, maxCostUsd: remainingCostUsd === null ? null : Math.min(remainingCostUsd, capability.maxCostUsd ?? remainingCostUsd) }, remaining: { phaseTokens, taskTokens, taskTimeMs, costUsd: remainingCostUsd } };
 }
+function normalizedPlanValue(plan: Record<string, unknown>, key: "profile" | "classification"): string { const value = plan[key]; if (typeof value !== "string" || !value.length) throw new Error(`normalized_execution_plan_missing_${key}`); return value; }
 function truncatePrompt(prompt: string, maxTokens: number): string { const maxChars = Math.max(1, Math.floor(maxTokens * 4)); if (prompt.length <= maxChars) return prompt; const marker = "\n[bounded context truncated]\n"; const head = Math.max(0, Math.floor((maxChars - marker.length) * 0.6)); const tail = Math.max(0, maxChars - marker.length - head); return prompt.slice(0, head) + marker + prompt.slice(-tail); }
 function optionalPositive(value: unknown): number | null { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : null; }
 function numeric(value: unknown): number { return typeof value === "number" && Number.isFinite(value) ? value : 0; }
@@ -361,8 +379,7 @@ async function runAgent(commandText: string, model: string | null, cwd: string, 
     const stop = () => { cancelled = true; child.kill("SIGTERM"); };
     signal?.addEventListener("abort", stop, { once: true });
     const timer = setTimeout(() => { timedOut = true; child.kill("SIGTERM"); setTimeout(() => child.kill("SIGKILL"), 1_000).unref(); }, envelope.limits.maxWallClockMs);
-    const configuredEarly = optionalPositive(process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS) ?? 90_000;
-    const earlyTimer = setTimeout(() => { if (!useful) { noProgress = true; child.kill("SIGTERM"); setTimeout(() => child.kill("SIGKILL"), 1_000).unref(); } }, Math.min(configuredEarly, envelope.limits.maxWallClockMs));
+    const earlyTimer = setTimeout(() => { if (!useful) { noProgress = true; child.kill("SIGTERM"); setTimeout(() => child.kill("SIGKILL"), 1_000).unref(); } }, envelope.limits.earlyProgressDeadlineMs);
     const consume = (line: string) => {
       if (!line.trim()) return;
       let item: Record<string, any>; try { item = JSON.parse(line); } catch { return; }
@@ -399,7 +416,7 @@ async function runAgent(commandText: string, model: string | null, cwd: string, 
     };
     child.stdout?.on("data", (chunk) => { const text = String(chunk); if (Buffer.byteLength(stdout) < 2_000_000) stdout += text; const complete = (pendingLine + text).split(/\r?\n/); pendingLine = complete.pop() ?? ""; for (const line of complete) consume(line); }); child.stderr?.on("data", (chunk) => { if (Buffer.byteLength(stderr) < 2_000_000) stderr += chunk; });
     child.on("error", reject);
-    child.on("close", (exitCode, childSignal) => { clearTimeout(timer); clearTimeout(earlyTimer); if (pendingLine) consume(pendingLine); signal?.removeEventListener("abort", stop); const finishedAt = new Date().toISOString(); const safeStdout = redactProviderOutput(stdout), safeStderr = redactProviderOutput(stderr); const normalizedExit = timedOut || noProgress ? null : exitCode; const failureReason = normalizedExit === 0 ? null : noProgress ? `no_progress: no useful provider signal before ${Math.min(configuredEarly, envelope.limits.maxWallClockMs)}ms.` : timedOut ? `Implementation provider timed out after ${envelope.limits.maxWallClockMs}ms.` : cancelled ? "Implementation provider was cancelled." : safeStdout.trim() || safeStderr.trim() ? `Implementation provider exited with code ${normalizedExit ?? "signal"}.` : "Implementation provider exited non-zero without stdout or stderr."; void progressWork.then(() => Promise.all([writeFile(join(root, stdoutArtifact), safeStdout), writeFile(join(root, stderrArtifact), safeStderr)])).then(() => resolveRun({ startedAt, finishedAt, durationMs: Date.now() - started, exitCode: normalizedExit, signal: childSignal, summary: extractSummary(safeStdout, safeStderr), cancelled, timedOut, noProgress, stdout: safeStdout, stderr: safeStderr, truncation: { stdout: Buffer.byteLength(stdout) >= 2_000_000, stderr: Buffer.byteLength(stderr) >= 2_000_000, limitBytes: 2_000_000 }, failureReason, tokenUsage: signals.usage.tokens ?? extractTokenUsage(safeStdout), costUsd: signals.usage.costUsd, progressSignals: signals, stdoutArtifact, stderrArtifact }), reject); });
+    child.on("close", (exitCode, childSignal) => { clearTimeout(timer); clearTimeout(earlyTimer); if (pendingLine) consume(pendingLine); signal?.removeEventListener("abort", stop); const finishedAt = new Date().toISOString(); const safeStdout = redactProviderOutput(stdout), safeStderr = redactProviderOutput(stderr); const normalizedExit = timedOut || noProgress ? null : exitCode; const failureReason = normalizedExit === 0 ? null : noProgress ? `no_progress: no useful provider signal before ${envelope.limits.earlyProgressDeadlineMs}ms.` : timedOut ? `Implementation provider timed out after ${envelope.limits.maxWallClockMs}ms.` : cancelled ? "Implementation provider was cancelled." : safeStdout.trim() || safeStderr.trim() ? `Implementation provider exited with code ${normalizedExit ?? "signal"}.` : "Implementation provider exited non-zero without stdout or stderr."; void progressWork.then(() => Promise.all([writeFile(join(root, stdoutArtifact), safeStdout), writeFile(join(root, stderrArtifact), safeStderr)])).then(() => resolveRun({ startedAt, finishedAt, durationMs: Date.now() - started, exitCode: normalizedExit, signal: childSignal, summary: extractSummary(safeStdout, safeStderr), cancelled, timedOut, noProgress, stdout: safeStdout, stderr: safeStderr, truncation: { stdout: Buffer.byteLength(stdout) >= 2_000_000, stderr: Buffer.byteLength(stderr) >= 2_000_000, limitBytes: 2_000_000 }, failureReason, tokenUsage: signals.usage.tokens ?? extractTokenUsage(safeStdout), costUsd: signals.usage.costUsd, progressSignals: signals, stdoutArtifact, stderrArtifact }), reject); });
   });
 }
 function exactFileLineDiagnosis(message: string): boolean { return /(?:src|tests?|scripts|schemas|docs|config)\/[\w./-]+:\d+/.test(message) && /\b(?:diagnos|cause|fail(?:s|ed|ure)?|error|expected|actual)\b/i.test(message); }
