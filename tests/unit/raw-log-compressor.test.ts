@@ -36,6 +36,27 @@ describe("raw log compressor", () => {
     expect(result.digest.sources).toEqual(captured!.sources.map(({ redactions: _redactions, ...source }) => source));
   });
 
+  it("accepts direct JSON and one complete fenced JSON digest", async () => {
+    const sources = [{ ref: "x.log", content: "failed" }];
+    const direct = await compressRawLogs({ sources, invoke: async ({ rawDigest }) => response(rawDigest) });
+    const fenced = await compressRawLogs({ sources, invoke: async ({ rawDigest }) => ({ ...response(rawDigest), content: `\`\`\`json\n${JSON.stringify(digest(rawDigest))}\n\`\`\`` }) });
+    expect(fenced.digest).toEqual(direct.digest);
+  });
+
+  it.each([
+    "before\nPAYLOAD",
+    "PAYLOAD\nafter",
+    "before\n```json\nPAYLOAD\n```",
+    "```json\nPAYLOAD\n```\nafter",
+    "```json\nPAYLOAD\n```\n```json\nPAYLOAD\n```",
+  ])("rejects payload extraction from prose or multiple fences", async (template) => {
+    const sources = [{ ref: "x.log", content: "failed" }];
+    await expect(compressRawLogs({
+      sources,
+      invoke: async ({ rawDigest }) => ({ ...response(rawDigest), content: template.replaceAll("PAYLOAD", JSON.stringify(digest(rawDigest))) }),
+    })).rejects.toMatchObject({ code: "invalid_digest", blocksDownstream: true });
+  });
+
   it.each([
     ["missing source", (raw: RawLogDigestV1) => ({ ...digest(raw), sources: [] }), "source_mismatch"],
     ["changed hash", (raw: RawLogDigestV1) => { const value = digest(raw); return { ...value, sources: [{ ...(value.sources as Array<Record<string, unknown>>)[0]!, rawSha256: "0".repeat(64) }] }; }, "source_mismatch"],

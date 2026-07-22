@@ -1,5 +1,11 @@
 {
   "name": "runforge-implementation-fixture",
   "private": true,
-  "scripts": { "test": "node test.js", "lint": "node lint.js", "typecheck": "node typecheck.js" }
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "test": "node -e \"if(process.env.CI!=='true')process.exit(9)\" && node test.js",
+    "lint": "node lint.js",
+    "typecheck": "node -e \"if(process.env.CI!=='true')process.exit(9)\" && node typecheck.js",
+    "build": "node -e \"if(process.env.CI!=='true')process.exit(9)\""
+  }
 }

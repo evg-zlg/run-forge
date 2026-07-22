@@ -149,8 +149,35 @@ function compressionPrompt(rawDigest: RawLogDigestV1): string {
 function parseLogDigest(content: string, raw: RawLogDigestV1, limits: RawLogCompressionLimits): LogDigestV1 {
   if (Buffer.byteLength(content, "utf8") > limits.maxOutputBytes) throw new RawLogCompressionError("output_too_large", `digest exceeds ${limits.maxOutputBytes} bytes`);
   if (scanSecrets(content).status !== "passed") throw new RawLogCompressionError("unsafe_output", "digest contains secret-like material");
-  let value: unknown;
-  try { value = JSON.parse(content); } catch { throw new RawLogCompressionError("invalid_digest", "digest is not strict JSON"); }
+  const candidates = jsonResponseCandidates(content);
+  for (const candidate of candidates) {
+    try {
+      return normalizeLogDigest(JSON.parse(candidate), raw, limits);
+    } catch (error) {
+      if (error instanceof RawLogCompressionError) throw error;
+    }
+  }
+  throw new RawLogCompressionError("invalid_digest", "digest is not strict JSON");
+}
+
+/** Permit only a whole response, optionally wrapped by one complete JSON fence. */
+function jsonResponseCandidates(content: string): string[] {
+  const output = content.trim();
+  const fenced = fencedJsonBody(output);
+  if (fenced !== null) return [fenced];
+  // A fence anywhere else is malformed or surrounded by prose. Do not extract
+  // its interior because that would weaken the raw-log boundary.
+  if (output.includes("```")) return [];
+  return [output];
+}
+
+/** Compatibility for one otherwise exact Markdown JSON fence. */
+function fencedJsonBody(value: string): string | null {
+  const match = /^```(?:json)?[\t ]*\r?\n([\s\S]*?)\r?\n```$/i.exec(value);
+  return match ? match[1]! : null;
+}
+
+function normalizeLogDigest(value: unknown, raw: RawLogDigestV1, limits: RawLogCompressionLimits): LogDigestV1 {
   const root = strictObject(value, ["schemaVersion", "kind", "summary", "failureClass", "diagnostics", "sources"], "digest");
   if (root.schemaVersion !== 1 || root.kind !== "log-digest") throw new RawLogCompressionError("invalid_digest", "digest schemaVersion or kind is invalid");
   const summary = boundedString(root.summary, limits.maxSummaryBytes, "summary", true);

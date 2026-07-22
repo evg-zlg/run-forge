@@ -106,6 +106,26 @@ async function verifiedExecutionRoot(executionRoot: string, target: string, owne
 async function trustedPrivateDirectory(path: string): Promise<boolean> { const canonicalTemp = await realpath(tmpdir()).catch(() => ""), canonical = await realpath(path).catch(() => ""); return Boolean(canonicalTemp && canonical && dirname(canonical) === canonicalTemp && /^runforge-dependencies-[a-z0-9-]+[A-Za-z0-9]+$/.test(canonical.split("/").at(-1) ?? "") && (await lstat(canonical)).isDirectory()); }
 export async function cleanupPreparedExternalWorkspace(workspace: string, workingDirectory = "."): Promise<void> { const executionRoot = resolve(workspace, workingDirectory), manifestPath = join(executionRoot, ".runforge-workspace-link-owner.json"), manifest = await readManifest(manifestPath); if (!manifest) return; const capability = privateDependencyCapabilities.get(manifest.expectedTarget), target = join(executionRoot, "node_modules"), actualTarget = await readlink(target).catch(() => null), canonicalRoot = await realpath(executionRoot).catch(() => ""); if (capability && capability.workspaceRoot === canonicalRoot && capability.manifestPath === manifestPath && capability.taskId === manifest.taskId && linkTargetMatches(target, actualTarget, manifest.expectedTarget) && await trustedPrivateDirectory(manifest.expectedTarget)) { await rm(manifest.expectedTarget, { recursive: true, force: true }); privateDependencyCapabilities.delete(manifest.expectedTarget); } }
 
+/** Paths created by RunForge dependency preparation, relative to the disposable worktree. */
+export async function preparedWorkspaceArtifactPaths(workspace: string, workingDirectory = "."): Promise<string[]> {
+  const executionRoot = resolve(workspace, workingDirectory), manifestPath = join(executionRoot, ".runforge-workspace-link-owner.json"), manifest = await readManifest(manifestPath);
+  const target = join(executionRoot, "node_modules");
+  if (!manifest || manifest.path !== target || !manifest.expectedTarget) return [];
+  const actualTarget = await readlink(target).catch(() => null), capability = privateDependencyCapabilities.get(manifest.expectedTarget), canonicalRoot = await realpath(executionRoot).catch(() => "");
+  if (!capability || capability.workspaceRoot !== canonicalRoot || capability.manifestPath !== manifestPath || capability.taskId !== manifest.taskId || !linkTargetMatches(target, actualTarget, manifest.expectedTarget)) return [];
+  return [relative(workspace, manifestPath), relative(workspace, target)];
+}
+
+/** Remove verified RunForge-only dependency link artifacts before source patch finalization. */
+export async function removePreparedWorkspaceArtifacts(workspace: string, workingDirectory = "."): Promise<void> {
+  const paths = await preparedWorkspaceArtifactPaths(workspace, workingDirectory);
+  if (!paths.length) return;
+  const executionRoot = resolve(workspace, workingDirectory);
+  await cleanupPreparedExternalWorkspace(workspace, workingDirectory);
+  await rm(join(executionRoot, "node_modules"), { recursive: true, force: true });
+  await rm(join(executionRoot, ".runforge-workspace-link-owner.json"), { force: true });
+}
+
 function linkTargetMatches(linkPath: string, actualTarget: string | null, expectedTarget: string): boolean {
   if (!actualTarget) return false;
   if (actualTarget === expectedTarget) return true;

@@ -22,7 +22,7 @@ import { extractTokenUsage, runLocalAgent } from "./local-agent.js"; import { ag
 import { buildContextPlan } from "./bounded-context.js";
 import type { LogCompressionInvoker, LogDigestV1 } from "./raw-log-compressor.js";
 import { gateValidationRawLogs, repairDigestContext, requireRawLogDigest } from "./raw-log-gate.js"; import { selectProviderModel } from "../product/provider-routing.js";
-import { cleanupPreparedExternalWorkspace, prepareUnpreparedExternalWorkspace, WorkspaceSetupError } from "../run/task-run-workspace.js";
+import { cleanupPreparedExternalWorkspace, prepareUnpreparedExternalWorkspace, preparedWorkspaceArtifactPaths, removePreparedWorkspaceArtifacts, WorkspaceSetupError } from "../run/task-run-workspace.js";
 import { localBranchName, localRefExists } from "./executor-git-utils.js";
 const execFileAsync = promisify(execFile);
 const credentialCache = new Map<string, { at: number; ready: boolean }>();
@@ -208,8 +208,9 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       if (call.cancelled) throw new Error("cancelled");
       if (call.exitCode !== 0) { unresolved = [`Coding agent failed with exit ${call.exitCode ?? "signal"}.`]; break; }
       await git(workspace, ["add", "-N", "."]);
-      patch = await git(workspace, ["diff", "--binary", "--no-ext-diff", request.spec.target.expectedSha]);
-      changedFiles = lines(await git(workspace, ["diff", "--name-only", request.spec.target.expectedSha]));
+      const excludedWorkspaceArtifacts = await preparedWorkspaceArtifactPaths(workspace, request.workingDirectory);
+      patch = await gitDiff(workspace, ["--binary", "--no-ext-diff", request.spec.target.expectedSha], excludedWorkspaceArtifacts);
+      changedFiles = lines(await gitDiff(workspace, ["--name-only", request.spec.target.expectedSha], excludedWorkspaceArtifacts));
       if (!changedFiles.length) {
         const ambiguous = /ambiguous|clarif|product decision|cannot determine/i.test(agentSummary);
         status = ambiguous ? "blocked_with_owner_gate" : /no change|required|already (?:correct|fixed)|false positive/i.test(agentSummary) ? "no_change_required" : "failed_with_diagnostics";
@@ -294,6 +295,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
     if (status === "implemented_and_validated" || status === "no_change_required") {
       if (commitOwnedByRunForge) {
         await progress(request, "finalize", "Creating the RunForge-owned local commit and patch package; publication remains on hold.");
+        await removePreparedWorkspaceArtifacts(workspace, request.workingDirectory);
         await git(workspace, ["add", "-A"]);
         await git(workspace, ["-c", "user.name=RunForge Executor", "-c", "user.email=runforge@localhost", "commit", ...(status === "no_change_required" ? ["--allow-empty"] : []), "-m", `RunForge ${request.spec.taskId}`]);
         localCommit = (await git(workspace, ["rev-parse", "HEAD"])).trim();
@@ -333,6 +335,7 @@ async function codexCredentialReady(argv: string[]): Promise<boolean> { const ke
 function splitCommand(value: string): string[] { return value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((part) => part.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2")) ?? []; }
 function safeRuntimeEnv(): NodeJS.ProcessEnv { const keys = ["HOME", "PATH", "SHELL", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "LANG", "LC_ALL", "CODEX_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"]; return Object.fromEntries(keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]!]])); }
 async function git(cwd: string, args: string[]): Promise<string> { return (await execFileAsync("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 })).stdout; }
+async function gitDiff(cwd: string, args: string[], excludedPaths: string[]): Promise<string> { const pathspec = excludedPaths.length ? ["--", ".", ...excludedPaths.map((path) => `:(exclude)${path}`)] : []; return git(cwd, ["diff", ...args, ...pathspec]); }
 function addedPatchLines(patch: string): string { const added: string[] = []; let inHunk = false; for (const line of patch.split(/\r?\n/)) { if (line.startsWith("@@ ")) { inHunk = true; continue; } if (line.startsWith("diff --git ") || line.startsWith("GIT binary patch") || line.startsWith("Binary files ")) { inHunk = false; continue; } if (inHunk && line.startsWith("+")) added.push(line.slice(1)); } return added.join("\n"); }
 function lines(text: string): string[] { return text.split(/\r?\n/).map((item) => item.trim()).filter(Boolean); }
 function isInside(root: string, path: string): boolean { const rel = relative(root, path); return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/")); }
