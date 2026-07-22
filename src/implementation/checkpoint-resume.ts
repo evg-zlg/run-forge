@@ -28,6 +28,7 @@ export async function resumeDurableCheckpoint(input: ResumeContext): Promise<Rec
     const response = await executeResume(input, generation, requestDigest);
     await atomicJson(responsePath, response); await atomicJson(leasePath, { schemaVersion: 1, checkpointId: input.checkpointId, taskId: task.id, generation, requestDigest, state: "finished", responsePath: relative(task.artifactRoot, responsePath), finishedAt: new Date().toISOString() });
     return response;
+  } catch (error) { await rm(leasePath, { force: true }); throw error;
   } finally { await rmdir(lock).catch(() => undefined); }
 }
 
@@ -72,10 +73,10 @@ async function executeResume(input: ResumeContext, generation: string, requestDi
 }
 
 async function verifyBindings(input: ResumeContext, manifest: DurableCheckpointManifest): Promise<void> {
-  const { task, request, taskSpec, checkpointId } = input, target = object(taskSpec.target);
-  const manifestAgreement = { ...object(manifest.executionAgreement) }; if (manifestAgreement.id === request.executionAgreementId) delete manifestAgreement.id;
+  const { task, request, taskSpec, checkpointId } = input, target = object(taskSpec.target), manifestAgreement = object(manifest.executionAgreement), taskAgreement = object(task.executionAgreement);
+  const executionAgreementMatch = manifest.executionAgreementId === request.executionAgreementId && String(manifestAgreement.id) === request.executionAgreementId && String(taskAgreement.agreementId) === request.executionAgreementId && ["schemaVersion", "profile"].every((key) => stable(manifestAgreement[key]) === stable(taskAgreement[key]));
   const [requestedArtifacts, taskArtifacts] = await Promise.all([realpath(request.artifactRoot).catch(() => ""), realpath(task.artifactRoot).catch(() => "invalid")]);
-  const checks: Array<[boolean, string]> = [[manifest.taskId === task.id, "taskId"], [manifest.projectId === request.projectId, "projectId"], [requestedArtifacts === taskArtifacts, "artifactRoot"], [manifest.executionAgreementId === request.executionAgreementId, "executionAgreementId"], [manifest.expectedBaseSha === request.expectedBaseSha && target.expectedSha === request.expectedBaseSha, "expectedBaseSha"], [manifest.workspace.workingDirectory === request.workingDirectory && target.workingDirectory === request.workingDirectory, "workingDirectory"], [stable(manifest.authoritySnapshot) === stable(request.authoritySnapshot), "authoritySnapshot"], [stable(manifestAgreement) === stable(task.executionAgreement), "executionAgreement"]];
+  const checks: Array<[boolean, string]> = [[manifest.taskId === task.id, "taskId"], [manifest.projectId === request.projectId, "projectId"], [requestedArtifacts === taskArtifacts, "artifactRoot"], [executionAgreementMatch, "executionAgreement"], [manifest.expectedBaseSha === request.expectedBaseSha && target.expectedSha === request.expectedBaseSha, "expectedBaseSha"], [manifest.workspace.workingDirectory === request.workingDirectory && target.workingDirectory === request.workingDirectory, "workingDirectory"], [stable(manifest.authoritySnapshot) === stable(request.authoritySnapshot), "authoritySnapshot"]];
   const requestedRepo = await import("node:fs/promises").then(({ realpath }) => realpath(request.targetRepository)).catch(() => ""), taskRepo = await import("node:fs/promises").then(({ realpath }) => realpath(String(target.repository))).catch(() => "invalid"); checks.push([requestedRepo === taskRepo && manifest.projectId === String(target.repository), "repositoryIdentity"]);
   const failed = checks.filter(([ok]) => !ok).map(([, name]) => name); if (failed.length) throw wrong(task.id, checkpointId, failed.join(", "));
 }
