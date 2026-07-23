@@ -9,6 +9,7 @@ import {
   factoryVpsProtocolVersion,
   requestFactoryVpsBridge,
 } from "./factory-vps-contract.js";
+import { buildFactoryVpsSourceBundle } from "./factory-vps-source-bundle.js";
 
 type RemoteTask = {
   status?: string;
@@ -56,6 +57,10 @@ export async function runFactoryVpsImplementationExecutor(
     !validationTaskNames.every((name) => /^[A-Za-z0-9._:-]{1,80}$/.test(name))
   )
     throw new Error("factory_vps_validation_policy_invalid");
+  const sourceMode = process.env.RUNFORGE_FACTORY_VPS_SOURCE_MODE ?? "git";
+  if (sourceMode !== "git" && sourceMode !== "bundle") {
+    throw new Error("factory_vps_source_mode_invalid");
+  }
   const deadlineAt = new Date(
     Date.now() + request.spec.execution.timeoutMs,
   ).toISOString();
@@ -67,13 +72,16 @@ export async function runFactoryVpsImplementationExecutor(
     attempt: Math.max(0, request.attempt - 1),
     generation: 0,
     nonce: randomUUID().replaceAll("-", ""),
-    source: {
-      mode: "git",
-      repository,
-      ref: request.spec.target.expectedSha,
-      baseSha: request.spec.target.expectedSha,
-      allowlisted: true,
-    },
+    source:
+      sourceMode === "bundle"
+        ? await buildFactoryVpsSourceBundle(request.targetRepository, repository, request.spec.target.expectedSha)
+        : {
+            mode: "git",
+            repository,
+            ref: request.spec.target.expectedSha,
+            baseSha: request.spec.target.expectedSha,
+            allowlisted: true,
+          },
     taskSpec: {
       mode: "implementation",
       instruction: `${request.spec.task.text}\nGoal: ${request.spec.task.goal}\nAcceptance: ${request.acceptanceCriteria.join("; ")}`,

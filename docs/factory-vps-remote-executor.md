@@ -32,7 +32,9 @@ revision, advertises the four configured VPS provider identities, and confirms
 cancellation, recovery, and usage telemetry. Factory Loop remains healthy and
 listens only on `127.0.0.1:3300`. The host-level command is absent by design:
 the transport invokes `/app/dist/scripts/runforge-factory-vps.js` in the private
-worker container. The remaining roadmap action is synthetic end-to-end dogfood.
+worker container. The remaining roadmap action is a synthetic end-to-end
+dogfood dispatch using the already authorized, VPS-local provider path; no
+deployment, secret, database, or production action remains.
 
 ## Bridge contract
 
