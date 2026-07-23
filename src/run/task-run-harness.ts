@@ -154,7 +154,7 @@ export async function runTaskRunHarness(input: TaskRunInput): Promise<TaskRunRes
     await mkdir(subtaskDir, { recursive: true });
     if (!preparation) {
       await copyTaskRunWorkspace(sourceRoot, workspace, external ? "" : relative(repoRoot, outDir));
-      if (external) await prepareUnpreparedExternalWorkspace(sourceRoot, workspace, workingDirectory);
+      if (external) await prepareUnpreparedExternalWorkspace(sourceRoot, workspace, workingDirectory, { taskId: runId, workspaceId: planned.id });
     }
     await writeFile(join(subtaskDir, "brief.md"), renderBrief(planned, workspace), "utf8");
     const executorRequest = createExecutorRequest({

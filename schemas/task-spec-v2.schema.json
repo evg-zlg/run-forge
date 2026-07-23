@@ -13,7 +13,24 @@
       "properties": { "text": { "type": "string", "minLength": 1 }, "goal": { "type": "string", "minLength": 1 }, "acceptanceCriteria": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } } }
     },
     "target": { "type": "object", "additionalProperties": false, "required": ["repository"], "properties": { "repository": { "type": "string", "minLength": 1 }, "workingDirectory": { "type": "string", "minLength": 1 }, "expectedSha": { "type": "string", "minLength": 7 }, "dirtyPolicy": { "enum": ["require_clean", "allow_known_generated", "snapshot_from_sha", "use_disposable_from_base_sha"] } } },
-    "execution": { "type": "object", "additionalProperties": false, "required": ["mode"], "properties": { "mode": { "enum": ["inspection", "implementation", "validation", "repair"] }, "maxRepairIterations": { "type": "integer", "minimum": 0 }, "timeoutMs": { "type": "integer", "minimum": 1000 }, "maxChangedFiles": { "type": "integer", "minimum": 1 }, "maxPatchBytes": { "type": "integer", "minimum": 1000 }, "maxProviderTokens": { "type": "integer", "minimum": 1000 }, "maxInputContextTokens": { "type": "integer", "minimum": 1000 }, "maxOutputTokens": { "type": "integer", "minimum": 1 }, "maxReasoningTokens": { "type": "integer", "minimum": 0 }, "reasoningSetting": { "enum": ["minimal", "low", "medium", "high"] }, "maxCallsPerPhase": { "type": "integer", "minimum": 1 }, "maxPhaseTokens": { "type": "integer", "minimum": 1 }, "maxTaskTokens": { "type": "integer", "minimum": 1000 }, "earlyProgressDeadlineMs": { "type": "integer", "minimum": 60000 }, "maxCostUsd": { "type": "number", "exclusiveMinimum": 0 }, "requestedProfile": { "enum": ["fast", "standard", "heavy"] }, "complexitySignal": { "const": "heavy" }, "budgetMode": { "enum": ["soft", "hard"] }, "phaseBudgets": { "type": "object", "additionalProperties": false, "properties": { "startup": { "type": "integer", "minimum": 0 }, "analysis": { "type": "integer", "minimum": 0 }, "implementation": { "type": "integer", "minimum": 0 }, "validation": { "type": "integer", "minimum": 0 }, "repair": { "type": "integer", "minimum": 0 }, "review": { "type": "integer", "minimum": 0 }, "publication": { "type": "integer", "minimum": 0 } } }, "plan": { "type": "object", "readOnly": true, "additionalProperties": false, "required": ["classification", "profile", "modelSelection", "expectedDurationMs"], "properties": { "classification": { "enum": ["bounded-small", "bounded-standard", "heavy"] }, "profile": { "enum": ["fast", "standard", "heavy"] }, "modelSelection": { "enum": ["economical", "capable"] }, "expectedDurationMs": { "type": "integer", "minimum": 1 } } } } },
+    "execution": { "type": "object", "additionalProperties": false, "required": ["mode"], "properties": { "mode": { "enum": ["inspection", "implementation", "validation", "repair"] }, "maxRepairIterations": { "type": "integer", "minimum": 0, "maximum": 3 }, "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 1800000 }, "maxChangedFiles": { "type": "integer", "minimum": 1, "maximum": 100 }, "maxPatchBytes": { "type": "integer", "minimum": 1000, "maximum": 5000000 }, "maxProviderTokens": { "type": "integer", "minimum": 1000, "maximum": 200000 }, "budgetMode": { "enum": ["soft", "hard"] }, "phaseBudgets": { "type": "object", "additionalProperties": false, "properties": { "startup": { "type": "integer", "minimum": 0, "maximum": 200000 }, "analysis": { "type": "integer", "minimum": 0, "maximum": 200000 }, "implementation": { "type": "integer", "minimum": 0, "maximum": 200000 }, "validation": { "type": "integer", "minimum": 0, "maximum": 200000 }, "repair": { "type": "integer", "minimum": 0, "maximum": 200000 }, "review": { "type": "integer", "minimum": 0, "maximum": 200000 }, "publication": { "type": "integer", "minimum": 0, "maximum": 200000 } } } } },
+    "providerRouting": {
+      "type": "object", "additionalProperties": false, "required": ["provider", "maxCalls", "tokenBudget", "timeoutMs", "retry"],
+      "properties": {
+        "provider": { "enum": ["local", "openrouter"] }, "fallbackPolicy": { "enum": ["none", "same_provider"] },
+        "models": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "string", "minLength": 1 }, "implementer": { "type": "string", "minLength": 1 }, "repair": { "type": "string", "minLength": 1 }, "reviewer": { "type": "string", "minLength": 1 }, "logCompression": { "type": "string", "minLength": 1 } } },
+        "modelPools": { "type": "object", "additionalProperties": false, "properties": { "planner": { "$ref": "#/$defs/modelPool" }, "implementer": { "$ref": "#/$defs/modelPool" }, "repair": { "$ref": "#/$defs/modelPool" }, "reviewer": { "$ref": "#/$defs/modelPool" }, "logCompression": { "$ref": "#/$defs/modelPool" } } },
+        "reasoning": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "object", "additionalProperties": false, "properties": { "effort": { "type": "string", "minLength": 1 }, "maxTokens": { "type": "integer", "minimum": 1, "maximum": 200000 }, "exclude": { "type": "boolean" } } }, "reviewer": { "type": "object", "additionalProperties": false, "properties": { "effort": { "type": "string", "minLength": 1 }, "maxTokens": { "type": "integer", "minimum": 1, "maximum": 200000 }, "exclude": { "type": "boolean" } } } } },
+        "maxCalls": { "type": "integer", "minimum": 1, "maximum": 32 },
+        "tokenBudget": { "type": "object", "additionalProperties": false, "required": ["total", "perPhase"], "properties": { "total": { "type": "integer", "minimum": 1000, "maximum": 200000 }, "perPhase": { "type": "object", "additionalProperties": false, "properties": { "planner": { "type": "integer", "minimum": 0, "maximum": 200000 }, "implementer": { "type": "integer", "minimum": 0, "maximum": 200000 }, "repair": { "type": "integer", "minimum": 0, "maximum": 200000 }, "reviewer": { "type": "integer", "minimum": 0, "maximum": 200000 }, "logCompression": { "type": "integer", "minimum": 0, "maximum": 200000 } } } } },
+        "costBudgetUsd": { "type": "number", "minimum": 0, "maximum": 1000 }, "timeoutMs": { "type": "integer", "minimum": 1000, "maximum": 1800000 },
+        "retry": { "type": "object", "additionalProperties": false, "required": ["maxAttempts"], "properties": { "maxAttempts": { "type": "integer", "minimum": 1, "maximum": 3 } } }
+      },
+      "allOf": [
+        { "if": { "properties": { "provider": { "const": "local" } }, "required": ["provider"] }, "then": { "properties": { "fallbackPolicy": { "const": "none" } } } },
+        { "if": { "properties": { "fallbackPolicy": { "const": "same_provider" } }, "required": ["fallbackPolicy"] }, "then": { "properties": { "provider": { "const": "openrouter" }, "retry": { "type": "object", "properties": { "maxAttempts": { "type": "integer", "minimum": 2 } } } } } }
+      ]
+    },
     "executionAgreement": {
       "type": "object", "additionalProperties": false, "required": ["schemaVersion", "profile"],
       "properties": {
@@ -47,11 +64,33 @@
           }
         }
       },
-      "allOf": [{ "if": { "properties": { "profile": { "const": "custom" } } }, "then": { "required": ["phaseOwnership"] }, "else": { "not": { "required": ["phaseOwnership"] } } }]
+      "allOf": [{ "if": { "type": "object", "properties": { "profile": { "const": "custom" } }, "required": ["profile"] }, "then": { "type": "object", "required": ["phaseOwnership"] }, "else": { "type": "object", "not": { "required": ["phaseOwnership"] } } }]
     },
-    "discovery": { "type": "object", "additionalProperties": false, "properties": { "policy": { "enum": ["auto", "explicit"] }, "profile": { "enum": ["small-scope", "standard"] }, "explicitFiles": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "maxFiles": { "type": "integer", "minimum": 1, "maximum": 1000 }, "maxBytes": { "type": "integer", "minimum": 1000, "maximum": 10000000 }, "maxTokens": { "type": "integer", "minimum": 100, "maximum": 500000 }, "stopCondition": { "type": "string", "minLength": 1 } } },
+    "discovery": { "type": "object", "additionalProperties": false, "properties": { "policy": { "enum": ["auto", "explicit"] }, "profile": { "enum": ["small-scope", "standard"] }, "explicitFiles": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "writeScopes": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "maxFiles": { "type": "integer", "minimum": 1, "maximum": 1000 }, "maxBytes": { "type": "integer", "minimum": 1000, "maximum": 10000000 }, "maxTokens": { "type": "integer", "minimum": 100, "maximum": 500000 }, "stopCondition": { "type": "string", "minLength": 1 } } },
     "runtime": { "type": "object", "additionalProperties": false, "properties": { "preference": { "enum": ["docker", "local-disposable"] }, "dockerImage": { "type": "string", "minLength": 1 }, "prepareDependencies": { "type": "boolean" }, "dependencyPreparation": { "enum": ["required", "if-needed", "disabled", "reuse-existing"] }, "externalNetwork": { "enum": ["denied", "dependency-preparation-only", "allowed"] } }, "not": { "required": ["prepareDependencies", "dependencyPreparation"] } },
-    "validation": { "type": "object", "additionalProperties": false, "properties": { "mode": { "enum": ["auto", "explicit"] }, "commands": { "type": "array", "items": { "type": "string", "minLength": 1 } } } },
+    "validation": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "mode": { "enum": ["auto", "explicit"] },
+        "commands": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "requirements": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["command"], "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "capabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production", "git-read-only-evidence"] } },
+          "acceptance": { "enum": ["required", "optional", "advisory", "evidence-only"] },
+          "evidenceRole": { "type": "string", "minLength": 1 },
+          "fallbacks": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+        } } },
+        "profile": { "type": "object", "additionalProperties": false, "properties": {
+          "id": { "type": "string", "minLength": 1 }, "defaultAcceptance": { "enum": ["required", "optional", "advisory", "evidence-only"] },
+          "defaultEvidenceRole": { "type": "string", "minLength": 1 },
+          "additionalCapabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production", "git-read-only-evidence"] } }
+        } },
+        "projectPolicy": { "type": "object", "additionalProperties": false, "properties": {
+          "deniedCapabilities": { "type": "array", "uniqueItems": true, "items": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production", "git-read-only-evidence"] } },
+          "skippedCommands": { "type": "array", "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
+        } }
+      }
+    },
     "authority": { "type": "object", "additionalProperties": false, "properties": { "profile": { "enum": ["read-only", "bounded-implementation"] }, "envelopeFile": { "type": ["string", "null"] }, "forbiddenAreas": { "type": "array", "items": { "type": "string", "minLength": 1 } }, "allowProviderCalls": { "type": "boolean" }, "allowNetwork": { "type": "boolean" } } },
     "git": { "type": "object", "additionalProperties": false, "properties": { "publication": { "enum": ["none", "draft-pr"] }, "branch": { "type": ["string", "null"] } } },
     "merge": { "type": "object", "additionalProperties": false, "properties": { "policy": { "const": "never" } } },
@@ -59,5 +98,8 @@
     "artifacts": { "type": "object", "additionalProperties": false, "properties": { "root": { "type": "string", "minLength": 1 }, "resultFormat": { "const": "normalized-v1" } } },
     "ownerGate": { "type": "object", "additionalProperties": false, "properties": { "policy": { "const": "stop-and-report" } } },
     "repair": { "type": "object", "additionalProperties": false, "properties": { "mode": { "enum": ["none", "disposable", "code"] }, "plan": { "type": ["string", "null"] } } }
+  },
+  "$defs": {
+    "modelPool": { "type": "array", "minItems": 1, "uniqueItems": true, "items": { "type": "string", "minLength": 1 } }
   }
 }

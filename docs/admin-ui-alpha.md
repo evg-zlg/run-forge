@@ -36,6 +36,11 @@ Raw tokens are not written by the admin commands. Generated UI data redacts API 
 pnpm dev admin config show
 pnpm dev admin repo add --id factory --name Factory --path /Users/evgeny/Documents/projects/factory --tag external
 pnpm dev admin provider add-openrouter --api-key-ref env:OPENROUTER_API_KEY
+
+For capped semantic campaigns, configure the server-only planner quote catalog before starting
+the control plane: `RUNFORGE_OPENROUTER_MODEL_PRICING_JSON='{"provider/concrete-model":{"inputUsdPerToken":0.000001,"outputUsdPerToken":0.000002}}'`.
+Each selected concrete planner model needs a positive input and output quote. Dynamic aliases
+such as `openrouter/auto` are rejected for hard cost caps; request payloads cannot provide prices.
 pnpm dev admin provider add-cli --id codex-cli --command codex
 pnpm dev admin build --out /tmp/runforge-admin-ui
 pnpm demo:admin-ui

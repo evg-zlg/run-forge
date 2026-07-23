@@ -9,6 +9,7 @@ import { EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES } from "../.
 import { publicTaskSpecContract, taskSpecV2Schema } from "../../src/product/task-spec-contract.js";
 import { loadTaskSpecV2, normalizeTaskSpecV2, redactedTaskSpec } from "../../src/product/task-spec-v2.js";
 import { readExternalValidationResults } from "../../src/product/task-result-contract.js";
+import { defaultOpenRouterModelPools, selectProviderModel } from "../../src/product/provider-routing.js";
 
 const execFileAsync = promisify(execFile);
 const roots: string[] = [];
@@ -33,66 +34,71 @@ describe("TaskSpec v2", () => {
     expect(redactedTaskSpec(first)).toEqual(first);
   });
 
-  it("truncates requested context and token limits to executor-owned effective caps", async () => {
+  it("defaults omitted provider routing to the legacy local-only contract", async () => {
     const repo = await gitRepo();
-    const spec = await normalizeTaskSpecV2({
-      ...minimal(repo),
-      execution: {
-        mode: "validation",
-        maxInputContextTokens: 999_999,
-        maxOutputTokens: 999_999,
-        maxReasoningTokens: 999_999,
-        reasoningSetting: "high",
-        maxCallsPerPhase: 999,
-        maxPhaseTokens: 999_999,
-        maxTaskTokens: 999_999,
-        earlyProgressDeadlineMs: 999_999,
-        maxCostUsd: 999
-      }
-    });
-    expect(spec.execution).toMatchObject({
-      maxInputContextTokens: 120_000,
-      maxOutputTokens: 16_000,
-      maxReasoningTokens: 32_000,
-      reasoningSetting: "high",
-      maxCallsPerPhase: 8,
-      maxPhaseTokens: 80_000,
-      maxTaskTokens: 200_000,
-      earlyProgressDeadlineMs: 90_000,
-      maxCostUsd: 25
+    await expect(normalizeTaskSpecV2(minimal(repo))).resolves.toMatchObject({
+      providerRouting: { provider: "local", fallbackPolicy: "none", models: {}, maxCalls: 4, retry: { maxAttempts: 1 } }
     });
   });
 
-  it("selects the fast economical profile deterministically for a two-file task", async () => {
+  it("normalizes bounded OpenRouter routing without requiring every phase model", async () => {
     const repo = await gitRepo();
-    const spec = await normalizeTaskSpecV2({
-      ...minimal(repo),
-      execution: { mode: "validation", maxChangedFiles: 2 },
-      discovery: { policy: "explicit", profile: "small-scope", explicitFiles: ["src/a.ts", "tests/a.test.ts"], maxFiles: 2 }
-    });
-    expect(spec.execution.plan).toEqual({
-      classification: "bounded-small",
-      profile: "fast",
-      modelSelection: "economical",
-      expectedDurationMs: 300_000
-    });
+    const providerRouting = {
+      provider: "openrouter", fallbackPolicy: "same_provider", models: { planner: "openai/gpt-5" },
+      maxCalls: 6, tokenBudget: { total: 50000, perPhase: { planner: 12000, implementer: 25000, repair: 8000, reviewer: 5000 } },
+      costBudgetUsd: 12.5, timeoutMs: 120000, retry: { maxAttempts: 2 }
+    };
+    const spec = await normalizeTaskSpecV2({ ...minimal(repo), providerRouting });
+    expect(spec.providerRouting).toEqual({ ...providerRouting, models: { ...providerRouting.models, logCompression: "z-ai/glm-4.7-flash" }, modelPools: { logCompression: ["z-ai/glm-4.7-flash", "deepseek/deepseek-v4-flash", "google/gemini-3.5-flash-lite"] }, tokenBudget: { ...providerRouting.tokenBudget, perPhase: { ...providerRouting.tokenBudget.perPhase, implementer: 24_000, logCompression: 1_000 } } });
+    const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(taskSpecV2Schema);
+    expect(validate({ ...minimal(repo), providerRouting }), JSON.stringify(validate.errors)).toBe(true);
   });
 
-  it("does not select the heavy profile without an explicit complexity signal", async () => {
+  it("rejects invalid provider fallbacks and credential-shaped routing input", async () => {
     const repo = await gitRepo();
-    const base = { ...minimal(repo), discovery: { profile: "standard", maxFiles: 40 } };
-    await expect(normalizeTaskSpecV2({ ...base, execution: { mode: "validation", requestedProfile: "heavy" } }))
-      .rejects.toThrow("requires execution.complexitySignal='heavy'");
-    await expect(normalizeTaskSpecV2({ ...base, execution: { mode: "validation", requestedProfile: "heavy", complexitySignal: "heavy" } }))
-      .resolves.toMatchObject({ execution: { plan: { classification: "heavy", profile: "heavy", modelSelection: "capable" } } });
+    const routing = { provider: "local", fallbackPolicy: "same_provider", maxCalls: 1, tokenBudget: { total: 1000, perPhase: {} }, timeoutMs: 1000, retry: { maxAttempts: 2 } };
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), providerRouting: routing })).rejects.toThrow("only supports fallbackPolicy='none'");
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), providerRouting: { ...routing, provider: "openrouter", apiKey: "not-a-secret" } })).rejects.toThrow("credential-shaped field");
   });
 
-  it("rejects internally inconsistent hard token budgets", async () => {
+  it("normalizes ordered model pools, including log compression, while preserving legacy single models", async () => {
     const repo = await gitRepo();
-    await expect(normalizeTaskSpecV2({
-      ...minimal(repo),
-      execution: { mode: "validation", maxTaskTokens: 100_000, maxPhaseTokens: 80_000, phaseBudgets: { analysis: 80_000, implementation: 80_000 } }
-    })).rejects.toThrow("phaseBudgets total must not exceed execution.maxTaskTokens");
+    const providerRouting = {
+      provider: "openrouter", fallbackPolicy: "none", models: { reviewer: "legacy/reviewer" },
+      modelPools: {
+        planner: [...defaultOpenRouterModelPools.planner],
+        logCompression: [...defaultOpenRouterModelPools.logCompression],
+      },
+      maxCalls: 4, tokenBudget: { total: 10_000, perPhase: { planner: 2_000, reviewer: 1_000, logCompression: 500 } }, timeoutMs: 20_000, retry: { maxAttempts: 1 }
+    };
+    const spec = await normalizeTaskSpecV2({ ...minimal(repo), providerRouting });
+    expect(spec.providerRouting.modelPools).toEqual(providerRouting.modelPools);
+    expect(spec.providerRouting.models).toEqual({ reviewer: "legacy/reviewer" });
+    expect(spec.providerRouting.tokenBudget.perPhase).toMatchObject({ planner: 2_000, reviewer: 1_000, logCompression: 500 });
+    expect(spec.providerRouting.tokenBudget.perPhase.implementer).toBe(0);
+    const first = selectProviderModel(spec.providerRouting, "planner", "campaign-stable-key");
+    const second = selectProviderModel(spec.providerRouting, "planner", "campaign-stable-key");
+    expect(first).toEqual(second);
+    expect(first).toMatchObject({ phase: "planner", source: "model_pool", model: expect.stringMatching(/^z-ai\/glm-5\.2|moonshotai\/kimi-k3|qwen\/qwen3\.7-max$/) });
+    expect(selectProviderModel({ models: { planner: "legacy/planner" }, modelPools: { planner: ["pool/first"] } }, "planner", "campaign-stable-key"))
+      .toEqual({ phase: "planner", model: "pool/first", source: "model_pool", index: 0, poolSize: 1 });
+    expect(selectProviderModel(spec.providerRouting, "reviewer", "campaign-stable-key")).toEqual({ phase: "reviewer", model: "legacy/reviewer", source: "legacy_model", index: 0, poolSize: 1 });
+  });
+
+  it("rejects empty, duplicate, or unknown ordered model pools", async () => {
+    const repo = await gitRepo();
+    const base = { provider: "openrouter", fallbackPolicy: "none", maxCalls: 1, tokenBudget: { total: 1_000, perPhase: {} }, timeoutMs: 1_000, retry: { maxAttempts: 1 } };
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), providerRouting: { ...base, modelPools: { planner: [] } } })).rejects.toThrow("non-empty array");
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), providerRouting: { ...base, modelPools: { planner: ["a/model", "a/model"] } } })).rejects.toThrow("duplicate");
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), providerRouting: { ...base, modelPools: { arbitrary: ["a/model"] } } })).rejects.toThrow("unknown field");
+  });
+
+  it("migrates a legacy four-phase OpenRouter route only when an honest compression budget can be reserved", async () => {
+    const repo = await gitRepo();
+    const legacy = { provider: "openrouter", fallbackPolicy: "none", models: { planner: "legacy/planner", implementer: "legacy/implementer", repair: "legacy/repair", reviewer: "legacy/reviewer" }, maxCalls: 5, tokenBudget: { total: 10_000, perPhase: { planner: 2_000, implementer: 6_000, repair: 1_000, reviewer: 1_000 } }, timeoutMs: 20_000, retry: { maxAttempts: 1 } };
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), providerRouting: legacy })).resolves.toMatchObject({ providerRouting: { models: { logCompression: "z-ai/glm-4.7-flash" }, modelPools: { logCompression: ["z-ai/glm-4.7-flash", "deepseek/deepseek-v4-flash", "google/gemini-3.5-flash-lite"] }, tokenBudget: { perPhase: { logCompression: 1_000, implementer: 5_000 } } } });
+    const tooSmall = { ...legacy, tokenBudget: { total: 1_000, perPhase: { planner: 500, implementer: 500, repair: 0, reviewer: 0 } } };
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), providerRouting: tooSmall })).rejects.toThrow(/legacy four-phase migration.*logCompression budget/i);
   });
 
   it.each(EXECUTION_PROFILES.filter((profile) => profile !== "custom"))("normalizes the %s execution agreement profile", async (profile) => {
@@ -158,6 +164,12 @@ describe("TaskSpec v2", () => {
     expect(taskSpecV2Schema).toEqual(fileSchema);
     const contract = publicTaskSpecContract() as Record<string, any>;
     expect(contract.executionAgreement).toMatchObject({ schemaVersion: 1, profiles: EXECUTION_PROFILES, phases: EXECUTION_PHASE_IDS, phaseOwnershipParties: EXECUTION_PARTIES });
+    expect(contract.validationContract).toMatchObject({
+      preflightSchemaVersion: 1,
+      autoDiscoveryDefaults: { acceptance: "required", evidenceRole: "product-validation", unknownCommands: "capability_unsupported_until_explicitly_described" },
+      lanes: { product: ["docker-validation", "local-disposable-validation"], gitEvidence: "git-evidence" },
+      gitEvidence: { binding: ["canonicalRepositoryIdentity", "expectedTargetSha"], execution: "argv-only", network: false, mutations: false },
+    });
     expect(contract.implementationRequest.taskSpec.executionAgreement).toEqual({ schemaVersion: 1, profile: "local-ready" });
     expect(contract.implementationExecutor).toMatchObject({
       profiles: { fast: { modelSelection: "economical" }, heavy: { requiresComplexitySignal: "heavy" } },
@@ -189,10 +201,10 @@ describe("TaskSpec v2", () => {
     await expect(normalizeTaskSpecV2(value)).rejects.toThrow(message);
   });
 
-  it("rejects output inside target and unsafe commands", async () => {
+  it("rejects output inside target and unsafe shell commands while deferring Git to capability preflight", async () => {
     const repo = await gitRepo();
     await expect(normalizeTaskSpecV2({ ...minimal(repo), artifacts: { root: join(repo, "artifacts") } })).rejects.toThrow("outside target.repository");
-    await expect(normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["git push origin main"] } })).rejects.toThrow("Unsafe validation command");
+    await expect(normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["git push origin main"] } })).resolves.toMatchObject({ validation: { requirements: [{ acceptance: "evidence-only" }] } });
     await expect(normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["rg credentials src"] } })).resolves.toBeDefined();
     await expect(normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["echo $API_KEY"] } })).rejects.toThrow("environment credentials");
   });
@@ -287,6 +299,29 @@ describe("TaskSpec v2", () => {
     const repo = await gitRepo();
     await expect(normalizeTaskSpecV2({ ...minimal(repo), runtime: { preference: "local-disposable", dependencyPreparation: strategy } }))
       .resolves.toMatchObject({ runtime: { preference: "local-disposable", dependencyPreparation: strategy } });
+  });
+
+  it("normalizes explicit validation capability metadata into TaskSpec", async () => {
+    const repo = await gitRepo();
+    const spec = await normalizeTaskSpecV2({
+      ...minimal(repo),
+      validation: {
+        mode: "explicit", commands: ["custom-check"],
+        requirements: [{ command: "custom-check", capabilities: ["shell", "database"], acceptance: "optional", evidenceRole: "integration-evidence", fallbacks: ["Use CI evidence"] }],
+        projectPolicy: { deniedCapabilities: ["production"], skippedCommands: [] },
+      },
+    });
+    expect(spec.validation).toMatchObject({
+      mode: "explicit", commands: ["custom-check"],
+      requirements: [{ command: "custom-check", requiredCapabilities: ["shell", "database"], acceptance: "optional", evidenceRole: "integration-evidence", fallbacks: ["Use CI evidence"], source: "explicit" }],
+      projectPolicy: { deniedCapabilities: ["production"], skippedCommands: [] },
+    });
+  });
+
+  it("preserves unsupported Git forms for capability preflight instead of shell execution", async () => {
+    const repo = await gitRepo();
+    const spec = await normalizeTaskSpecV2({ ...minimal(repo), validation: { mode: "explicit", commands: ["git fetch origin"] } });
+    expect(spec.validation.requirements[0]).toMatchObject({ command: "git fetch origin", acceptance: "evidence-only", evidenceRole: "git-evidence" });
   });
 
   it("includes decisive post-apply stages in normalized validation", async () => {

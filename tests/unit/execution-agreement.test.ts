@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES,
   completeExecutionPhase, negotiateExecutionAgreement, normalizeExecutionHandoff,
+  validationSemanticReviewOptIn,
 } from "../../src/product/execution-agreement.js";
 
 const allTrue = Object.fromEntries(EXECUTION_PHASE_IDS.map((phase) => [phase, true]));
@@ -90,6 +91,15 @@ describe("Execution Agreement v1", () => {
       responsibleParty: "nobody", status: "not_requested",
     });
     expect(agreement.conflicts).toEqual([expect.objectContaining({ phaseId: "implementation", kind: "policy_denied" })]);
+  });
+
+  it("makes validation semantic review an explicit custom two-phase opt-in", () => {
+    const explicit = negotiateExecutionAgreement({ profile: "custom", requestedOwnership: { independentReview: "runforge", providerModelCalls: "runforge" } });
+    const partial = negotiateExecutionAgreement({ profile: "custom", requestedOwnership: { independentReview: "runforge" } });
+    const preset = negotiateExecutionAgreement({ profile: "local-ready" });
+    expect(validationSemanticReviewOptIn(explicit)).toBe(true);
+    expect(validationSemanticReviewOptIn(partial)).toBe(false);
+    expect(validationSemanticReviewOptIn(preset)).toBe(false);
   });
 
   it("reports deterministic pre-execution conflicts for unavailable or unauthorized RunForge work", () => {

@@ -1,5 +1,4 @@
-import { readFile, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { writeFile } from "node:fs/promises";
 import type { Subtask } from "./task-run-harness.js";
 import type { TaskKind } from "./task-run-planner.js";
 import type { ReviewRequest } from "./task-run-reviewer.js";
@@ -21,22 +20,17 @@ export type ProviderInputPackage = {
   }>;
   selectedFindings: Array<{
     subtaskId: string;
-    findings: string[];
+    findingCount: number;
+    evidenceRef: string;
   }>;
-  boundedLogExcerpts: Array<{
-    subtaskId: string;
-    path: string;
-    excerpt: string;
-    bytesRead: number;
-    truncated: boolean;
-  }>;
+  /** Provider input never carries raw command or provider output. */
+  rawLogState: "none";
+  logDigestRefs: string[];
   evidencePaths: string[];
   knownGaps: string[];
   limits: {
-    maxLogBytesPerArtifact: number;
-    maxTotalLogBytes: number;
-    totalLogBytes: number;
-    truncated: boolean;
+    rawLogBytesIncluded: 0;
+    rawLogArtifactsExcluded: number;
   };
 };
 
@@ -54,34 +48,16 @@ export async function writeProviderInputPackage(input: {
   return {
     package: providerInput,
     inputBytes: Buffer.byteLength(json, "utf8") + Buffer.byteLength(markdown, "utf8"),
-    inputTruncated: providerInput.limits.truncated
+    inputTruncated: false
   };
 }
 
 async function buildProviderInputPackage(request: ReviewRequest, repoRoot: string): Promise<ProviderInputPackage> {
-  const maxLogBytesPerArtifact = 4000;
-  const maxTotalLogBytes = 16_000;
-  let totalLogBytes = 0;
-  let truncated = false;
-  const logCandidates = request.logPaths.flatMap((item) => [
-    { subtaskId: item.subtaskId, path: item.commandLog },
-    { subtaskId: item.subtaskId, path: item.stdoutLog },
-    { subtaskId: item.subtaskId, path: item.stderrLog },
-    { subtaskId: item.subtaskId, path: item.executorReport }
-  ]);
-  const boundedLogExcerpts: ProviderInputPackage["boundedLogExcerpts"] = [];
-  for (const item of logCandidates) {
-    if (totalLogBytes >= maxTotalLogBytes) {
-      truncated = true;
-      break;
-    }
-    const remaining = maxTotalLogBytes - totalLogBytes;
-    const limit = Math.min(maxLogBytesPerArtifact, remaining);
-    const excerpt = await readBounded(resolve(repoRoot, item.path), limit);
-    totalLogBytes += excerpt.bytesRead;
-    truncated = truncated || excerpt.truncated;
-    boundedLogExcerpts.push({ subtaskId: item.subtaskId, path: item.path, ...excerpt });
-  }
+  // `repoRoot` remains in the API for stable callers. Never read a log here:
+  // this package can be sent to a provider, and refs must cross that boundary
+  // through a dedicated digest stage rather than bounded raw excerpts.
+  void repoRoot;
+  const rawLogArtifactsExcluded = request.logPaths.reduce((total) => total + 4, 0);
 
   return {
     task: request.acceptedTask,
@@ -103,34 +79,21 @@ async function buildProviderInputPackage(request: ReviewRequest, repoRoot: strin
     }),
     selectedFindings: request.subtaskReports.map((report) => ({
       subtaskId: report.id,
-      findings: report.findings.slice(0, 4)
+      findingCount: report.findings.length,
+      evidenceRef: report.reportPath
     })),
-    boundedLogExcerpts,
+    rawLogState: "none",
+    logDigestRefs: [],
     evidencePaths: unique([
       ...request.subtaskReports.map((item) => item.reportPath),
       ...request.logPaths.flatMap((item) => [item.commandLog, item.stdoutLog, item.stderrLog, item.executorReport])
     ]),
     knownGaps: request.gaps,
     limits: {
-      maxLogBytesPerArtifact,
-      maxTotalLogBytes,
-      totalLogBytes,
-      truncated
+      rawLogBytesIncluded: 0,
+      rawLogArtifactsExcluded
     }
   };
-}
-
-async function readBounded(path: string, maxBytes: number): Promise<{ excerpt: string; bytesRead: number; truncated: boolean }> {
-  try {
-    const text = await readFile(path, "utf8");
-    const bytes = Buffer.byteLength(text, "utf8");
-    if (bytes <= maxBytes) return { excerpt: text, bytesRead: bytes, truncated: false };
-    const excerpt = Buffer.from(text, "utf8").subarray(0, maxBytes).toString("utf8");
-    return { excerpt, bytesRead: maxBytes, truncated: true };
-  } catch (error) {
-    const excerpt = `Unable to read artifact: ${error instanceof Error ? error.message : String(error)}`;
-    return { excerpt, bytesRead: Buffer.byteLength(excerpt, "utf8"), truncated: false };
-  }
 }
 
 function renderProviderInputMarkdown(input: ProviderInputPackage): string {
@@ -152,11 +115,13 @@ ${input.subtaskStatuses.map((item) => `- \`${item.id}\`: ${item.commandStatus}; 
 
 ## Selected Findings
 
-${input.selectedFindings.map((item) => `- \`${item.subtaskId}\`: ${item.findings.join(" ")}`).join("\n")}
+${input.selectedFindings.map((item) => `- \`${item.subtaskId}\`: ${item.findingCount} finding(s); evidence: \`${item.evidenceRef}\``).join("\n")}
 
-## Bounded Log Excerpts
+## Raw Log Boundary
 
-${input.boundedLogExcerpts.map((item) => `### ${item.path}\n\n\`\`\`text\n${item.excerpt}\n\`\`\`\n`).join("\n")}
+Raw command/provider logs are excluded from provider input. Raw-log state: \`${input.rawLogState}\`.
+
+${input.logDigestRefs.length ? input.logDigestRefs.map((item) => `- \`${item}\``).join("\n") : "- no digest references supplied"}
 
 ## Evidence Paths
 
@@ -168,10 +133,8 @@ ${input.knownGaps.map((item) => `- ${item}`).join("\n")}
 
 ## Limits
 
-- Max bytes per artifact: ${input.limits.maxLogBytesPerArtifact}
-- Max total log bytes: ${input.limits.maxTotalLogBytes}
-- Total log bytes included: ${input.limits.totalLogBytes}
-- Truncated: ${input.limits.truncated ? "yes" : "no"}
+- Raw log bytes included: ${input.limits.rawLogBytesIncluded}
+- Raw log artifacts excluded: ${input.limits.rawLogArtifactsExcluded}
 `;
 }
 

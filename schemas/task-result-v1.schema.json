@@ -78,9 +78,20 @@
       "items": {
         "type": "object",
         "required": ["command"],
-        "properties": { "command": { "type": "string", "minLength": 1 } }
+        "properties": {
+          "command": { "type": "string", "minLength": 1 },
+          "outcome": { "$ref": "#/$defs/validationOutcome" },
+          "acceptance": { "$ref": "#/$defs/validationAcceptance" },
+          "evidenceRole": { "type": "string", "minLength": 1 },
+          "requiredCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } },
+          "availableCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } }
+        }
       }
     },
+    "validationPlan": { "$ref": "#/$defs/validationPlan" },
+    "validationAggregate": { "$ref": "#/$defs/validationAggregate" },
+    "validationNegotiation": { "$ref": "#/$defs/validationNegotiation" },
+    "review": { "$ref": "#/$defs/review" },
     "artifacts": true,
     "git": { "type": "object" },
     "ownerGate": {
@@ -97,6 +108,43 @@
     "limitations": { "type": "array" }
   },
   "$defs": {
+    "checkpointResumeEvidence": { "type": "object", "additionalProperties": true, "required": ["checkpointId", "checkpointDigest", "candidateAttemptId", "candidateBinary", "workspaces", "filesystemIntegrity", "dependencyStrategy", "validationAggregate", "providerCalls"], "properties": { "checkpointId": { "type": "string" }, "checkpointDigest": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "candidateAttemptId": { "type": "string" }, "candidateBinary": { "type": "object", "required": ["sha256", "compatible"], "properties": { "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }, "compatible": { "const": true } } }, "workspaces": { "type": "object", "required": ["implementationWorkspaceId", "validationWorkspaceId", "reconstructionMethod", "baseSha", "appliedCheckpoint"] }, "filesystemIntegrity": { "type": "object" }, "dependencyStrategy": { "type": "object" }, "validationAggregate": { "$ref": "#/$defs/validationAggregate" }, "providerCalls": { "const": 0 } }, "description": "Immutable candidate-binary evidence for restart-safe base-plus-patch checkpoint validation without an implementation provider rerun." },
+    "validationCapability": { "enum": ["filesystem", "git-metadata", "git-history", "working-tree-index", "package-manager", "dependencies", "shell", "network", "credentials", "docker", "local-disposable", "provider-model", "database", "production", "git-read-only-evidence"] },
+    "validationAcceptance": { "enum": ["required", "optional", "advisory", "evidence-only"] },
+    "validationOutcome": { "enum": ["passed", "product_failed", "setup_failed", "runtime_failed", "capability_unsupported", "skipped_by_policy", "timed_out", "cancelled"] },
+    "validationAggregate": { "enum": ["passed", "completed_with_validation_gaps", "blocked_by_capability", "blocked_by_policy", "product_failed", "setup_failed", "runtime_failed", "timed_out", "cancelled"] },
+    "validationNegotiation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schemaVersion", "status", "stage", "runtime", "requirements", "requiredUnsupported", "responsibility"],
+      "properties": {
+        "schemaVersion": { "const": 1 }, "status": { "enum": ["accepted", "rejected"] }, "stage": { "const": "task_acceptance" }, "runtime": { "type": "string", "minLength": 1 },
+        "requirements": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["command", "acceptance", "requiredCapabilities", "disposition", "staticallyUnsupportedCapabilities", "reason", "fallbacks", "blocking"], "properties": {
+          "command": { "type": "string", "minLength": 1 }, "acceptance": { "$ref": "#/$defs/validationAcceptance" }, "requiredCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } },
+          "disposition": { "enum": ["execute", "deferred_preflight", "capability_unsupported", "skipped_by_policy"] }, "staticallyUnsupportedCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } },
+          "reason": { "type": "string", "minLength": 1 }, "fallbacks": { "$ref": "#/$defs/strings" }, "blocking": { "type": "boolean" }
+        } } },
+        "requiredUnsupported": { "type": "array", "items": { "type": "object", "additionalProperties": false, "required": ["command", "reason", "fallbacks"], "properties": { "command": { "type": "string", "minLength": 1 }, "reason": { "type": "string", "minLength": 1 }, "fallbacks": { "$ref": "#/$defs/strings" } } } },
+        "responsibility": { "type": "object", "additionalProperties": false, "required": ["executionAgreementId", "structuralReview", "semanticReview"], "properties": {
+          "executionAgreementId": { "type": "string", "pattern": "^ea_v1_[a-f0-9]{24}$" },
+          "structuralReview": { "type": "object", "additionalProperties": false, "required": ["kind", "responsibleParty", "source"], "properties": { "kind": { "const": "structural" }, "responsibleParty": { "$ref": "#/$defs/party" }, "source": { "const": "localValidation" } } },
+          "semanticReview": { "type": "object", "additionalProperties": false, "required": ["kind", "responsibleParty", "source"], "properties": { "kind": { "const": "semantic" }, "responsibleParty": { "$ref": "#/$defs/party" }, "source": { "const": "independentReview" } } }
+        } }
+      }
+    },
+    "validationPlan": {
+      "type": "object", "additionalProperties": false, "required": ["schemaVersion", "createdAt", "profile", "runtime", "commands"],
+      "properties": {
+        "schemaVersion": { "const": 1 }, "createdAt": { "type": "string", "minLength": 1 }, "profile": { "type": "object" }, "runtime": { "type": "object" },
+        "lanes": { "type": "array", "items": { "type": "object", "required": ["runtime", "lane", "cwd", "available"], "properties": { "runtime": { "type": "string" }, "lane": { "type": "string" }, "cwd": { "type": "string" }, "available": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } }, "repositoryIdentity": { "type": "string" }, "boundSha": { "type": "string" }, "safetyAssertions": { "$ref": "#/$defs/strings" } } } },
+        "commands": { "type": "array", "items": { "type": "object", "required": ["command", "runtime", "lane", "cwd", "requiredCapabilities", "availableCapabilities", "supported", "reason", "fallbacks", "acceptance", "evidenceRole", "disposition"], "properties": {
+          "command": { "type": "string", "minLength": 1 }, "runtime": { "type": "string", "minLength": 1 }, "lane": { "type": "string", "minLength": 1 }, "cwd": { "type": "string", "minLength": 1 },
+          "requiredCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } }, "availableCapabilities": { "type": "array", "items": { "$ref": "#/$defs/validationCapability" } },
+          "supported": { "type": "boolean" }, "reason": { "type": "string", "minLength": 1 }, "fallbacks": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "acceptance": { "$ref": "#/$defs/validationAcceptance" }, "evidenceRole": { "type": "string", "minLength": 1 }, "disposition": { "enum": ["execute", "capability_unsupported", "skipped_by_policy"] },
+          "argv": { "$ref": "#/$defs/strings" }, "repositoryIdentity": { "type": "string" }, "boundSha": { "type": "string" }, "safetyAssertions": { "$ref": "#/$defs/strings" }
+        } } }
+      }
+    },
     "completionStatus": {
       "enum": [
         "runforge_scope_completed",
@@ -109,7 +157,7 @@
       ]
     },
     "legacyStatus": {
-      "enum": ["completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required"]
+      "enum": ["completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required", "blocked_by_capability", "blocked_by_policy"]
     },
     "implementationReceipt": {
       "type": "object",
@@ -194,6 +242,33 @@
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1 }
     },
+    "semanticFinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["severity", "file", "location", "category", "evidence", "recommendation", "blocking"],
+      "properties": {
+        "severity": { "enum": ["critical", "high", "medium", "low", "info"] },
+        "file": { "type": "string", "minLength": 1 }, "location": { "type": "string", "minLength": 1 },
+        "category": { "type": "string", "minLength": 1 }, "evidence": { "type": "string", "minLength": 1 },
+        "recommendation": { "type": "string", "minLength": 1 }, "blocking": { "type": "boolean" }
+      }
+    },
+    "semanticReview": {
+      "type": "object", "additionalProperties": false,
+      "required": ["kind", "status", "performed", "selectedReviewer", "reviewer", "confidence", "limitations", "findings", "evidence", "delegation"],
+      "properties": {
+        "kind": { "const": "semantic" }, "status": { "enum": ["completed", "unavailable", "forbidden"] },
+        "performed": { "type": "boolean" },
+        "selectedReviewer": { "type": "object", "additionalProperties": false, "required": ["provider", "model"], "properties": { "provider": { "type": ["string", "null"] }, "model": { "type": ["string", "null"] } } },
+        "reviewer": { "type": "object", "additionalProperties": false, "required": ["provider", "model", "invocationId"], "properties": { "provider": { "type": ["string", "null"] }, "model": { "type": ["string", "null"] }, "invocationId": { "type": ["string", "null"] } } },
+        "confidence": { "enum": ["high", "medium", "low", "unknown"] }, "limitations": { "$ref": "#/$defs/strings" },
+        "findings": { "type": "array", "items": { "$ref": "#/$defs/semanticFinding" } }, "evidence": { "$ref": "#/$defs/strings" },
+        "delegation": { "anyOf": [{ "type": "null" }, { "type": "object", "additionalProperties": false, "required": ["party", "reason", "exactAction"], "properties": { "party": { "enum": ["external_session", "owner"] }, "reason": { "type": "string", "minLength": 1 }, "exactAction": { "type": "string", "minLength": 1 } } }] }
+      }
+    },
+    "review": {
+      "type": "object", "additionalProperties": false, "required": ["structural", "semantic"],
+      "properties": { "structural": { "type": "object", "additionalProperties": false, "required": ["kind", "status", "evidence"], "properties": { "kind": { "const": "structural" }, "status": { "$ref": "#/$defs/validationAggregate" }, "evidence": { "$ref": "#/$defs/strings" } } }, "semantic": { "$ref": "#/$defs/semanticReview" } }
+    },
     "phaseOwnership": {
       "type": "object",
       "additionalProperties": false,
@@ -269,7 +344,10 @@
       "properties": {
         "name": { "type": "string", "minLength": 1 },
         "status": { "enum": ["satisfied", "pending", "blocked"] },
-        "evidence": { "$ref": "#/$defs/strings" }
+        "evidence": { "$ref": "#/$defs/strings" },
+        "lane": { "type": "string", "minLength": 1 }, "cwd": { "type": "string", "minLength": 1 }, "argv": { "$ref": "#/$defs/strings" },
+        "repositoryIdentity": { "type": ["string", "null"] }, "boundSha": { "type": ["string", "null"] },
+        "capabilities": { "$ref": "#/$defs/strings" }, "safetyAssertions": { "$ref": "#/$defs/strings" }
       }
     },
     "evidence": {
@@ -299,7 +377,7 @@
       "required": ["command", "status", "exitCode", "evidence"],
       "properties": {
         "command": { "type": "string", "minLength": 1 },
-        "status": { "enum": ["passed", "failed", "not_run"] },
+        "status": { "enum": ["passed", "product_failed", "setup_failed", "runtime_failed", "capability_unsupported", "skipped_by_policy", "timed_out", "cancelled", "failed", "not_run"] },
         "exitCode": { "type": ["integer", "null"] },
         "evidence": { "$ref": "#/$defs/strings" }
       }
@@ -359,7 +437,9 @@
         "branch": { "type": ["string", "null"], "minLength": 1 },
         "commit": { "type": ["string", "null"], "minLength": 1 },
         "validation": { "type": "array", "items": { "$ref": "#/$defs/handoffValidation" } },
-        "findings": { "$ref": "#/$defs/strings" },
+        "findings": { "type": "array", "items": { "anyOf": [{ "type": "string", "minLength": 1 }, { "$ref": "#/$defs/semanticFinding" }] } },
+        "structuralEvidence": { "type": "array", "items": { "$ref": "#/$defs/evidence" } },
+        "semanticReview": { "anyOf": [{ "type": "null" }, { "$ref": "#/$defs/semanticReview" }] },
         "risks": { "$ref": "#/$defs/strings" },
         "nextActions": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/nextAction" } },
         "publicationInstructions": { "$ref": "#/$defs/strings" },

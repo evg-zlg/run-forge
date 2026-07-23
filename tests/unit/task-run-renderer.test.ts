@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { TaskRunResult } from "../../src/run/task-run-harness.js";
@@ -14,6 +14,7 @@ import {
   writeProviderInputPackage
 } from "../../src/run/task-run-reviewer.js";
 import { renderSummary, toJsonResult, validateSummaryFreshness } from "../../src/run/task-run-renderer.js";
+import { completeExecutedSubtask } from "../../src/run/task-run-harness-helpers.js";
 
 describe("task-run summary renderer", () => {
   it("renders and validates the current task-run command instead of copied stale wording", () => {
@@ -90,6 +91,16 @@ describe("task-run summary renderer", () => {
 });
 
 describe("task-run review lane", () => {
+  it("keeps raw executor stdout out of generated subtask findings", () => {
+    const rawCanary = `RAW_STDOUT_${"sk-"}${"x".repeat(30)}`;
+    const subtask = completeExecutedSubtask({ id: "inspect", goal: "inspect", inputs: ["src/a.ts"], evidenceCommand: "check", evidenceFocus: "evidence" } as any, {
+      status: "passed", exitCode: 0, stdout: `${rawCanary}\nsecond line\n`, stderr: "",
+      artifactPaths: { commandLog: "command.log", stdoutLog: "stdout.log", stderrLog: "stderr.log", report: "executor-report.json" },
+    } as any);
+    expect(subtask.findings.join("\n")).not.toContain(rawCanary);
+    expect(subtask.findings.join("\n")).toContain("raw output remains in the referenced local artifact");
+  });
+
   it("builds providerless review requests from evidence and returns read-only review results", async () => {
     const result = taskRunResult({
       runId: "TASK-RUN-101",
@@ -156,7 +167,7 @@ describe("task-run review lane", () => {
     expect(metadata.repoAccess).toBe("evidence_packet_only");
   });
 
-  it("builds bounded provider input packages for delegated reviewer modes", async () => {
+  it("excludes raw logs from provider input packages for delegated reviewer modes", async () => {
     const repoRoot = await mkdtemp(join(tmpdir(), "runforge-provider-input-"));
     const result = taskRunResult({
       runId: "TASK-RUN-103",
@@ -172,6 +183,8 @@ describe("task-run review lane", () => {
       checks: result.checks,
       gaps: result.gaps
     });
+    const rawCanary = `RAW_STDOUT_${"sk-"}${"x".repeat(30)}`;
+    request.subtaskReports[0]!.findings.push(rawCanary);
     for (const log of request.logPaths.flatMap((item) => [item.commandLog, item.stdoutLog, item.stderrLog, item.executorReport])) {
       const path = join(repoRoot, log);
       await mkdir(dirname(path), { recursive: true });
@@ -186,10 +199,18 @@ describe("task-run review lane", () => {
     });
 
     expect(output.inputBytes).toBeGreaterThan(0);
-    expect(output.inputTruncated).toBe(true);
-    expect(output.package.limits.maxTotalLogBytes).toBe(16_000);
-    expect(output.package.boundedLogExcerpts.every((item) => item.excerpt.length <= 4000)).toBe(true);
+    expect(output.inputTruncated).toBe(false);
+    expect(output.package.rawLogState).toBe("none");
+    expect(output.package.logDigestRefs).toEqual([]);
+    expect(output.package.limits.rawLogBytesIncluded).toBe(0);
+    expect(output.package.limits.rawLogArtifactsExcluded).toBeGreaterThan(0);
     expect(output.package.evidencePaths.some((item) => item.includes("executor-report.json"))).toBe(true);
+    const providerJson = await readFile(join(repoRoot, "provider-input.json"), "utf8");
+    const providerMarkdown = await readFile(join(repoRoot, "provider-input.md"), "utf8");
+    expect(providerJson).not.toContain("x".repeat(100));
+    expect(providerJson).not.toContain(rawCanary);
+    expect(providerMarkdown).not.toContain(rawCanary);
+    expect(providerMarkdown).toContain("Raw command/provider logs are excluded");
   });
 
   it("requires explicit cli mode and fails cleanly when provider CLI is unavailable", async () => {

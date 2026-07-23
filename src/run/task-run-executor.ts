@@ -2,6 +2,7 @@ import { execFile } from "node:child_process";
 import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { promisify } from "node:util";
+import { assertDockerMountPath, assertDockerVolumeName, resolveDockerWorkspace } from "./docker-workspace.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -12,6 +13,7 @@ export type ExecutorRequest = {
   cwd: string;
   artifactDir: string;
   timeoutMs: number;
+  dockerWorkspace?: { root: string; workingDirectory: string };
 };
 
 export type ExecutorLane = "local-shell" | "docker-shell";
@@ -59,9 +61,10 @@ export class LocalShellExecutor implements TaskRunExecutor {
     let timedOut = false;
 
     try {
+      const environment = this.controlledEnvironment ? await controlledLocalEnvironment(request.artifactDir) : process.env;
       const output = await execFileAsync("sh", ["-lc", request.command], {
         cwd: request.cwd,
-        env: this.controlledEnvironment ? controlledLocalEnvironment() : process.env,
+        env: environment,
         maxBuffer: 1024 * 1024 * 8,
         timeout: request.timeoutMs
       });
@@ -114,19 +117,34 @@ export class LocalShellExecutor implements TaskRunExecutor {
   }
 }
 
-function controlledLocalEnvironment(): NodeJS.ProcessEnv {
-  const allowed = ["PATH", "LANG", "LC_ALL", "TMPDIR", "SHELL", "TERM"];
-  return { ...Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]])), CI: "1", RUNFORGE_RUNTIME_NETWORK: "denied" };
+async function controlledLocalEnvironment(artifactDir: string): Promise<NodeJS.ProcessEnv> {
+  const allowed = ["PATH", "LANG", "LC_ALL", "SHELL", "TERM"];
+  // These directories are owned by this request's artifact root. They are
+  // retained and removed with the execution evidence, never borrowed from a
+  // caller-provided HOME or TMPDIR.
+  const runtimeRoot = join(artifactDir, "runtime");
+  const home = join(runtimeRoot, "home");
+  const temporaryDirectory = join(runtimeRoot, "tmp");
+  const npmCache = join(runtimeRoot, "npm-cache");
+  await Promise.all([home, temporaryDirectory, npmCache].map((directory) => mkdir(directory, { recursive: true })));
+  return {
+    ...Object.fromEntries(allowed.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]]])),
+    HOME: home,
+    TMPDIR: temporaryDirectory,
+    npm_config_cache: npmCache,
+    CI: "1",
+    RUNFORGE_RUNTIME_NETWORK: "denied"
+  };
 }
 
 export class DockerShellExecutor implements TaskRunExecutor {
   readonly lane = "docker-shell" as const;
 
-  constructor(
-    private readonly repoRoot: string,
-    private readonly image: string,
+  constructor(private readonly repoRoot: string, private readonly image: string,
     private readonly writableWorkspace = false,
-    private readonly readonlySource?: string
+    private readonly readonlySource?: string,
+    private readonly tempVolume?: string,
+    private readonly workspaceDependencies?: string
   ) {}
 
   async execute(request: ExecutorRequest): Promise<ExecutorResult> {
@@ -140,7 +158,7 @@ export class DockerShellExecutor implements TaskRunExecutor {
     let timedOut = false;
 
     try {
-      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace, this.readonlySource), {
+      const output = await execFileAsync("docker", dockerRunArgs(request, this.image, containerName, this.writableWorkspace, this.readonlySource, this.tempVolume, this.workspaceDependencies), {
         maxBuffer: 1024 * 1024 * 8,
         timeout: request.timeoutMs
       });
@@ -194,7 +212,9 @@ export class DockerShellExecutor implements TaskRunExecutor {
   }
 }
 
-export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false, readonlySource?: string): string[] {
+export function dockerRunArgs(request: ExecutorRequest, image: string, containerName: string, writableWorkspace = false, readonlySource?: string, tempVolume?: string, workspaceDependencies?: string): string[] {
+  const hostUser = dockerHostUser(), dockerWorkspace = resolveDockerWorkspace(request);
+  if (readonlySource) assertDockerMountPath(readonlySource, "Docker read-only dependency source"); if (workspaceDependencies) assertDockerMountPath(workspaceDependencies, "Docker workspace dependency source"); if (tempVolume) assertDockerVolumeName(tempVolume);
   return [
     "run",
     "--rm",
@@ -213,28 +233,38 @@ export function dockerRunArgs(request: ExecutorRequest, image: string, container
     "--memory",
     "2g",
     "--cpus",
-    "2",
+    "4",
+    "--user",
+    hostUser,
     "--read-only",
     "--tmpfs",
     "/tmp:rw,nosuid,size=256m",
+    ...(tempVolume ? ["--mount", `type=volume,src=${tempVolume},dst=/runforge-tmp`] : ["--tmpfs", "/runforge-tmp:rw,nosuid,nodev,size=512m,mode=1777"]),
     "--env",
     "HOME=/tmp",
     "--env",
     "npm_config_cache=/tmp/npm-cache",
     "--env",
+    `COREPACK_HOME=${dockerWorkspace.workdir}/.runforge-corepack`,
+    "--env",
     "TMPDIR=/runforge-tmp",
     "--mount",
-    `type=bind,src=${request.cwd},dst=/workspace${writableWorkspace ? "" : ",readonly"}`,
-    ...(writableWorkspace ? ["--mount", `type=bind,src=${request.cwd}/.runforge-tmp,dst=/runforge-tmp`] : []),
-    ...(readonlySource ? ["--mount", `type=bind,src=${readonlySource},dst=/source/node_modules,readonly`] : []),
+    `type=bind,src=${dockerWorkspace.root},dst=/workspace${writableWorkspace ? "" : ",readonly"}`,
+    ...(readonlySource ? ["--mount", `type=bind,src=${readonlySource},dst=${dockerWorkspace.workdir}/node_modules,readonly`] : []),
+    ...(workspaceDependencies ? ["--mount", `type=bind,src=${workspaceDependencies},dst=${dockerWorkspace.workdir}/node_modules`] : []),
     "--workdir",
-    "/workspace",
+    dockerWorkspace.workdir,
     "--entrypoint",
     "/bin/sh",
     image,
     "-lc",
     request.command
   ];
+}
+function dockerHostUser(): string {
+  const uid = typeof process.getuid === "function" ? process.getuid() : 65_534;
+  const gid = typeof process.getgid === "function" ? process.getgid() : 65_534;
+  return `${Number.isSafeInteger(uid) && uid >= 0 ? uid : 65_534}:${Number.isSafeInteger(gid) && gid >= 0 ? gid : 65_534}`;
 }
 
 async function removeContainer(name: string): Promise<void> {
@@ -305,6 +335,7 @@ export function createExecutorRequest(input: {
   artifactDir: string;
   timeoutMs?: number;
   lane?: ExecutorLane;
+  dockerWorkspace?: { root: string; workingDirectory: string };
 }): ExecutorRequest {
   return {
     id: `${basename(input.runId)}:${input.subtaskId}:${input.lane ?? "local-shell"}`,
@@ -312,6 +343,7 @@ export function createExecutorRequest(input: {
     command: input.command,
     cwd: input.cwd,
     artifactDir: input.artifactDir,
-    timeoutMs: input.timeoutMs ?? 30_000
+    timeoutMs: input.timeoutMs ?? 30_000,
+    ...(input.dockerWorkspace ? { dockerWorkspace: input.dockerWorkspace } : {})
   };
 }

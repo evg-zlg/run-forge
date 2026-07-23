@@ -67,7 +67,7 @@ describe("agreement-aware task result contract", () => {
       patch: " patch.diff ",
       branch,
       commit: null,
-      validation: [{ command: " pnpm test ", status: "passed", exitCode: 0, evidence: [" test.log ", "test.log"] }],
+      validation: [{ command: " pnpm test ", status: "passed", exitCode: 0, evidence: [" test.log ", "test.log"], lane: "git-evidence", cwd: "/evidence", argv: ["git", "diff", "--check"], repositoryIdentity: "/repo", boundSha: "abc123", capabilities: ["git-read-only-evidence"], safetyAssertions: ["argv_only_no_shell"] }],
       findings: [" finding B ", "finding A"],
       risks: ["owner review remains"],
       nextActions: [{
@@ -88,8 +88,10 @@ describe("agreement-aware task result contract", () => {
       patch: "patch.diff",
       branch,
       commit: null,
-      validation: [{ command: "pnpm test", status: "passed", exitCode: 0, evidence: ["test.log"] }],
+      validation: [{ command: "pnpm test", status: "passed", exitCode: 0, evidence: ["test.log"], lane: "git-evidence", cwd: "/evidence", argv: ["git", "diff", "--check"], repositoryIdentity: "/repo", boundSha: "abc123", capabilities: ["git-read-only-evidence"], safetyAssertions: ["argv_only_no_shell"] }],
       findings: ["finding A", "finding B"],
+      structuralEvidence: [],
+      semanticReview: null,
       risks: ["owner review remains"],
       nextActions: [{
         party: "external_session", exactAction: "Apply patch.diff in the target worktree.",
@@ -170,7 +172,7 @@ describe("agreement-aware task result contract", () => {
     })).toThrow("handoff.branch must be null for assist-only handoffs");
   });
 
-  it("keeps legacy result validation compatible while reserving new statuses for agreement-aware results", async () => {
+  it("keeps legacy result validation compatible while exposing capability and policy blocks to HTTP envelopes", async () => {
     const legacy = {
       schemaVersion: 1, contract: "runforge-task-result", taskId: "LEGACY-1", status: "completed",
       targetRepository: { path: "/repo", initialSha: "abc", finalSha: "def", changed: true },
@@ -186,6 +188,8 @@ describe("agreement-aware task result contract", () => {
     const schema = JSON.parse(await readFile("schemas/task-result-v1.schema.json", "utf8"));
     const validate = new Ajv2020({ strict: true }).compile(schema);
     expect(validate(legacy), JSON.stringify(validate.errors)).toBe(true);
+    expect(validate({ ...legacy, status: "blocked_by_capability" })).toBe(true);
+    expect(validate({ ...legacy, status: "blocked_by_policy" })).toBe(true);
     expect(validate({ ...legacy, status: "runforge_scope_completed" })).toBe(false);
   });
 

@@ -86,14 +86,65 @@ export function boundPublicResult(result: Record<string, unknown>): { result: Re
 }
 
 export function redactPublicValue<T>(value: T): T {
-  const visit = (item: unknown): unknown => {
-    if (typeof item === "string") return redactPublicText(item);
-    if (Array.isArray(item)) return item.map(visit);
-    if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, visit(child)]));
+  const visit = (item: unknown, path: string[]): unknown => {
+    // A corrected request is replay material. Its direct target is supplied by
+    // the caller, not discovered by RunForge, so preserving it is required for
+    // an exact HTTP retry. Keep this exception structurally narrow.
+    if (typeof item === "string") return correctedTargetRepositoryPath(path) ? item : redactPublicText(item);
+    if (Array.isArray(item)) return item.map((child, index) => visit(child, [...path, String(index)]));
+    if (item && typeof item === "object") return Object.fromEntries(Object.entries(item).map(([key, child]) => [key, visit(child, [...path, key])]));
     return item;
   };
-  return visit(value) as T;
+  return visit(value, []) as T;
 }
+function correctedTargetRepositoryPath(path: string[]): boolean { return path.join(".") === "error.details.correctedRequest.taskSpec.target.repository"; }
+
+/** A small stable projection for HTTP clients; structural inspection never sets performed=true. */
+export function normalizedSemanticReview(result: Record<string, unknown>): Record<string, unknown> | null {
+  const review = object(object(result.review).semantic);
+  if (!Object.keys(review).length) return null;
+  const calls = Array.isArray(result.providerCalls) ? result.providerCalls.map(object).filter((call) => call.purpose === "semantic-review" || call.phase === "reviewer") : [];
+  const providerCalls = calls.filter((call) => call.providerCalls === true).length;
+  const reviewer = semanticReviewerIdentity(review.reviewer);
+  const findings = semanticFindings(review.findings);
+  const limitations = semanticLimitations(review.limitations);
+  const malformed = reviewer === null || findings === null || limitations === null;
+  const invocationBacked = reviewer !== null && calls.some((call) => semanticCallMatchesReviewer(call, reviewer));
+  const performed = !malformed && review.performed === true && review.status === "completed" && invocationBacked;
+  const failure = malformed ? "Semantic review result was malformed or lacked a provider-backed reviewer identity." : review.status === "completed" && !invocationBacked ? "Semantic review completion lacked a matching successful provider invocation." : null;
+  return {
+    performed,
+    reviewer: reviewer ?? { provider: null, model: null, invocationId: null },
+    providerCalls,
+    findings: performed ? findings : [],
+    limitations: [...(limitations ?? []), ...(failure ? [failure] : [])],
+    outcome: performed ? "semantic_review_completed" : malformed || review.status === "unavailable" || review.status === "completed" ? "reviewer_unavailable" : "semantic_review_not_completed",
+  };
+}
+
+const semanticSeverities = new Set(["critical", "high", "medium", "low", "info"]);
+function semanticReviewerIdentity(value: unknown): { provider: string; model: string | null; invocationId: string } | null {
+  const reviewer = object(value);
+  return nonEmpty(reviewer.provider) && (reviewer.model === null || nonEmpty(reviewer.model)) && nonEmpty(reviewer.invocationId)
+    ? { provider: reviewer.provider as string, model: reviewer.model as string | null, invocationId: reviewer.invocationId as string }
+    : null;
+}
+function semanticCallMatchesReviewer(call: Record<string, any>, reviewer: { provider: string; model: string | null; invocationId: string }): boolean {
+  return call.providerCalls === true && call.networkAuthorized === true && call.success === true && call.exitCode === 0
+    && call.provider === reviewer.provider && call.model === reviewer.model && call.invocationId === reviewer.invocationId;
+}
+function semanticFindings(value: unknown): Array<Record<string, unknown>> | null {
+  if (!Array.isArray(value)) return null;
+  const findings: Array<Record<string, unknown>> = [];
+  for (const item of value) {
+    const finding = object(item);
+    if (!semanticSeverities.has(String(finding.severity)) || !["file", "location", "category", "evidence", "recommendation"].every((field) => nonEmpty(finding[field])) || typeof finding.blocking !== "boolean") return null;
+    findings.push({ severity: finding.severity, file: finding.file, location: finding.location, category: finding.category, evidence: finding.evidence, recommendation: finding.recommendation, blocking: finding.blocking });
+  }
+  return findings;
+}
+function semanticLimitations(value: unknown): string[] | null { return Array.isArray(value) && value.every(nonEmpty) ? [...new Set(value as string[])] : null; }
+function nonEmpty(value: unknown): value is string { return typeof value === "string" && Boolean(value.trim()); }
 
 function redactPublicText(value: string): string {
   return value

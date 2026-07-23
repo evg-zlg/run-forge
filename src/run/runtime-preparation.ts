@@ -3,7 +3,8 @@ import { execFile } from "node:child_process";
 import { cp, mkdir, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, join, relative } from "node:path";
 import { promisify } from "node:util";
-import { isSensitiveWorkspacePath } from "./task-run-workspace.js";
+import { assertDockerMountPath, resolveDockerWorkspace } from "./docker-workspace.js";
+import { isSensitiveWorkspacePath, materializeAutonomousGitSnapshot } from "./task-run-workspace.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -62,6 +63,7 @@ export async function prepareExternalRuntime(input: {
   workspace: string;
   outDir: string;
   image: string;
+  gitSnapshot?: { expectedSha: string };
 }): Promise<RuntimePreparationResult> {
   const startedAt = new Date().toISOString();
   const source = await inspectRepoState(input.repo);
@@ -72,7 +74,8 @@ export async function prepareExternalRuntime(input: {
   await rm(input.workspace, { recursive: true, force: true });
   await mkdir(input.workspace, { recursive: true });
   await copyExternalWorkspace(source.path, input.workspace);
-  await execFileAsync("git", ["init", "--quiet"], { cwd: input.workspace });
+  if (input.gitSnapshot) await materializeAutonomousGitSnapshot(source.path, input.workspace, input.gitSnapshot.expectedSha);
+  else await execFileAsync("git", ["init", "--quiet"], { cwd: input.workspace });
 
   const containerName = `runforge-prepare-${safeName(basename(input.outDir))}-${process.pid}`;
   const args = preparationDockerArgs(input.workspace, input.image, containerName, dependency.command, workingDirectory);
@@ -118,6 +121,8 @@ export async function prepareExternalRuntime(input: {
 }
 
 export function preparationDockerArgs(workspace: string, image: string, containerName: string, command: string, workingDirectory = "."): string[] {
+  const dockerWorkspace = resolveDockerWorkspace({ cwd: workspace, dockerWorkspace: { root: workspace, workingDirectory } });
+  const mountDestination = assertDockerMountPath("/workspace", "Docker preparation mount destination");
   return [
     "run", "--rm", "--pull", "never", "--name", containerName,
     "--network", "bridge",
@@ -127,12 +132,15 @@ export function preparationDockerArgs(workspace: string, image: string, containe
     "--memory", "2g",
     "--cpus", "2",
     "--user", "0",
-    "--mount", `type=bind,src=${workspace},dst=/workspace`,
-    "--workdir", join("/workspace", workingDirectory),
+    "--env", `COREPACK_HOME=${dockerWorkspace.workdir}/.runforge-corepack`,
+    "--env", `RUNFORGE_EXECUTION_ROOT=${dockerWorkspace.workdir}`,
+    "--env", "npm_config_store_dir=/workspace/.runforge-pnpm-store",
+    "--mount", `type=bind,src=${dockerWorkspace.root},dst=${mountDestination}`,
+    "--workdir", dockerWorkspace.workdir,
     "--entrypoint", "/bin/sh",
     image,
     "-lc",
-    `${command} && mkdir -p /workspace/.runforge-tmp && chmod -R a+rwX /workspace`
+    `${command} && mkdir -p "$RUNFORGE_EXECUTION_ROOT/.runforge-corepack" /workspace/.runforge-tmp /workspace/.runforge-pnpm-store && find /workspace -type d -name node_modules -prune -exec chmod -R a+rwX {} + && chmod -R a+rwX "$RUNFORGE_EXECUTION_ROOT/.runforge-corepack" /workspace/.runforge-tmp /workspace/.runforge-pnpm-store`
   ];
 }
 

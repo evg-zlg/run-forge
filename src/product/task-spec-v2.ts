@@ -4,10 +4,15 @@ import { blockedCommandReports } from "../run/external-command-check-helpers.js"
 import { loadCodeRepairPlan } from "../run/code-repair.js";
 import { EXECUTION_PARTIES, EXECUTION_PHASE_IDS, EXECUTION_PROFILES, type ExecutionParty, type ExecutionPhaseId, type ExecutionProfile } from "./execution-agreement.js";
 import { defaultArtifactRoot, inspectProject, isPathInside } from "./project-inspection.js";
+import { assertNoCredentialLikeKey, normalizeProviderRouting, type ProviderRouting } from "./provider-routing.js";
 import { defaultRuntimeForMode, implementationExecutorContract, runtimeCompatibleWithImplementationExecutor, taskExecutionModes, taskRuntimeIds, taskSpecSchemaVersion, type TaskExecutionMode, type TaskRuntimeId } from "./task-spec-contract.js";
+import {
+  VALIDATION_ACCEPTANCE, VALIDATION_CAPABILITIES, defaultValidationProfile, normalizeValidationRequirements,
+  type ValidationCommandRequirement, type ValidationProfile, type ValidationProjectPolicy,
+} from "../validation/capability-contract.js";
 
 export { taskSpecSchemaVersion } from "./task-spec-contract.js";
-const topKeys = ["schemaVersion", "taskId", "task", "target", "execution", "executionAgreement", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
+const topKeys = ["schemaVersion", "taskId", "task", "target", "execution", "providerRouting", "executionAgreement", "discovery", "runtime", "validation", "authority", "git", "merge", "deploy", "artifacts", "ownerGate", "repair"];
 
 export type { TaskExecutionMode } from "./task-spec-contract.js";
 
@@ -25,19 +30,15 @@ export type TaskSpecV2 = {
   taskId: string;
   task: { text: string; goal: string; acceptanceCriteria: string[] };
   target: { repository: string; workingDirectory: string; expectedSha: string; dirtyPolicy?: "require_clean" | "allow_known_generated" | "snapshot_from_sha" | "use_disposable_from_base_sha" };
-  execution: {
-    mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number;
-    maxProviderTokens: number; maxInputContextTokens: number; maxOutputTokens: number; maxReasoningTokens: number;
-    reasoningSetting: "minimal" | "low" | "medium" | "high"; maxCallsPerPhase: number; maxPhaseTokens: number;
-    maxTaskTokens: number; earlyProgressDeadlineMs: number; maxCostUsd: number; requestedProfile?: "fast" | "standard" | "heavy";
-    complexitySignal?: "heavy"; budgetMode: "soft" | "hard";
-    phaseBudgets: Record<"startup" | "analysis" | "implementation" | "validation" | "repair" | "review" | "publication", number>;
-    plan: { classification: "bounded-small" | "bounded-standard" | "heavy"; profile: "fast" | "standard" | "heavy"; modelSelection: "economical" | "capable"; expectedDurationMs: number };
-  };
+  execution: { mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number; budgetMode: "soft" | "hard"; phaseBudgets: Record<"startup" | "analysis" | "implementation" | "validation" | "repair" | "review" | "publication", number> };
+  providerRouting: ProviderRouting;
   executionAgreement: TaskSpecExecutionAgreement;
-  discovery: { policy: "auto" | "explicit"; profile: "small-scope" | "standard"; explicitFiles: string[]; maxFiles: number; maxBytes: number; maxTokens: number; stopCondition: string };
+  discovery: { policy: "auto" | "explicit"; profile: "small-scope" | "standard"; explicitFiles: string[]; /** Present only when a campaign has an explicit write boundary. */ writeScopes?: string[]; maxFiles: number; maxBytes: number; maxTokens: number; stopCondition: string };
   runtime: { preference: TaskRuntimeId; dockerImage: string; dependencyPreparation: "required" | "if-needed" | "disabled" | "reuse-existing"; externalNetwork: "denied" | "dependency-preparation-only" | "allowed" };
-  validation: { mode: "auto" | "explicit"; commands: string[] };
+  validation: {
+    mode: "auto" | "explicit"; commands: string[]; requirements: ValidationCommandRequirement[];
+    profile: ValidationProfile; projectPolicy: ValidationProjectPolicy;
+  };
   authority: { profile: "read-only" | "bounded-implementation"; envelopeFile: string | null; forbiddenAreas: string[]; allowProviderCalls: boolean; allowNetwork: boolean };
   git: { publication: "none" | "draft-pr"; branch: string | null };
   merge: { policy: "never" };
@@ -79,24 +80,51 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const expectedSha = optionalString(target.expectedSha, "target.expectedSha") ?? inspection.head;
   if (expectedSha !== inspection.head) throw new Error(`target.expectedSha mismatch: expected ${expectedSha}, current ${inspection.head}.`);
   const executionRaw = object(raw.execution, "execution is required and must be an object.");
-  rejectUnknown(executionRaw, ["mode", "maxRepairIterations", "timeoutMs", "maxChangedFiles", "maxPatchBytes", "maxProviderTokens", "maxInputContextTokens", "maxOutputTokens", "maxReasoningTokens", "reasoningSetting", "maxCallsPerPhase", "maxPhaseTokens", "maxTaskTokens", "earlyProgressDeadlineMs", "maxCostUsd", "requestedProfile", "complexitySignal", "budgetMode", "phaseBudgets"], "execution");
+  rejectUnknown(executionRaw, ["mode", "maxRepairIterations", "timeoutMs", "maxChangedFiles", "maxPatchBytes", "maxProviderTokens", "budgetMode", "phaseBudgets"], "execution");
   const artifactsRaw = optionalObject(raw.artifacts, "artifacts");
   rejectUnknown(artifactsRaw, ["root", "resultFormat"], "artifacts");
   const artifactInput = optionalString(artifactsRaw.root, "artifacts.root") ?? join(defaultArtifactRoot(inspection.path), taskId);
   const artifactRoot = resolve(baseDir, artifactInput);
   if (await isPathInside(inspection.path, artifactRoot)) throw new Error(`artifacts.root must be outside target.repository: ${artifactRoot}`);
   const validationRaw = optionalObject(raw.validation, "validation");
-  rejectUnknown(validationRaw, ["mode", "commands"], "validation");
+  rejectUnknown(validationRaw, ["mode", "commands", "requirements", "profile", "projectPolicy"], "validation");
   const validationMode = choice(validationRaw.mode ?? "auto", ["auto", "explicit"], "validation.mode");
   const explicitCommands = strings(validationRaw.commands ?? [], "validation.commands");
   if (validationMode === "auto" && explicitCommands.length) throw new Error("validation.commands must be empty when validation.mode='auto'.");
   if (validationMode === "explicit" && !explicitCommands.length) throw new Error("validation.mode='explicit' requires validation.commands.");
   const commands = validationMode === "auto" ? inspection.validationCommands : explicitCommands;
   if (!commands.length) throw new Error("No validation commands were discovered; set validation.mode='explicit' and provide commands.");
-  const blocked = blockedCommandReports(commands, "main");
+  // Git validation is never executed as a shell command. Its dedicated lane performs stricter
+  // structural parsing and records unsupported forms as capability_unsupported before spawn.
+  const blocked = blockedCommandReports(commands.filter((command) => !/^git(?:\s|$)/.test(command.trim())), "main");
   if (blocked[0]) throw new Error(`Unsafe validation command: ${blocked[0].reason}`);
+  const requirementInputs = array(validationRaw.requirements).map((value, index) => {
+    const item = object(value, `validation.requirements[${index}] must be an object.`);
+    rejectUnknown(item, ["command", "capabilities", "acceptance", "evidenceRole", "fallbacks"], `validation.requirements[${index}]`);
+    return {
+      command: string(item.command, `validation.requirements[${index}].command`),
+      capabilities: choices(item.capabilities ?? [], VALIDATION_CAPABILITIES, `validation.requirements[${index}].capabilities`),
+      acceptance: item.acceptance === undefined ? undefined : choice(item.acceptance, VALIDATION_ACCEPTANCE, `validation.requirements[${index}].acceptance`),
+      evidenceRole: optionalString(item.evidenceRole, `validation.requirements[${index}].evidenceRole`),
+      fallbacks: strings(item.fallbacks ?? [], `validation.requirements[${index}].fallbacks`),
+    };
+  });
+  const profileRaw = optionalObject(validationRaw.profile, "validation.profile");
+  rejectUnknown(profileRaw, ["id", "defaultAcceptance", "defaultEvidenceRole", "additionalCapabilities"], "validation.profile");
+  const defaultProfile = defaultValidationProfile(validationMode);
+  const normalizedValidation = normalizeValidationRequirements({
+    commands, mode: validationMode, requirements: requirementInputs,
+    profile: {
+      id: optionalString(profileRaw.id, "validation.profile.id") ?? defaultProfile.id,
+      defaultAcceptance: choice(profileRaw.defaultAcceptance ?? defaultProfile.defaultAcceptance, VALIDATION_ACCEPTANCE, "validation.profile.defaultAcceptance"),
+      defaultEvidenceRole: optionalString(profileRaw.defaultEvidenceRole, "validation.profile.defaultEvidenceRole") ?? defaultProfile.defaultEvidenceRole,
+      additionalCapabilities: choices(profileRaw.additionalCapabilities ?? [], VALIDATION_CAPABILITIES, "validation.profile.additionalCapabilities"),
+    },
+  });
+  const policyRaw = optionalObject(validationRaw.projectPolicy, "validation.projectPolicy");
+  rejectUnknown(policyRaw, ["deniedCapabilities", "skippedCommands"], "validation.projectPolicy");
   const discoveryRaw = optionalObject(raw.discovery, "discovery");
-  rejectUnknown(discoveryRaw, ["policy", "profile", "explicitFiles", "maxFiles", "maxBytes", "maxTokens", "stopCondition"], "discovery");
+  rejectUnknown(discoveryRaw, ["policy", "profile", "explicitFiles", "writeScopes", "maxFiles", "maxBytes", "maxTokens", "stopCondition"], "discovery");
   const runtimeRaw = optionalObject(raw.runtime, "runtime");
   rejectUnknown(runtimeRaw, ["preference", "dockerImage", "prepareDependencies", "dependencyPreparation", "externalNetwork"], "runtime");
   const authorityRaw = optionalObject(raw.authority, "authority");
@@ -115,6 +143,8 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const forbiddenAreas = strings(authorityRaw.forbiddenAreas ?? defaultForbidden(), "authority.forbiddenAreas");
   const repairMode = choice(repairRaw.mode ?? "none", ["none", "disposable", "code"], "repair.mode");
   const executionMode = choice(executionRaw.mode, taskExecutionModes, "execution.mode");
+  const execution = normalizeExecution(executionRaw, executionMode);
+  const providerRouting = normalizeProviderRouting(raw.providerRouting, execution);
   const executionAgreement = normalizeExecutionAgreementRequest(raw.executionAgreement, executionMode);
   if (["implementation", "repair"].includes(executionMode) !== (profile === "bounded-implementation")) throw new Error(`execution.mode='${executionMode}' is inconsistent with authority.profile='${profile}'.`);
   const authorityFile = authorityRaw.envelopeFile === undefined || authorityRaw.envelopeFile === null ? null : resolve(baseDir, string(authorityRaw.envelopeFile, "authority.envelopeFile"));
@@ -147,16 +177,23 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
     taskId,
     task: { text: string(task.text, "task.text"), goal: string(task.goal, "task.goal"), acceptanceCriteria: strings(task.acceptanceCriteria, "task.acceptanceCriteria", true) },
     target: { repository: await realpath(inspection.path), workingDirectory: inspection.workingDirectory ?? ".", expectedSha, ...(target.dirtyPolicy !== undefined || executionMode === "implementation" ? { dirtyPolicy: choice(target.dirtyPolicy ?? "use_disposable_from_base_sha", ["require_clean", "allow_known_generated", "snapshot_from_sha", "use_disposable_from_base_sha"] as const, "target.dirtyPolicy") } : {}) },
-    execution: normalizeExecution(executionRaw, executionMode, discovery),
+    execution,
+    providerRouting,
     executionAgreement,
-    discovery,
+    discovery: normalizeDiscovery(discoveryRaw),
     runtime: {
       preference: runtimePreference,
       dockerImage: optionalString(runtimeRaw.dockerImage, "runtime.dockerImage") ?? "runforge:local",
       dependencyPreparation,
       externalNetwork
     },
-    validation: { mode: validationMode, commands },
+    validation: {
+      mode: validationMode, commands, requirements: normalizedValidation.requirements, profile: normalizedValidation.profile,
+      projectPolicy: {
+        deniedCapabilities: choices(policyRaw.deniedCapabilities ?? [], VALIDATION_CAPABILITIES, "validation.projectPolicy.deniedCapabilities"),
+        skippedCommands: strings(policyRaw.skippedCommands ?? [], "validation.projectPolicy.skippedCommands"),
+      },
+    },
     authority: { profile, envelopeFile: authorityFile, forbiddenAreas, allowProviderCalls, allowNetwork },
     git: { publication, branch: nullableString(gitRaw.branch, "git.branch") },
     merge: { policy: choice(mergeRaw.policy ?? "never", ["never"], "merge.policy") },
@@ -170,40 +207,18 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
 }
 
 const budgetPhases = ["startup", "analysis", "implementation", "validation", "repair", "review", "publication"] as const;
-function normalizeExecution(raw: Record<string, unknown>, mode: TaskExecutionMode, discovery: TaskSpecV2["discovery"]): TaskSpecV2["execution"] {
-  const maxima = implementationExecutorContract.maxLimits;
-  if (raw.maxProviderTokens !== undefined && raw.maxTaskTokens !== undefined && raw.maxProviderTokens !== raw.maxTaskTokens) {
-    throw new Error("execution.maxProviderTokens and execution.maxTaskTokens must match when both are provided.");
-  }
-  const requestedTaskTokens = raw.maxTaskTokens ?? raw.maxProviderTokens;
-  const total = cappedInteger(requestedTaskTokens, "execution.maxTaskTokens", 1_000, maxima.taskTokens, 100_000);
-  const maxInputContextTokens = cappedInteger(raw.maxInputContextTokens, "execution.maxInputContextTokens", 1_000, maxima.inputContextTokens, 60_000);
-  const maxOutputTokens = cappedInteger(raw.maxOutputTokens, "execution.maxOutputTokens", 1, maxima.outputTokens, 8_000);
-  const maxReasoningTokens = cappedInteger(raw.maxReasoningTokens, "execution.maxReasoningTokens", 0, maxima.reasoningTokens, 16_000);
-  const maxCallsPerPhase = cappedInteger(raw.maxCallsPerPhase, "execution.maxCallsPerPhase", 1, maxima.callsPerPhase, 4);
-  const maxPhaseTokens = cappedInteger(raw.maxPhaseTokens, "execution.maxPhaseTokens", 1, maxima.phaseTokens, Math.min(40_000, total));
-  const earlyProgressDeadlineMs = cappedInteger(raw.earlyProgressDeadlineMs, "execution.earlyProgressDeadlineMs", 60_000, maxima.earlyProgressDeadlineMs, implementationExecutorContract.defaultEarlyProgressDeadlineMs);
-  const maxCostUsd = cappedNumber(raw.maxCostUsd, "execution.maxCostUsd", maxima.costUsd, 10);
+function normalizeExecution(raw: Record<string, unknown>, mode: TaskExecutionMode): TaskSpecV2["execution"] {
+  const total = integer(raw.maxProviderTokens, "execution.maxProviderTokens", 1_000, 200_000, 100_000);
   const phaseRaw = optionalObject(raw.phaseBudgets, "execution.phaseBudgets"); rejectUnknown(phaseRaw, [...budgetPhases], "execution.phaseBudgets");
   const defaults = { startup: .05, analysis: .1, implementation: .45, validation: .1, repair: .2, review: .07, publication: .03 };
-  const phaseBudgets = Object.fromEntries(budgetPhases.map((phase) => [phase, cappedInteger(phaseRaw[phase], `execution.phaseBudgets.${phase}`, 0, maxPhaseTokens, Math.min(maxPhaseTokens, Math.floor(total * defaults[phase])))])) as TaskSpecV2["execution"]["phaseBudgets"];
-  if (Object.values(phaseBudgets).reduce((sum, value) => sum + value, 0) > total) throw new Error("execution.phaseBudgets total must not exceed execution.maxTaskTokens.");
-  if (maxOutputTokens + maxReasoningTokens > total) throw new Error("execution output and reasoning budgets must not exceed execution.maxTaskTokens.");
-  const maxChangedFiles = cappedInteger(raw.maxChangedFiles, "execution.maxChangedFiles", 1, maxima.changedFiles, 20);
-  const requestedProfile = raw.requestedProfile === undefined ? undefined : choice(raw.requestedProfile, ["fast", "standard", "heavy"] as const, "execution.requestedProfile");
-  const complexitySignal = raw.complexitySignal === undefined ? undefined : choice(raw.complexitySignal, ["heavy"] as const, "execution.complexitySignal");
-  if (requestedProfile === "heavy" && complexitySignal !== "heavy") throw new Error("execution.requestedProfile='heavy' requires execution.complexitySignal='heavy'.");
-  const fileBound = discovery.explicitFiles.length || Math.min(discovery.maxFiles, maxChangedFiles);
-  const small = discovery.profile === "small-scope" && fileBound <= implementationExecutorContract.profiles.fast.maxFiles;
-  if (requestedProfile === "fast" && !small) throw new Error("execution.requestedProfile='fast' requires a bounded 1-3-file small-scope task.");
-  const profile: TaskSpecV2["execution"]["plan"]["profile"] = complexitySignal === "heavy" ? "heavy" : small ? "fast" : "standard";
-  const profileContract = implementationExecutorContract.profiles[profile];
-  const plan = { classification: profile === "heavy" ? "heavy" as const : small ? "bounded-small" as const : "bounded-standard" as const, profile, modelSelection: profileContract.modelSelection, expectedDurationMs: profileContract.expectedDurationMs };
-  return { mode, maxRepairIterations: cappedInteger(raw.maxRepairIterations, "execution.maxRepairIterations", 0, maxima.repairIterations, 2), timeoutMs: cappedInteger(raw.timeoutMs, "execution.timeoutMs", 1_000, maxima.timeoutMs, 300_000), maxChangedFiles, maxPatchBytes: cappedInteger(raw.maxPatchBytes, "execution.maxPatchBytes", 1_000, maxima.patchBytes, 500_000), maxProviderTokens: total, maxInputContextTokens, maxOutputTokens, maxReasoningTokens, reasoningSetting: choice(raw.reasoningSetting ?? "medium", ["minimal", "low", "medium", "high"] as const, "execution.reasoningSetting"), maxCallsPerPhase, maxPhaseTokens, maxTaskTokens: total, earlyProgressDeadlineMs, maxCostUsd, ...(requestedProfile ? { requestedProfile } : {}), ...(complexitySignal ? { complexitySignal } : {}), budgetMode: choice(raw.budgetMode ?? "hard", ["soft", "hard"], "execution.budgetMode"), phaseBudgets, plan };
+  const phaseBudgets = Object.fromEntries(budgetPhases.map((phase) => [phase, integer(phaseRaw[phase], `execution.phaseBudgets.${phase}`, 0, 200_000, Math.floor(total * defaults[phase]))])) as TaskSpecV2["execution"]["phaseBudgets"];
+  return { mode, maxRepairIterations: integer(raw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(raw.timeoutMs, "execution.timeoutMs", 1_000, implementationExecutorContract.maxLimits.timeoutMs, 300_000), maxChangedFiles: integer(raw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(raw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: total, budgetMode: choice(raw.budgetMode ?? "soft", ["soft", "hard"], "execution.budgetMode"), phaseBudgets };
 }
 function normalizeDiscovery(raw: Record<string, unknown>): TaskSpecV2["discovery"] {
   const profile = choice(raw.profile ?? "standard", ["small-scope", "standard"], "discovery.profile");
-  return { policy: choice(raw.policy ?? "auto", ["auto", "explicit"], "discovery.policy"), profile, explicitFiles: strings(raw.explicitFiles ?? [], "discovery.explicitFiles"), maxFiles: integer(raw.maxFiles, "discovery.maxFiles", 1, 1_000, profile === "small-scope" ? 20 : 100), maxBytes: integer(raw.maxBytes, "discovery.maxBytes", 1_000, 10_000_000, profile === "small-scope" ? 240_000 : 1_000_000), maxTokens: integer(raw.maxTokens, "discovery.maxTokens", 100, 500_000, profile === "small-scope" ? 30_000 : 100_000), stopCondition: optionalString(raw.stopCondition, "discovery.stopCondition") ?? "Stop when the task, declared files, directly related tests/config, and minimum mandatory policy are sufficient." };
+  const writeScopes = raw.writeScopes === undefined ? undefined : strings(raw.writeScopes, "discovery.writeScopes");
+  if (writeScopes?.some((scope) => !safeWriteScope(scope))) throw new Error("discovery.writeScopes must contain safe relative paths.");
+  return { policy: choice(raw.policy ?? "auto", ["auto", "explicit"], "discovery.policy"), profile, explicitFiles: strings(raw.explicitFiles ?? [], "discovery.explicitFiles"), ...(writeScopes === undefined ? {} : { writeScopes: [...new Set(writeScopes)] }), maxFiles: integer(raw.maxFiles, "discovery.maxFiles", 1, 1_000, profile === "small-scope" ? 20 : 100), maxBytes: integer(raw.maxBytes, "discovery.maxBytes", 1_000, 10_000_000, profile === "small-scope" ? 240_000 : 1_000_000), maxTokens: integer(raw.maxTokens, "discovery.maxTokens", 100, 500_000, profile === "small-scope" ? 30_000 : 100_000), stopCondition: optionalString(raw.stopCondition, "discovery.stopCondition") ?? "Stop when the task, declared files, directly related tests/config, and minimum mandatory policy are sufficient." };
 }
 
 export function redactedTaskSpec(spec: TaskSpecV2): TaskSpecV2 {
@@ -220,7 +235,10 @@ function integer(value: unknown, name: string, min: number, max: number, fallbac
 function cappedInteger(value: unknown, name: string, min: number, max: number, fallback: number): number { const parsed = value === undefined ? fallback : value; if (!Number.isInteger(parsed) || Number(parsed) < min) throw new Error(`${name} must be an integer of at least ${min}.`); return Math.min(Number(parsed), max); }
 function cappedNumber(value: unknown, name: string, max: number, fallback: number): number { const parsed = value === undefined ? fallback : value; if (typeof parsed !== "number" || !Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} must be a positive finite number.`); return Math.min(parsed, max); }
 function strings(value: unknown, name: string, nonEmpty = false): string[] { if (!Array.isArray(value) || (nonEmpty && !value.length) || value.some((item) => typeof item !== "string" || !item.trim())) throw new Error(`${name} must be ${nonEmpty ? "a non-empty " : "an "}array of non-empty strings.`); return value.map((item) => item.trim()); }
+function safeWriteScope(value: string): boolean { const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, ""); return Boolean(normalized) && !normalized.startsWith("/") && !normalized.split("/").includes("..") && !normalized.split("/").includes(".git"); }
 function choice<T extends string>(value: unknown, choices: readonly T[], name: string): T { if (typeof value !== "string" || !choices.includes(value as T)) throw new Error(`${name} must be one of: ${choices.join(", ")}.`); return value as T; }
+function choices<T extends string>(value: unknown, allowed: readonly T[], name: string): T[] { return strings(value, name).map((item) => choice(item, allowed, name)); }
+function array(value: unknown): unknown[] { if (value === undefined) return []; if (!Array.isArray(value)) throw new Error("validation.requirements must be an array."); return value; }
 function rejectUnknown(value: Record<string, unknown>, allowed: string[], name: string): void { const unknown = Object.keys(value).filter((key) => !allowed.includes(key)); if (unknown.length) throw new Error(`${name} contains unknown field(s): ${unknown.join(", ")}.`); }
 function defaultForbidden(): string[] { return ["target main mutation or push", "PR merge", "deploy", "database", "production", "secrets", "migrations"]; }
 
@@ -284,7 +302,10 @@ function assertNoCredentialLikeValues(value: unknown, path = "TaskSpec"): void {
   }
   if (Array.isArray(value)) value.forEach((item, index) => assertNoCredentialLikeValues(item, `${path}[${index}]`));
   else if (typeof value === "object" && value !== null) {
-    for (const [key, item] of Object.entries(value)) assertNoCredentialLikeValues(item, `${path}.${key}`);
+    for (const [key, item] of Object.entries(value)) {
+      assertNoCredentialLikeKey(key, path);
+      assertNoCredentialLikeValues(item, `${path}.${key}`);
+    }
   }
 }
 

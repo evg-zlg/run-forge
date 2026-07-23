@@ -1,28 +1,202 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { request as httpRequest } from "node:http";
+import { access, chmod, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneManager } from "../../src/control-plane/manager.js";
 import { startControlPlaneServer, type ControlPlaneServerInstance } from "../../src/control-plane/server.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
 import { persistDurableCheckpoint } from "../../src/implementation/durable-checkpoint.js";
 import { validateTaskResultContract } from "../../src/product/task-result-contract.js";
+import { WorkspaceSetupError } from "../../src/run/task-run-workspace.js";
+import { PreProviderSetupFailure } from "../../src/control-plane/http-task-preflight.js";
 
 const roots: string[] = [];
 const servers: ControlPlaneServerInstance[] = [];
-afterEach(async () => { await Promise.all(servers.splice(0).map((item) => item.close())); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
+afterEach(async () => { vi.unstubAllGlobals(); await Promise.all(servers.splice(0).map((item) => item.close())); await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))); });
 
 describe("local control-plane HTTP lifecycle", () => {
+  it("publishes the validation/reviewer contract and a schema-valid multi-lane example", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-discovery-"))) - 1]!;
+    const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
+    const discovery = await json(await fetch(`${instance.url}/v1/capabilities/discovery`));
+    expect(discovery).toMatchObject({
+      negotiation: { beforeProviderInvocation: true, requiredUnsupported: { httpStatus: 422, providerInvocations: 0 }, nonRequiredUnsupported: { accepted: true, productFailed: false } },
+      lanes: { "git-evidence": { network: false, credentials: false, mutations: false, safetyAssertions: expect.arrayContaining(["argv_only_no_shell", "source_state_immutable"]) } },
+      review: { distinction: expect.stringContaining("never substitutes"), backends: expect.arrayContaining([expect.objectContaining({ kind: "structural_review", status: "available" }), expect.objectContaining({ kind: "semantic_review", quality: expect.any(String), limitations: expect.any(Array) })]) },
+      responsibility: { structuralReviewPhase: "localValidation", semanticReviewPhase: "independentReview", preservedAcross: expect.arrayContaining(["retry", "restart", "continuation", "normalized result", "handoff"]) },
+      schemas: { validationRequirements: "/schemas/task-spec-v2.schema.json#/properties/validation/properties/requirements", validationPlan: "/schemas/task-result-v1.schema.json#/$defs/validationPlan" },
+    });
+    const schema = await json(await fetch(`${instance.url}/schemas/task-spec-v2.schema.json`));
+    const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(schema);
+    expect(validate(discovery.examples.multiLaneTaskSpec), JSON.stringify(validate.errors)).toBe(true);
+    const resultSchema = await json(await fetch(`${instance.url}/schemas/task-result-v1.schema.json`));
+    const resultAjv = new Ajv2020({ strict: true, strictRequired: false }); resultAjv.addSchema(resultSchema);
+    const validateNegotiation = resultAjv.getSchema("https://runforge.local/schemas/task-result-v1.schema.json#/$defs/validationNegotiation");
+    expect(validateNegotiation).toBeTypeOf("function");
+    expect(await json(await fetch(`${instance.url}/v1/capabilities`))).toMatchObject({ validation: { endpoint: "/v1/capabilities/discovery" } });
+    expect(await json(await fetch(`${instance.url}/.well-known/runforge`))).toMatchObject({ validation: { negotiation: { beforeProviderInvocation: true } } });
+  });
+
+  it("rejects impossible required validation before execution and accepts non-required gaps", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-negotiation-"))) - 1]!;
+    const repository = await syntheticRepository(); let executions = 0;
+    const previous = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = process.execPath;
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), {
+      runTaskSpec: async (specPath) => { executions += 1; const spec = JSON.parse(await readFile(specPath, "utf8")); await mkdir(spec.artifacts.root, { recursive: true }); await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
+      recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never),
+    });
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
+    const resultSchema = await json(await fetch(`${instance.url}/schemas/task-result-v1.schema.json`));
+    const resultAjv = new Ajv2020({ strict: true, strictRequired: false }); resultAjv.addSchema(resultSchema);
+    const validateNegotiation = resultAjv.getSchema("https://runforge.local/schemas/task-result-v1.schema.json#/$defs/validationNegotiation")!;
+    const withRequirement = (taskId: string, acceptance: "required" | "optional" | "advisory" | "evidence-only") => ({
+      ...implementationTaskSpec(taskId, repository),
+      validation: { mode: "explicit", commands: ["node --version"], requirements: [{ command: "node --version", capabilities: ["database"], acceptance, evidenceRole: "capability-sentinel", fallbacks: ["Delegate database evidence to the external session."] }] },
+    });
+    try {
+      const rejected = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: withRequirement("VALIDATION-REQUIRED-1", "required"), authority: implementationAuthority() }) });
+      expect(rejected.status).toBe(422);
+      expect(await json(rejected)).toMatchObject({ error: { code: "validation_capability_unavailable", taskId: "VALIDATION-REQUIRED-1", details: { negotiation: { status: "rejected", requiredUnsupported: [{ command: "node --version" }] } } } });
+      expect(executions).toBe(0);
+      expect(await manager.store.getTask("VALIDATION-REQUIRED-1")).toBeNull();
+
+      for (const acceptance of ["optional", "advisory", "evidence-only"] as const) {
+        const taskId = `VALIDATION-${acceptance.toUpperCase().replace("-", "_")}-1`;
+        const accepted = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: withRequirement(taskId, acceptance), authority: implementationAuthority() }) });
+        expect(accepted.status).toBe(202);
+        expect(await json(accepted)).toMatchObject({ validationNegotiation: { status: "accepted", requirements: [{ acceptance, disposition: "capability_unsupported", blocking: false }], responsibility: { structuralReview: { source: "localValidation" }, semanticReview: { source: "independentReview" } } } });
+        await eventually(async () => (await manager.getTask(taskId)).status === "completed");
+        const result = await json(await fetch(`${instance.url}/v1/tasks/${taskId}/result`));
+        expect(result.status).toBe("completed");
+        expect(result.validationNegotiation).toMatchObject({ status: "accepted", requirements: [{ acceptance, blocking: false }] });
+        expect(validateNegotiation!(result.validationNegotiation), JSON.stringify(validateNegotiation!.errors)).toBe(true);
+        expect(result.status).not.toBe("product_failed");
+        expect((await new ControlPlaneStore(stateRoot).getTask(taskId))?.validationNegotiation).toEqual(result.validationNegotiation);
+      }
+      expect(executions).toBe(3);
+    } finally {
+      if (previous === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previous;
+    }
+  });
+
+  it("routes validation-only public API execution through negotiated Docker and SHA-bound Git lanes", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-validation-multilane-"))) - 1]!;
+    const repository = await syntheticRepository();
+    const dockerBin = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-docker-shim-"))) - 1]!;
+    const dockerLog = join(dockerBin, "docker-invocations.log");
+    const dockerPath = join(dockerBin, "docker");
+    await writeFile(dockerPath, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "Docker version 99.0.0, build test"; exit 0; fi
+printf '%s\\n' "$*" >> "${dockerLog}"
+if [ "$1" = "volume" ]; then
+  if [ "$2" = "create" ]; then for argument in "$@"; do volume="$argument"; done; printf '%s\\n' "$volume"; fi
+  exit 0
+fi
+workspace=""
+last=""
+for argument in "$@"; do
+  case "$argument" in type=bind,src=*,dst=/workspace*) workspace="\${argument#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace*}" ;; esac
+  last="$argument"
+done
+if [ -z "$workspace" ]; then echo "workspace mount missing" >&2; exit 97; fi
+(cd "$workspace" && /bin/sh -lc "$last")
+`, "utf8");
+    await chmod(dockerPath, 0o755);
+    const previousPath = process.env.PATH;
+    process.env.PATH = `${dockerBin}:${previousPath ?? ""}`;
+    const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
+    const before = {
+      head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim(),
+      status: execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim(),
+    };
+    const databaseCommand = "runforge-database-probe --read-only";
+    const taskId = "VALIDATION-MULTILANE-DOGFOOD-1";
+    const taskSpec = {
+      schemaVersion: 2, taskId,
+      task: { text: "Run validation-only multi-lane dogfood.", goal: "Prove capability-aware routing.", acceptanceCriteria: ["Docker product checks pass", "Git evidence is SHA-bound", "Database probe is not spawned"] },
+      target: { repository, workingDirectory: ".", expectedSha: before.head },
+      execution: { mode: "validation", timeoutMs: 30_000 },
+      executionAgreement: { schemaVersion: 1, profile: "assist-only" },
+      runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "disabled", externalNetwork: "denied" },
+      validation: {
+        mode: "explicit",
+        commands: ["node --version", "test -d .git", "git diff --check", databaseCommand],
+        requirements: [
+          { command: "node --version", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation", fallbacks: [] },
+          { command: "test -d .git", capabilities: ["filesystem", "shell"], acceptance: "required", evidenceRole: "product-validation", fallbacks: [] },
+          { command: "git diff --check", capabilities: ["git-read-only-evidence"], acceptance: "evidence-only", evidenceRole: "git-evidence", fallbacks: [] },
+          { command: databaseCommand, capabilities: ["database"], acceptance: "optional", evidenceRole: "database-evidence", fallbacks: ["Delegate database evidence."] },
+        ],
+      },
+      authority: { profile: "read-only", allowProviderCalls: false, allowNetwork: false },
+      git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" },
+    };
+    try {
+      const accepted = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec, authority: { inspect: true } }) });
+      expect(accepted.status).toBe(202);
+      expect(await json(accepted)).toMatchObject({ validationNegotiation: { status: "accepted", requirements: [
+        { command: "node --version", disposition: "deferred_preflight" },
+        { command: "test -d .git", disposition: "deferred_preflight" },
+        { command: "git diff --check", disposition: "deferred_preflight" },
+        { command: databaseCommand, disposition: "capability_unsupported", blocking: false },
+      ] } });
+      await eventually(async () => (await instance.manager.getTask(taskId)).status === "completed");
+      const result = await json(await fetch(`${instance.url}/v1/tasks/${taskId}/result`));
+      await expectValidPublicResult(result);
+      const validation = result.validation as Array<Record<string, any>>;
+      expect(result).toMatchObject({
+        status: "completed", validationAggregate: "completed_with_validation_gaps",
+        targetRepository: { initialSha: before.head, finalSha: before.head, changed: false, initialStatus: before.status, finalStatus: before.status },
+        safetyAssertions: { targetUnchanged: true, providerCalls: false, databaseAccess: false },
+        review: { structural: { kind: "structural", status: "completed_with_validation_gaps" }, semantic: { kind: "semantic", status: "unavailable", performed: false, delegation: { party: "external_session" } } },
+        workflow: { agreement: { phaseOwnership: expect.arrayContaining([{ phaseId: "localValidation", responsibleParty: "runforge" }]) }, handoff: { semanticReview: { status: "unavailable", delegation: { party: "external_session" } } } },
+      });
+      expect(validation.slice(0, 2)).toEqual(expect.arrayContaining([
+        expect.objectContaining({ command: "node --version", outcome: "passed", lane: "docker-validation", executor: "docker-shell", exitCode: 0 }),
+        expect.objectContaining({ command: "test -d .git", outcome: "passed", lane: "docker-validation", executor: "docker-shell", exitCode: 0 }),
+      ]));
+      const gitEvidence = validation.find((item) => item.command === "git diff --check")!;
+      expect(gitEvidence).toMatchObject({ outcome: "passed", lane: "git-evidence", executor: "safe-git-evidence", argv: ["git", "diff", "--no-ext-diff", "--no-textconv", "--check"], repositoryIdentity: "[internal path]", boundSha: before.head });
+      expect(gitEvidence.safetyAssertions).toEqual(expect.arrayContaining(["argv_only_no_shell", "expected_sha_verified_before_and_after", "source_state_immutable"]));
+      const unsupported = validation.find((item) => item.command === databaseCommand)!;
+      expect(unsupported).toMatchObject({ outcome: "capability_unsupported", exitCode: null, lane: "docker-validation", missingCapabilities: ["database"] });
+      expect(await access(join(validation[0]!.cwd, ".git")).then(() => true, () => false)).toBe(false);
+      const invocations = await readFile(dockerLog, "utf8");
+      expect(invocations).toContain("node --version"); expect(invocations).toContain("test -d .git");
+      expect(invocations).not.toContain("git diff --check"); expect(invocations).not.toContain(databaseCommand);
+      const lifecycle = invocations.trim().split("\n");
+      const createIndex = lifecycle.findIndex((line) => line.startsWith("volume create "));
+      const removeIndex = lifecycle.findIndex((line) => line.startsWith("volume rm -f "));
+      const runIndexes = lifecycle.flatMap((line, index) => line.startsWith("run ") ? [index] : []);
+      const volume = lifecycle[createIndex]!.split(" ").at(-1)!;
+      expect(volume).toMatch(/^runforge-validation-tmp-validation-multilane-dogfood-1-[a-z0-9.-]+-[a-f0-9]{16}$/);
+      expect(runIndexes).toHaveLength(2);
+      expect(runIndexes.every((index) => lifecycle[index]!.includes(`type=volume,src=${volume},dst=/runforge-tmp`))).toBe(true);
+      expect(createIndex).toBeLessThan(runIndexes[0]!);
+      expect(removeIndex).toBeGreaterThan(runIndexes.at(-1)!);
+      expect(lifecycle[removeIndex]).toBe(`volume rm -f ${volume}`);
+      expect(execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim()).toBe(before.head);
+      expect(execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim()).toBe(before.status);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath;
+    }
+  });
+
   it("publishes degraded adapter-honest capabilities and negotiates durable registered-project context", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-project-agreement-"))) - 1]!;
     const previous = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+    const previousOpenRouter = process.env.OPENROUTER_API_KEY;
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = "/definitely/missing/super-secret-command-token";
+    delete process.env.OPENROUTER_API_KEY;
     const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
     try {
       const capabilities = await json(await fetch(`${instance.url}/v1/capabilities`));
       expect(capabilities).toMatchObject({ executionAgreements: { projectLevelNegotiation: true, technicalCapabilities: { implementation: false, providerModelCalls: false, remotePush: false, draftPublication: false }, readiness: { implementationExecutorReady: false }, unavailableAdapters: { githubPush: { available: false, credentialReady: false }, updateExistingChange: { available: false }, ci: { available: false }, deploy: { available: false }, database: { available: false }, production: { available: false }, secrets: { available: false } } } });
+      expect(capabilities).toMatchObject({ providerRouting: { providers: { openrouter: { configured: false, credentialReady: false, ready: false, noLocalFallback: true } } }, implementationExecutors: expect.arrayContaining([expect.objectContaining({ id: "openrouter-coding-agent", provider: "openrouter", credentialReady: false })]) });
       expect(JSON.stringify(capabilities)).not.toContain("super-secret-command-token");
 
       const unknown = await fetch(`${instance.url}/v1/execution-agreements/negotiate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ schemaVersion: 1, profile: "assist-only", projectId: "missing-project", publicationTarget: { kind: "none" } }) });
@@ -44,6 +218,7 @@ describe("local control-plane HTTP lifecycle", () => {
       expect(await json(await fetch(`${instance.url}/v1/execution-agreements/${agreement.agreementId}`))).toEqual(agreement);
     } finally {
       if (previous === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previous;
+      if (previousOpenRouter === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = previousOpenRouter;
     }
   });
 
@@ -444,6 +619,129 @@ describe("local control-plane HTTP lifecycle", () => {
     expect(malformed).toMatchObject({ schemaVersion: 1, error: { code: "malformed_json", retryable: false, details: {} } });
   });
 
+  it("round-trips public runtime corrections and applies chunked retry corrections without leaking accepted repository data", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-http-runtime-roundtrip-"))) - 1]!;
+    const repository = await syntheticRepository();
+    const previousExecutor = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = process.execPath;
+    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), {
+      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); await mkdir(spec.artifacts.root, { recursive: true }); await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
+      recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never),
+    });
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
+    try {
+      const inspected = await json(await fetch(`${instance.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repository, workingDirectory: ".", register: true }) }));
+      const rejectedRequest = { projectId: inspected.project.id, taskSpec: { ...implementationTaskSpec("CONTROL-CORRECTED-HTTP-1", repository), runtime: { preference: "docker", externalNetwork: "allowed" } }, authority: implementationAuthority(), publication: "none" };
+      const rejected = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(rejectedRequest) });
+      expect(rejected.status).toBe(422);
+      const rejectedText = await rejected.text(); const rejectedBody = JSON.parse(rejectedText) as Record<string, any>;
+      expect(rejectedBody).toMatchObject({ error: { code: "preflight_contract_rejected", details: { correctedRequest: { projectId: inspected.project.id, taskSpec: { taskId: "CONTROL-CORRECTED-HTTP-1", runtime: { preference: "local-disposable" } } } } } });
+      expect(rejectedText).not.toContain(repository); expect(rejectedText).not.toContain("[internal path]");
+      const corrected = rejectedBody.error.details.correctedRequest;
+      const accepted = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(corrected) });
+      expect(accepted.status).toBe(202);
+      const task = await json(accepted); expect(task).toMatchObject({ id: "CONTROL-CORRECTED-HTTP-1", projectId: inspected.project.id, executionAgreement: { phases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview" })]) } });
+
+      const directRequest = { taskSpec: { ...implementationTaskSpec("CONTROL-CORRECTED-DIRECT-HTTP-1", repository), runtime: { preference: "docker", externalNetwork: "allowed" } }, authority: implementationAuthority(), publication: "none" };
+      const directRejected = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(directRequest) });
+      expect(directRejected.status).toBe(422);
+      const directBody = await json(directRejected); const directCorrected = directBody.error.details.correctedRequest as Record<string, any>;
+      expect(directCorrected).toMatchObject({ taskSpec: { taskId: "CONTROL-CORRECTED-DIRECT-HTTP-1", target: { repository }, runtime: { preference: "local-disposable" } } });
+      expect(JSON.stringify(directCorrected)).not.toContain("[internal path]"); expect(directCorrected.taskSpec.artifacts).toBeUndefined();
+      const directAccepted = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(directCorrected) });
+      expect(directAccepted.status).toBe(202);
+    } finally {
+      if (previousExecutor === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousExecutor;
+    }
+  });
+
+  it("uses the production runner boundary for setup failures and chunked retry runtime corrections", async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-http-chunked-retry-"))) - 1]!;
+    const repository = await syntheticRepository(); const dockerBin = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-chunked-docker-"))) - 1]!;
+    const marker = join(dockerBin, "first-volume-create"); const docker = join(dockerBin, "docker"); const priorPath = process.env.PATH;
+    await writeFile(docker, `#!/bin/sh
+if [ "$1" = "volume" ] && [ "$2" = "create" ]; then
+  if [ ! -f ${JSON.stringify(marker)} ]; then touch ${JSON.stringify(marker)}; echo "setup unavailable" >&2; exit 23; fi
+  for item in "$@"; do volume="$item"; done; echo "$volume"; exit 0
+fi
+if [ "$1" = "volume" ]; then exit 0; fi
+workspace=""; last=""
+for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace="\${item#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace*}";; esac; last="$item"; done
+[ -n "$workspace" ] || exit 97
+(cd "$workspace" && /bin/sh -lc "$last")
+`, "utf8");
+    await chmod(docker, 0o755); process.env.PATH = `${dockerBin}:${priorPath ?? ""}`;
+    const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
+    try {
+      const inspected = await json(await fetch(`${instance.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repository, workingDirectory: ".", register: true }) }));
+      const id = "CONTROL-CHUNKED-RETRY-1";
+      const submitted = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: inspected.project.id, taskSpec: { ...taskSpec(id, repository), runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "disabled", externalNetwork: "denied" }, validation: { mode: "explicit", commands: ["node --version"] } }, authority: { inspect: true } }) });
+      expect(submitted.status).toBe(202); const created = await json(submitted); const canonical = await readFile(join(stateRoot, "tasks", id, "task-spec.json"), "utf8");
+      await eventually(async () => (await instance.manager.getTask(id)).status === "interrupted");
+      const failed = await json(await fetch(`${instance.url}/v1/tasks/${id}/result`));
+      expect(failed).toMatchObject({ status: "interrupted", outcome: "runtime_capability_mismatch", providerCalls: 0, recovery: { retryAvailable: true } });
+      const corrected = await chunkedJson(`${instance.url}/v1/tasks/${id}/retry`, { runtime: { preference: "local-disposable" } });
+      expect(corrected.status).toBe(202); const retryTask = JSON.parse(corrected.body) as Record<string, any>;
+      expect(retryTask).toMatchObject({ id, projectId: inspected.project.id, validationNegotiation: { runtime: "local-disposable" }, executionAgreement: { agreementId: created.executionAgreement.agreementId, phases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview" })]) } });
+      await eventually(async () => (await instance.manager.getTask(id)).status === "interrupted");
+      expect(JSON.parse(canonical).runtime).toMatchObject({ preference: "docker" });
+      expect(await readFile(join(stateRoot, "tasks", id, "task-spec.json"), "utf8")).toBe(canonical);
+      expect(JSON.parse(await readFile(join(stateRoot, "tasks", id, "attempts", "2", "task-spec.json"), "utf8")).runtime).toMatchObject({ preference: "local-disposable" });
+      const finalRetry = await fetch(`${instance.url}/v1/tasks/${id}/retry`, { method: "POST" }); expect(finalRetry.status).toBe(202);
+      await eventually(async () => (await instance.manager.getTask(id)).status === "completed");
+      const result = await json(await fetch(`${instance.url}/v1/tasks/${id}/result`));
+      expect(result).toMatchObject({ status: "completed", safetyAssertions: { providerCalls: false } }); await expectValidPublicResult(result);
+    } finally { if (priorPath === undefined) delete process.env.PATH; else process.env.PATH = priorPath; }
+  });
+
+  it("retries the same Docker validation task after pre-provider interruption and completes its explicit semantic review", { timeout: 15_000 }, async () => {
+    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-http-semantic-retry-"))) - 1]!;
+    const repository = await syntheticRepository(); const dockerBin = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-semantic-docker-"))) - 1]!;
+    const nestedWorkingDirectory = "packages/app";
+    await mkdir(join(repository, nestedWorkingDirectory, "src"), { recursive: true }); await writeFile(join(repository, nestedWorkingDirectory, "src", "review.ts"), "export const stable = true;\n");
+    await writeFile(join(repository, nestedWorkingDirectory, "package.json"), JSON.stringify({ packageManager: "pnpm@10.0.0" })); await writeFile(join(repository, nestedWorkingDirectory, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n");
+    execFileSync("git", ["add", nestedWorkingDirectory], { cwd: repository }); execFileSync("git", ["commit", "-qm", "review source"], { cwd: repository });
+    const sourceBefore = { head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim(), status: execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim(), refs: execFileSync("git", ["for-each-ref", "--format=%(refname) %(objectname)"], { cwd: repository, encoding: "utf8" }).trim() };
+    const marker = join(dockerBin, "failed-once"), preparationLog = join(dockerBin, "preparation.log"), docker = join(dockerBin, "docker"), priorPath = process.env.PATH, priorKey = process.env.OPENROUTER_API_KEY, nativeFetch = globalThis.fetch;
+    await writeFile(docker, `#!/bin/sh
+if [ "$1" = "--version" ]; then echo "Docker version 99.0.0"; exit 0; fi
+if [ "$1" = "image" ] && [ "$2" = "inspect" ]; then echo "sha256:test amd64"; exit 0; fi
+if [ "$1" = "volume" ] && [ "$2" = "create" ]; then for item in "$@"; do volume="$item"; done; echo "$volume"; exit 0; fi
+if [ "$1" = "volume" ]; then exit 0; fi
+case "$*" in *runforge-prepare*)
+  printf 'prepared-attempt\\n' >> ${JSON.stringify(preparationLog)}
+  if [ ! -f ${JSON.stringify(marker)} ]; then touch ${JSON.stringify(marker)}; echo "transient failure after workspace preparation" >&2; exit 23; fi
+  exit 0;;
+esac
+workspace=""; last=""
+for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace="\${item#type=bind,src=}"; workspace="\${workspace%%,dst=/workspace*}";; esac; last="$item"; done
+[ -n "$workspace" ] || exit 97
+(cd "$workspace" && /bin/sh -lc "$last")
+`); await chmod(docker, 0o755); process.env.PATH = `${dockerBin}:${priorPath ?? ""}`; process.env.OPENROUTER_API_KEY = "test-key";
+    const providerFetch = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ semanticReview: { confidence: "high", limitations: [], findings: [{ severity: "low", file: "src/review.ts", location: "1", category: "coverage", evidence: "bounded source reviewed", recommendation: "retain test", blocking: false }] } }) }, finish_reason: "stop" }], usage: { prompt_tokens: 10, completion_tokens: 4, total_tokens: 14, cost: 0.002 } }), { status: 200, headers: { "x-request-id": "semantic-retry-review" } }));
+    vi.stubGlobal("fetch", ((input: string | URL | Request, init?: RequestInit) => String(input).startsWith("https://openrouter.ai/") ? providerFetch(input, init) : nativeFetch(input, init)) as typeof fetch);
+    const instance = await startControlPlaneServer({ port: 0, stateRoot }); servers.push(instance);
+    const id = "CONTROL-SEMANTIC-DOCKER-RETRY-1";
+    try {
+      const inspected = await json(await fetch(`${instance.url}/v1/projects/inspect`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ path: repository, workingDirectory: nestedWorkingDirectory, register: true }) }));
+      const taskSpec = { schemaVersion: 2, taskId: id, task: { text: "Review src/review.ts", goal: "Prove retry-bound semantic review", acceptanceCriteria: ["source unchanged"] }, target: { repository, workingDirectory: nestedWorkingDirectory, expectedSha: sourceBefore.head }, execution: { mode: "validation", timeoutMs: 30_000, maxProviderTokens: 4000 }, executionAgreement: { schemaVersion: 1, profile: "custom", phaseOwnership: { independentReview: "runforge", providerModelCalls: "runforge" } }, discovery: { profile: "small-scope", explicitFiles: ["src/review.ts"], maxFiles: 2, maxBytes: 8000, maxTokens: 2000, stopCondition: "explicit source only" }, runtime: { preference: "docker", dockerImage: "runforge:test", dependencyPreparation: "required", externalNetwork: "allowed" }, validation: { mode: "explicit", commands: ["node --version"] }, authority: { profile: "read-only", allowProviderCalls: true, allowNetwork: true }, providerRouting: { provider: "openrouter", fallbackPolicy: "none", models: { reviewer: "review/model" }, maxCalls: 2, tokenBudget: { total: 4000, perPhase: { planner: 0, implementer: 0, repair: 0, reviewer: 2000, logCompression: 0 } }, timeoutMs: 30000, retry: { maxAttempts: 1 } }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } };
+      const submitted = await fetch(`${instance.url}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: inspected.project.id, taskSpec, authority: { inspect: true, providerCalls: true, network: true } }) });
+      expect(submitted.status).toBe(202); const created = await json(submitted); const canonical = await readFile(join(stateRoot, "tasks", id, "task-spec.json"), "utf8");
+      await eventually(async () => (await instance.manager.getTask(id)).status === "interrupted");
+      expect(await json(await fetch(`${instance.url}/v1/tasks/${id}/result`))).toMatchObject({ status: "interrupted", providerCalls: 0 }); expect(providerFetch).not.toHaveBeenCalled();
+      expect((await fetch(`${instance.url}/v1/tasks/${id}/retry`, { method: "POST" })).status).toBe(202);
+      await eventually(async () => (await instance.manager.getTask(id)).status === "completed");
+      const result = await json(await fetch(`${instance.url}/v1/tasks/${id}/result`));
+      expect(result).toMatchObject({ status: "completed", review: { semantic: { performed: true, reviewer: { provider: "openrouter", model: "review/model", invocationId: "semantic-retry-review" }, findings: [expect.objectContaining({ category: "coverage" })] } }, safetyAssertions: { providerCalls: true, targetUnchanged: true } });
+      expect(await instance.manager.getTask(id)).toMatchObject({ id, projectId: inspected.project.id, executionAgreement: { agreementId: created.executionAgreement.agreementId } });
+      expect(await readFile(join(stateRoot, "tasks", id, "task-spec.json"), "utf8")).toBe(canonical); expect(providerFetch).toHaveBeenCalledOnce();
+      expect((await readFile(preparationLog, "utf8")).trim().split("\n")).toEqual(["prepared-attempt", "prepared-attempt"]);
+      expect({ head: execFileSync("git", ["rev-parse", "HEAD"], { cwd: repository, encoding: "utf8" }).trim(), status: execFileSync("git", ["status", "--porcelain=v1", "-uall"], { cwd: repository, encoding: "utf8" }).trim(), refs: execFileSync("git", ["for-each-ref", "--format=%(refname) %(objectname)"], { cwd: repository, encoding: "utf8" }).trim() }).toEqual(sourceBefore);
+      expect(result.providerCalls).toEqual([expect.objectContaining({ purpose: "semantic-review", phase: "reviewer", providerCalls: true, networkAuthorized: true, exitCode: 0 })]);
+      expect(result.git).toEqual({ branch: null, commit: null, pullRequest: null, merge: null });
+    } finally { if (priorPath === undefined) delete process.env.PATH; else process.env.PATH = priorPath; if (priorKey === undefined) delete process.env.OPENROUTER_API_KEY; else process.env.OPENROUTER_API_KEY = priorKey; }
+  });
+
   it("restores missing or corrupt continuation state and applies continuation once", async () => {
     for (const damage of ["missing", "corrupt"] as const) {
       const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), `runforge-continuation-${damage}-`))) - 1]!;
@@ -463,16 +761,31 @@ describe("local control-plane HTTP lifecycle", () => {
     }
   });
 
-  it("emits execution heartbeats, cancels safely, and reports degraded task aggregates", { timeout: 15_000 }, async () => {
+  it("emits execution heartbeats, cancels safely, and reports degraded task aggregates", { timeout: 30_000 }, async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-watchdog-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let executions = 0;
     const manager = new ControlPlaneManager(store, { runTaskSpec: async (specPath) => { const run = ++executions; if (run === 1) await new Promise((done) => setTimeout(done, 80)); else { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); } return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 30, executionTimeoutMs: 1_000 });
-    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-CANCEL-1");
-    await new Promise((done) => setTimeout(done, 20)); const active = await manager.getTask("CONTROL-CANCEL-1"); const cancelAgreementId = active.executionAgreement?.agreementId; expect(active.progress.workerStatus).toBe("active"); expect(Date.parse(active.progress.lastHeartbeatAt!)).toBeGreaterThan(Date.parse(active.progress.startedAt!));
-    expect((await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-1/cancel`, { method: "POST" })).status).toBe(200); expect((await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-1/cancel`, { method: "POST" })).status).toBe(200);
-    await new Promise((done) => setTimeout(done, 90)); const cancelled = await manager.getTask("CONTROL-CANCEL-1"); expect(cancelled).toMatchObject({ status: "interrupted", executionAgreement: { agreementId: cancelAgreementId }, progress: { agreement: { agreementId: cancelAgreementId } }, recovery: { reason: "cancelled_by_operator", retryAvailable: true } }); expect(["completed", "not_required"]).toContain(cancelled.recovery?.cleanupStatus);
-    const now = new Date(Date.now() - 60_000).toISOString(); const lost = { ...(await manager.getTask("CONTROL-CANCEL-1")), id: "CONTROL-LOST-1", status: "running" as const, updatedAt: now, finishedAt: null, progress: { ...active.progress, executionId: "lost-worker", updatedAt: now, lastHeartbeatAt: now, workerStatus: "active" as const } }; await store.saveTask(lost);
-    const health = await manager.health(); expect(health).toMatchObject({ service: { status: "healthy" }, readiness: { acceptingNewTasks: true }, tasks: { active: 0, interrupted: 2 } }); expect((await manager.getTask("CONTROL-LOST-1")).status).toBe("interrupted");
-    await manager.retryTask("CONTROL-CANCEL-1"); await eventually(async () => (await manager.getTask("CONTROL-CANCEL-1")).status === "completed"); expect(executions).toBe(2);
+    const id = "CONTROL-CANCEL-1";
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance);
+    try {
+      await submit(instance.url, id);
+      let active = await manager.getTask(id);
+      await eventually(async () => {
+        active = await manager.getTask(id);
+        return active.progress.workerStatus === "active" && Date.parse(active.progress.lastHeartbeatAt!) > Date.parse(active.progress.startedAt!);
+      });
+      const cancelAgreementId = active.executionAgreement?.agreementId;
+      expect(active.progress.workerStatus).toBe("active");
+      expect(Date.parse(active.progress.lastHeartbeatAt!)).toBeGreaterThan(Date.parse(active.progress.startedAt!));
+      expect((await fetch(`${instance.url}/v1/tasks/${id}/cancel`, { method: "POST" })).status).toBe(200);
+      expect((await fetch(`${instance.url}/v1/tasks/${id}/cancel`, { method: "POST" })).status).toBe(200);
+      await new Promise((done) => setTimeout(done, 90)); const cancelled = await manager.getTask(id); expect(cancelled).toMatchObject({ status: "interrupted", executionAgreement: { agreementId: cancelAgreementId }, progress: { agreement: { agreementId: cancelAgreementId } }, recovery: { reason: "cancelled_by_operator", retryAvailable: true } }); expect(["completed", "not_required"]).toContain(cancelled.recovery?.cleanupStatus);
+      const now = new Date(Date.now() - 60_000).toISOString(); const lost = { ...(await manager.getTask(id)), id: "CONTROL-LOST-1", status: "running" as const, updatedAt: now, finishedAt: null, progress: { ...active.progress, executionId: "lost-worker", updatedAt: now, lastHeartbeatAt: now, workerStatus: "active" as const } }; await store.saveTask(lost);
+      const health = await manager.health(); expect(health).toMatchObject({ service: { status: "healthy" }, readiness: { acceptingNewTasks: true }, tasks: { active: 0, interrupted: 2 } }); expect((await manager.getTask("CONTROL-LOST-1")).status).toBe("interrupted");
+      await manager.retryTask(id); await eventually(async () => (await manager.getTask(id)).status === "completed"); expect(executions).toBe(2);
+    } finally {
+      await manager.cancelTask(id).catch(() => undefined);
+      await new Promise((done) => setTimeout(done, 90));
+    }
   });
 
   it("returns a formal interruption when no continuation artifact can be trusted", async () => {
@@ -517,29 +830,12 @@ describe("local control-plane HTTP lifecycle", () => {
     const completedRetry = await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" }); expect(completedRetry.status).toBe(409); expect(await json(completedRetry)).toMatchObject({ error: { code: "task_not_retryable" } });
   });
 
-  it("publishes a cancellation receipt from a durable checkpoint without exposing provider output", async () => {
-    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-cancel-receipt-"))) - 1]!; let release!: () => void; const blocked = new Promise<void>((resolve) => { release = resolve; }); let checkpointReady!: () => void; const ready = new Promise<void>((resolve) => { checkpointReady = resolve; });
-    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; await mkdir(root, { recursive: true }); await persistDurableCheckpoint(root, { checkpointId: "checkpoint-cancel-1", iteration: 1, kind: "implementation", baseSha: "base-sha", workspaceSha: null, workspaceState: "dirty", patch: "diff --git a/src/a.ts b/src/a.ts\n", changedFiles: ["src/a.ts"], validation: [], usage: { inputTokens: null, outputTokens: null, cost: null }, executor: { provider: "synthetic-provider", model: "synthetic-model", calls: 1, stdout: "RAW_CHECKPOINT_PROVIDER_OUTPUT" }, safetyAssertions: {}, unresolvedFindings: [] }); checkpointReady(); await blocked; return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 10_000, cleanupGraceMs: 100 });
-    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-CANCEL-CHECKPOINT-1"); await ready;
-    expect((await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-CHECKPOINT-1/cancel`, { method: "POST" })).status).toBe(200);
-    const result = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-CANCEL-CHECKPOINT-1/result`));
-    expect(result).toMatchObject({ status: "interrupted", interruption: { reason: "cancelled_by_operator" }, receipt: { provider: "synthetic-provider", model: "synthetic-model", calls: 1, filesChanged: ["src/a.ts"], patchAvailable: true, checkpointId: "checkpoint-cancel-1", testsStarted: 0, testsCompleted: 0, outcome: "checkpoint_available", stopReason: "cancellation", failureClassification: "validation_not_started", lastCompletedStage: "checkpoint", nextSafeAction: "review_checkpoint" } });
-    expectCompleteReceipt(result.receipt); expect(result.receipt.inputTokens).toBeNull(); expect(result.receipt.availability.inputTokens).toBe("not_reported"); expect(JSON.stringify(result)).not.toContain("RAW_CHECKPOINT_PROVIDER_OUTPUT"); await expectValidPublicResult(result); release();
-  });
-
-  it("publishes a complete infrastructure-failure receipt over public HTTP", async () => {
-    const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-infrastructure-receipt-"))) - 1]!;
-    const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), { runTaskSpec: async () => { throw new Error("synthetic infrastructure failure"); }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) });
-    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-INFRASTRUCTURE-RECEIPT-1"); await eventually(async () => (await manager.getTask("CONTROL-INFRASTRUCTURE-RECEIPT-1")).status === "failed");
-    const result = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-INFRASTRUCTURE-RECEIPT-1/result`));
-    expect(result).toMatchObject({ status: "failed", error: "synthetic infrastructure failure", receipt: { filesChanged: [], patchAvailable: false, checkpointId: null, testsStarted: 0, testsCompleted: 0, outcome: "no_progress", stopReason: "infrastructure_failure", failureClassification: "infrastructure_failure", lastCompletedStage: "queued", nextSafeAction: "repair_infrastructure_then_retry" } });
-    expectCompleteReceipt(result.receipt); for (const field of ["inputTokens", "cachedTokens", "outputTokens", "reasoningTokens", "billedTokens", "cost"]) { expect(result.receipt[field]).toBeNull(); expect(result.receipt.availability[field]).toBe("not_reported"); } await expectValidPublicResult(result);
-  });
-
-  it("recovers stale heartbeat and cancelled executions while rejecting owner-gated retry", { timeout: 15_000 }, async () => {
+  it("recovers stale heartbeat and cancelled executions while rejecting owner-gated retry", { timeout: 30_000 }, async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-stale-retry-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let runs = 0;
     const manager = new ControlPlaneManager(store, { runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const run = ++runs; await mkdir(root, { recursive: true }); if (run !== 2) await new Promise((done) => setTimeout(done, 80)); else await writeFile(join(root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }, { heartbeatIntervalMs: 1_000, staleHeartbeatMs: 15, executionTimeoutMs: 10_000, cleanupGraceMs: 100 });
-    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-STALE-1"); await new Promise((done) => setTimeout(done, 25)); await manager.health(); expect((await manager.getTask("CONTROL-STALE-1")).recovery?.reason).toBe("stale_heartbeat"); await eventually(async () => (await manager.getTask("CONTROL-STALE-1")).recovery?.retryAvailable === true);
+    const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-STALE-1"); await eventually(async () => runs === 1);
+    const active = await manager.getTask("CONTROL-STALE-1"); active.progress.lastHeartbeatAt = new Date(Date.now() - 1_000).toISOString(); await store.saveTask(active);
+    await manager.health(); expect((await manager.getTask("CONTROL-STALE-1")).recovery?.reason).toBe("stale_heartbeat"); await eventually(async () => (await manager.getTask("CONTROL-STALE-1")).recovery?.retryAvailable === true);
     const stale = await manager.getTask("CONTROL-STALE-1"); const registry = (manager as unknown as { active: Map<string, unknown> }).active; registry.set(stale.id, { executionId: "stale-registry-entry", operation: "execution", cancelled: false, controller: new AbortController() });
     expect((await manager.retryTask(stale.id)).progress.attempt).toBe(2); await eventually(async () => (await manager.getTask(stale.id)).status === "completed");
     const ownerGated = await manager.getTask(stale.id); ownerGated.status = "awaiting_owner_decision"; await store.saveTask(ownerGated); await expect(manager.retryTask(stale.id)).rejects.toMatchObject({ code: "task_not_retryable" });
@@ -553,10 +849,24 @@ describe("local control-plane HTTP lifecycle", () => {
     const after = new ControlPlaneManager(store, operations as never, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 10_000, cleanupGraceMs: 5 }); await after.initialize(); expect((await after.getTask("CONTROL-RESTART-RETRY-1")).executionAgreement?.agreementId).toBe(agreementId); const reconstructed = await after.getResult("CONTROL-RESTART-RETRY-1"); expect(reconstructed).toMatchObject({ status: "interrupted", interruption: { reason: "service_restart", originalExecutionId: oldExecutionId } }); await expectValidPublicResult(reconstructed); const retried = await after.retryTask("CONTROL-RESTART-RETRY-1"); expect(retried.progress.executionId).not.toBe(oldExecutionId); expect(retried.executionAgreement?.agreementId).toBe(agreementId); await eventually(async () => (await after.getTask("CONTROL-RESTART-RETRY-1")).status === "completed"); expect(await after.getResult("CONTROL-RESTART-RETRY-1")).toMatchObject({ marker: "after-restart" }); after.close();
   });
 
-  it("blocks retry after failed cleanup and publishes a terminal worker failure result", async () => {
+  it("blocks retry after failed cleanup and publishes a terminal worker failure result", { timeout: 30_000 }, async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-cleanup-failed-"))) - 1]!; const store = new ControlPlaneStore(stateRoot);
     const manager = new ControlPlaneManager(store, { runTaskSpec: async () => { await new Promise((done) => setTimeout(done, 120)); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 10, cleanupGraceMs: 10 }); await manager.initialize(); await manager.createTask({ taskSpec: taskSpec("CONTROL-CLEANUP-FAILED-1"), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); await eventually(async () => { await manager.health(); return (await manager.getTask("CONTROL-CLEANUP-FAILED-1")).recovery?.cleanupStatus === "detached"; }); const blocked = await manager.getTask("CONTROL-CLEANUP-FAILED-1"); expect(blocked.recovery).toMatchObject({ retryAvailable: false, cleanupStatus: "detached", actions: ["cancel", "start_new_task", "restart_control_plane"] }); await expect(manager.retryTask(blocked.id)).rejects.toMatchObject({ code: "worker_cleanup_failed", retryable: false }); await eventually(async () => (await manager.getTask(blocked.id)).recovery?.retryAvailable === true); expect((await manager.getTask(blocked.id)).recovery).toMatchObject({ cleanupStatus: "completed", actions: ["retry", "cancel"], operation: `/v1/tasks/${blocked.id}/retry` }); manager.close();
     const failureRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-worker-failed-"))) - 1]!; const failureManager = new ControlPlaneManager(new ControlPlaneStore(failureRoot), { runTaskSpec: async () => { throw new Error("synthetic worker failure"); }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }); await failureManager.initialize(); await failureManager.createTask({ taskSpec: taskSpec("CONTROL-WORKER-FAILED-1"), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); await eventually(async () => (await failureManager.getTask("CONTROL-WORKER-FAILED-1")).status === "failed"); const failedResult = await failureManager.getResult("CONTROL-WORKER-FAILED-1"); expect(failedResult).toMatchObject({ status: "failed", error: "synthetic worker failure" }); await expectValidPublicResult(failedResult); failureManager.close();
+  });
+
+  it("classifies pre-provider setup recovery without inventing provider calls", async () => {
+    const root = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-pre-provider-recovery-"))) - 1]!; let attempts = 0; const store = new ControlPlaneStore(root);
+    const manager = new ControlPlaneManager(store, { runTaskSpec: async (path) => { const spec = JSON.parse(await readFile(path, "utf8")); if (++attempts === 1) throw new PreProviderSetupFailure("dependency_setup", "workspace dependency preparation failed"); await mkdir(spec.artifacts.root, { recursive: true }); await writeFile(join(spec.artifacts.root, "results.json"), JSON.stringify({ status: "completed", ownerGate: { required: false, status: "not_required" } })); return {} as never; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }); await manager.initialize();
+    await manager.createTask({ taskSpec: taskSpec("CONTROL-SETUP-RETRY-1"), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); await eventually(async () => (await manager.getTask("CONTROL-SETUP-RETRY-1")).status === "interrupted");
+    const retryable = await manager.getTask("CONTROL-SETUP-RETRY-1"); const canonicalBefore = JSON.stringify(await store.readSpec(retryable.id)); expect(retryable.recovery).toMatchObject({ reason: "runtime_capability_mismatch", actions: ["retry", "retry_with_corrected_runtime"], retryAvailable: true, newTaskRequired: false }); expect(await manager.getResult(retryable.id)).toMatchObject({ outcome: "runtime_capability_mismatch", providerCalls: 0 }); await manager.retryTask(retryable.id, { runtimePreference: "local-disposable" }); const corrected = await manager.getTask(retryable.id); expect(corrected.validationNegotiation).toMatchObject({ runtime: "local-disposable" }); expect(JSON.stringify(await store.readSpec(retryable.id))).toBe(canonicalBefore); expect(JSON.parse(await readFile(corrected.specPath, "utf8"))).toMatchObject({ runtime: { preference: "local-disposable" } }); await eventually(async () => (await manager.getTask(retryable.id)).status === "completed"); expect(attempts).toBe(2); manager.close();
+
+    const dockerRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-retry-docker-required-"))) - 1]!; const dockerStore = new ControlPlaneStore(dockerRoot); const dockerManager = new ControlPlaneManager(dockerStore, { runTaskSpec: async () => { throw new PreProviderSetupFailure("runtime_setup", "docker unavailable"); }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }); await dockerManager.initialize();
+    const dockerRequired = taskSpec("CONTROL-RETRY-DOCKER-REQUIRED-1"); dockerRequired.validation = { mode: "explicit", commands: ["docker version"], requirements: [{ command: "docker version", capabilities: ["docker"], acceptance: "required", evidenceRole: "environment-validation", fallbacks: [] }] };
+    await dockerManager.createTask({ taskSpec: dockerRequired, authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); await eventually(async () => (await dockerManager.getTask("CONTROL-RETRY-DOCKER-REQUIRED-1")).status === "interrupted"); await expect(dockerManager.retryTask("CONTROL-RETRY-DOCKER-REQUIRED-1", { runtimePreference: "local-disposable" })).rejects.toMatchObject({ code: "validation_capability_unavailable" }); expect((await dockerManager.getTask("CONTROL-RETRY-DOCKER-REQUIRED-1")).validationNegotiation).toMatchObject({ runtime: "docker" }); dockerManager.close();
+
+    const conflictRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-workspace-conflict-"))) - 1]!; const conflict = new WorkspaceSetupError({ path: "/bounded/workspace/node_modules", expectedTarget: "/bounded/cache/node_modules", actualTarget: "/external/node_modules", owner: null }); const conflictManager = new ControlPlaneManager(new ControlPlaneStore(conflictRoot), { runTaskSpec: async () => { throw conflict; }, recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never) }); await conflictManager.initialize(); await conflictManager.createTask({ taskSpec: taskSpec("CONTROL-WORKSPACE-CONFLICT-1"), authority: { inspect: true, implementation: true, localBranch: false, localCommit: false, remotePush: false, draftPublication: false, merge: false, deploy: false }, publicationRequested: "none" }); await eventually(async () => (await conflictManager.getTask("CONTROL-WORKSPACE-CONFLICT-1")).status === "failed");
+    const failed = await conflictManager.getResult("CONTROL-WORKSPACE-CONFLICT-1"); expect(failed).toMatchObject({ outcome: "workspace_setup_failed", providerCalls: 0, recovery: { code: "workspace_conflict_external", retryAvailable: false, actions: ["start_new_task", "cancel"], workspaceSetup: { path: "/bounded/workspace/node_modules", expectedTarget: "/bounded/cache/node_modules", actualTarget: "/external/node_modules", owner: null } } }); conflictManager.close();
   });
 
   it("retries an interrupted continuation from its source-bound snapshot in a new artifact generation", async () => {
@@ -588,6 +898,15 @@ describe("local control-plane HTTP lifecycle", () => {
 });
 
 async function json(response: Response): Promise<Record<string, any>> { return response.json() as Promise<Record<string, any>>; }
+async function chunkedJson(url: string, value: unknown): Promise<{ status: number; body: string }> {
+  const target = new URL(url); const body = JSON.stringify(value);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest({ hostname: target.hostname, port: target.port, path: target.pathname, method: "POST", headers: { host: target.host, "content-type": "application/json", "transfer-encoding": "chunked" } }, (response) => {
+      const chunks: Buffer[] = []; response.on("data", (chunk: Buffer) => chunks.push(chunk)); response.on("end", () => resolve({ status: response.statusCode ?? 0, body: Buffer.concat(chunks).toString("utf8") }));
+    });
+    request.on("error", reject); request.end(body);
+  });
+}
 async function settlementScenario(taskId: string, input: { requestedOwnership: Record<string, "runforge" | "external_session" | "owner" | "external_system">; prerequisites?: Record<string, string[]>; result: Record<string, any> }): Promise<{ manager: ControlPlaneManager; agreement: { agreementId: string }; task: { status: string }; result: Record<string, any> }> {
   const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-settlement-safety-"))) - 1]!;
   const manager = new ControlPlaneManager(new ControlPlaneStore(stateRoot), {

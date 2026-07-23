@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
-import { buildDoctorReport } from "../../src/product/doctor.js";
+import { buildDoctorReport, renderDoctor } from "../../src/product/doctor.js";
 import { buildOnboardingReport, renderOnboarding } from "../../src/product/onboarding.js";
 
 const execFileAsync = promisify(execFile);
@@ -113,6 +113,31 @@ describe("onboarding and doctor contracts", () => {
       expect(requested.checks.find((item) => item.id === "github")?.status).toBe("blocked");
     } finally {
       process.env.PATH = originalPath;
+    }
+  });
+
+  it("reports missing, malformed, and valid capped-campaign pricing without exposing rates or changing base readiness", async () => {
+    const previous = process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON;
+    try {
+      delete process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON;
+      const missing = await buildDoctorReport({});
+      expect(missing.openRouterPricingCatalog).toMatchObject({ configured: false, catalogValid: false, code: "not_configured" });
+      expect(missing.checks.find((item) => item.id === "openrouter_capped_campaign_pricing")).toMatchObject({ status: "not_required", required: false, summary: expect.stringContaining("RUNFORGE_OPENROUTER_MODEL_PRICING_JSON") });
+      expect(renderDoctor(missing)).toContain("OpenRouter capped campaigns:");
+
+      process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = "{broken";
+      const malformed = await buildDoctorReport({});
+      expect(malformed.openRouterPricingCatalog).toMatchObject({ configured: true, catalogValid: false, code: "invalid", message: expect.stringContaining("not valid JSON") });
+
+      process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = JSON.stringify({ "model/exact": { inputUsdPerToken: .123456789, outputUsdPerToken: .987654321 } });
+      const valid = await buildDoctorReport({});
+      expect(valid.openRouterPricingCatalog).toMatchObject({ configured: true, catalogValid: true, code: "ready", message: expect.stringContaining("exact quote") });
+      expect(valid.checks.find((item) => item.id === "openrouter_capped_campaign_pricing")?.status).toBe("passed");
+      expect(JSON.stringify(valid)).not.toContain(".123456789");
+      expect(renderDoctor(valid)).not.toContain(".987654321");
+      expect(valid.status).toBe(missing.status);
+    } finally {
+      if (previous === undefined) delete process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON; else process.env.RUNFORGE_OPENROUTER_MODEL_PRICING_JSON = previous;
     }
   });
 });
