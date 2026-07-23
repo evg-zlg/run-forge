@@ -112,43 +112,43 @@ export async function reconstructTerminalReceipt(
   };
 }
 
-function object(value: unknown): Record<string, any> {
+export function object(value: unknown): Record<string, any> {
   return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, any>) : {};
 }
 
-function duration(from: string | null | undefined, to: string | null | undefined): number {
+export function duration(from: string | null | undefined, to: string | null | undefined): number {
   const start = from ? Date.parse(from) : NaN;
   const end = to ? Date.parse(to) : NaN;
   return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.round(end - start)) : 0;
 }
 
-function nonnegativeNumber(value: unknown): number | null {
+export function nonnegativeNumber(value: unknown): number | null {
   return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null;
 }
 
-function nonnegativeInteger(value: unknown): number | null {
+export function nonnegativeInteger(value: unknown): number | null {
   return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
-function nullableString(value: unknown): string | null {
+export function nullableString(value: unknown): string | null {
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-function stringEvidence(...values: unknown[]): string {
+export function stringEvidence(...values: unknown[]): string {
   return values.find((value): value is string => typeof value === "string" && Boolean(value.trim())) ?? "control-plane";
 }
 
-function uniqueStrings(value: unknown): string[] {
+export function uniqueStrings(value: unknown): string[] {
   return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())))].sort() : [];
 }
 
-function metricAvailability(value: unknown): "reported" | "partially_reported" | "not_reported" | "derived" | null {
+export function metricAvailability(value: unknown): "reported" | "partially_reported" | "not_reported" | "derived" | null {
   return ["reported", "partially_reported", "not_reported", "derived"].includes(String(value))
     ? (value as "reported" | "partially_reported" | "not_reported" | "derived")
     : null;
 }
 
-function receiptOutcome(value: unknown): string | null {
+export function receiptOutcome(value: unknown): string | null {
   return ["completed", "no_progress", "budget_exhausted", "deadline_exceeded", "provider_failed", "implementation_failed", "checkpoint_available", "validation_not_started", "cancellation", "infrastructure_failure"].includes(
     String(value)
   )
@@ -156,19 +156,19 @@ function receiptOutcome(value: unknown): string | null {
     : null;
 }
 
-function terminalStopReason(reason: string, phase: string): string {
+export function terminalStopReason(reason: string, phase: string): string {
   if (reason === "execution_deadline_exceeded") return "deadline_exceeded";
   if (reason === "cancelled_by_operator") return "cancellation";
   if (reason.includes("provider") || phase.toLowerCase().includes("provider")) return "provider_failed";
   return "infrastructure_failure";
 }
 
-function validationCompleted(value: unknown): boolean {
+export function validationCompleted(value: unknown): boolean {
   const status = String(object(value).status ?? object(value).result ?? "").toLowerCase();
   return Boolean(status) && !["running", "started", "pending", "not_started", "not_run", "skipped"].includes(status);
 }
 
-async function readJsonArray(path: string): Promise<unknown[]> {
+export async function readJsonArray(path: string): Promise<unknown[]> {
   try {
     const value = JSON.parse(await readFile(path, "utf8"));
     return Array.isArray(value) ? value : [];
@@ -177,7 +177,7 @@ async function readJsonArray(path: string): Promise<unknown[]> {
   }
 }
 
-async function readJsonObject(path: string): Promise<Record<string, unknown>> {
+export async function readJsonObject(path: string): Promise<Record<string, unknown>> {
   try {
     return object(JSON.parse(await readFile(path, "utf8")));
   } catch {

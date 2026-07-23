@@ -17,7 +17,7 @@ import { assertAgreementProjectBinding, buildExecutionAgreementContext } from ".
 import { listDurableCheckpoints } from "../implementation/durable-checkpoint.js";
 import { acceptCompletedResult, discardCompletedResult } from "./completed-result-acceptance.js";
 import { buildTimeoutContract } from "./timeout-contract.js";
-import { reconstructTerminalReceipt } from "./terminal-receipt.js";
+import { reconstructTerminalReceipt, object, duration, nonnegativeNumber, nonnegativeInteger, nullableString, stringEvidence, uniqueStrings, metricAvailability, receiptOutcome, terminalStopReason, validationCompleted, readJsonArray, readJsonObject } from "./terminal-receipt.js";
 export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
 const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs;
 const heartbeatIntervalMs = 1_000;
@@ -316,7 +316,6 @@ function normalizeTask(task: ControlTaskRecord): ControlTaskRecord {
   if (task.recovery) { const retryAvailable = task.recovery.retryAvailable ?? Boolean(task.recovery.operation); const cleanupPending = ["pending", "detached"].includes(task.recovery.cleanupStatus); task.recovery = { ...task.recovery, originalExecutionId: task.recovery.originalExecutionId ?? task.progress.executionId, retryAvailable, cleanupStatus: task.recovery.cleanupStatus ?? "not_required", ...(!task.recovery.operation && !cleanupPending ? { operation: retryAvailable ? `/v1/tasks/${task.id}/retry` : "start_new_task" } : {}), prerequisites: task.recovery.prerequisites ?? (retryAvailable ? ["Previous worker cleanup must be complete.", "Target SHA must still match the accepted TaskSpec."] : cleanupPending ? ["Poll until bounded worker cleanup completes."] : ["Correct the reported failure.", "Submit a current TaskSpec v2."]), newTaskRequired: task.recovery.newTaskRequired ?? (!retryAvailable && !cleanupPending), previousArtifactsReusable: task.recovery.previousArtifactsReusable ?? true, targetShaChanged: task.recovery.targetShaChanged ?? null }; }
   task.recovery ??= null; task.continuation ??= { schemaVersion: 1, state: "none", decisionId: null, executionId: null, sourceExecutionId: null }; task.continuation.sourceExecutionId ??= null; task.progress.agreement ??= projectAgreementLifecycle(task); return task;
 }
-function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} is required.`); return value.trim(); }
 function continuationBindingHash(binding: ContinuationBinding, authority: ControlAuthority, taskSpec: Record<string, unknown>): string { return createHash("sha256").update(JSON.stringify({ binding, authority, taskSpec })).digest("hex"); }
 function nativeMatchesContinuationContext(native: Record<string, unknown>, binding: ContinuationBinding): boolean {
@@ -325,23 +324,6 @@ function nativeMatchesContinuationContext(native: Record<string, unknown>, bindi
 }
 function decisionRecord(decisionId: string, kind: "owner" | "publication", decision: string, response: Record<string, unknown>): DecisionRecord { return { decisionId, kind, decision, response, createdAt: new Date().toISOString() }; }
 function safeMessage(error: unknown): string { const message = error instanceof Error ? error.message : String(error); return redactPublicValue(message).slice(0, 500); }
-function duration(from: string | null | undefined, to: string | null | undefined): number { const start = from ? Date.parse(from) : NaN; const end = to ? Date.parse(to) : NaN; return Number.isFinite(start) && Number.isFinite(end) ? Math.max(0, Math.round(end - start)) : 0; }
-function nonnegativeNumber(value: unknown): number | null { return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : null; }
-function nonnegativeInteger(value: unknown): number | null { return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null; }
-function nullableString(value: unknown): string | null { return typeof value === "string" && value.trim() ? value : null; }
-function stringEvidence(...values: unknown[]): string { return values.find((value): value is string => typeof value === "string" && Boolean(value.trim())) ?? "control-plane"; }
-function uniqueStrings(value: unknown): string[] { return Array.isArray(value) ? [...new Set(value.filter((item): item is string => typeof item === "string" && Boolean(item.trim())))].sort() : []; }
-function metricAvailability(value: unknown): "reported" | "partially_reported" | "not_reported" | "derived" | null { return ["reported", "partially_reported", "not_reported", "derived"].includes(String(value)) ? value as "reported" | "partially_reported" | "not_reported" | "derived" : null; }
-function receiptOutcome(value: unknown): string | null { return ["completed", "no_progress", "budget_exhausted", "deadline_exceeded", "provider_failed", "implementation_failed", "checkpoint_available", "validation_not_started", "cancellation", "infrastructure_failure"].includes(String(value)) ? String(value) : null; }
-function terminalStopReason(reason: string, phase: string): string {
-  if (reason === "execution_deadline_exceeded") return "deadline_exceeded";
-  if (reason === "cancelled_by_operator") return "cancellation";
-  if (reason.includes("provider") || phase.toLowerCase().includes("provider")) return "provider_failed";
-  return "infrastructure_failure";
-}
-function validationCompleted(value: unknown): boolean { const status = String(object(value).status ?? object(value).result ?? "").toLowerCase(); return Boolean(status) && !["running", "started", "pending", "not_started", "not_run", "skipped"].includes(status); }
-async function readJsonArray(path: string): Promise<unknown[]> { try { const value = JSON.parse(await readFile(path, "utf8")); return Array.isArray(value) ? value : []; } catch { return []; } }
-async function readJsonObject(path: string): Promise<Record<string, unknown>> { try { return object(JSON.parse(await readFile(path, "utf8"))); } catch { return {}; } }
 function preflightError(code: string, message: string, spec: Awaited<ReturnType<typeof loadTaskSpecV2>>, authority: ControlAuthority): ControlPlaneError {
   return new ControlPlaneError(403, code, message, {
     requestedMode: spec.execution.mode,
