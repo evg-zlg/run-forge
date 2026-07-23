@@ -6,7 +6,7 @@ import { fileURLToPath } from "node:url";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { Ajv2020 } from "ajv/dist/2020.js";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { runTaskSpecFile } from "../../src/product/task-spec-runner.js";
 import { discoverImplementationExecutors } from "../../src/implementation/executor.js";
 import { detectPackageValidationCapabilities } from "../../src/implementation/validation-runtime-capabilities.js";
@@ -22,6 +22,8 @@ const here = dirname(fileURLToPath(import.meta.url));
 const fixture = resolve(here, "../fixtures/implementation/simple-js");
 const adapter = resolve(here, "../fixtures/implementation/coding-agent-adapter.mjs");
 const previousCommand = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND;
+const runtimeEnvKeys = ["RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND", "RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES", "RUNFORGE_EARLY_PROGRESS_DEADLINE_MS"] as const;
+const previousRuntimeEnv = Object.fromEntries(runtimeEnvKeys.map((key) => [key, process.env[key]])) as Record<(typeof runtimeEnvKeys)[number], string | undefined>;
 const testLogCompressionInvoker: LogCompressionInvoker = async ({ rawDigest }) => ({
   content: JSON.stringify({ schemaVersion: 1, kind: "log-digest", summary: `Compressed ${rawDigest.sources.length} local test log source(s).`, failureClass: "test.validation", diagnostics: ["Consult the referenced local validation artifact."], sources: rawDigest.sources.map(({ redactions: _redactions, ...source }) => source) }),
   model: "test/cheap-log-compressor", requestId: "test-log-compression", tokenUsage: 1, inputTokens: 1, outputTokens: 0, reasoningTokens: 0, costUsd: 0, attempts: 1,
@@ -31,9 +33,183 @@ const startControlPlaneServer = (options: { port?: number; stateRoot: string }) 
   return startBaseControlPlaneServer({ ...options, manager });
 };
 
-afterEach(() => { if (previousCommand === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousCommand; });
+const capableProvider = (overrides: Record<string, unknown> = {}) => JSON.stringify({
+  maxInputContextTokens: 200_000, maxOutputTokens: 200_000, maxReasoningTokens: 200_000,
+  maxWallClockMs: 300_000, maxCallsPerPhase: 3, maxCostUsd: 10,
+  guarantees: { inputTokens: true, outputTokens: true, reasoningTokens: true, wallClock: true, calls: true, cost: true },
+  ...overrides,
+});
+
+beforeEach(() => { process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider(); });
+
+afterEach(() => {
+  if (previousCommand === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousCommand;
+  for (const key of runtimeEnvKeys) { const value = previousRuntimeEnv[key]; if (value === undefined) delete process.env[key]; else process.env[key] = value; }
+});
 
 describe("implementation executor", () => {
+  it("rejects a provider that cannot guarantee a mandatory cap before invocation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-cap-rejection-")); const marker = join(root, "invoked");
+    const agent = await makeAgent(root, [`import { writeFileSync } from "node:fs";`, `writeFileSync(${JSON.stringify(marker)}, "called");`]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider({ guarantees: { inputTokens: true, outputTokens: false, reasoningTokens: true, wallClock: true, calls: true, cost: true } });
+    await expect(execute(await repository(), "EXECUTOR-CAP-REJECT-1", "fix", ["node -e \"process.exit(0)\""])).rejects.toThrow(/mandatory.*output/i);
+    await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects an unqualified custom adapter before invocation", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-unqualified-provider-")); const marker = join(root, "invoked");
+    const agent = await makeAgent(root, [`import { writeFileSync } from "node:fs";`, `writeFileSync(${JSON.stringify(marker)}, "called");`]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    delete process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES;
+    await expect(execute(await repository(), "EXECUTOR-UNQUALIFIED-1", "fix", ["node -e \"process.exit(0)\""])).rejects.toThrow(/mandatory.*input.*output.*reasoning.*wall-clock.*call/i);
+    await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("rejects direct Codex even when configuration overclaims unenforceable guarantees", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-direct-codex-")); const marker = join(root, "provider-invoked"); const codex = join(root, "codex");
+    await writeFile(codex, `#!/bin/sh\nif [ "$1" = "login" ] && [ "$2" = "status" ]; then exit 0; fi\nprintf invoked > ${JSON.stringify(marker)}\nexit 0\n`);
+    await exec("chmod", ["+x", codex]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = codex;
+    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider();
+    await expect(execute(await repository(), "EXECUTOR-DIRECT-CODEX-1", "fix", ["node -e \"process.exit(0)\""])).rejects.toThrow(/mandatory.*input.*output.*reasoning/i);
+    await expect(readFile(marker, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("publishes the effective envelope and truncates provider context", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-context-envelope-"));
+    const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `appendFileSync("calculator.js", "\\n// bounded candidate\\n");`,
+      `console.log(JSON.stringify({ type: "candidate_diff", message: JSON.stringify({ envelope: JSON.parse(process.env.RUNFORGE_EXECUTION_ENVELOPE), prompt: process.env.RUNFORGE_IMPLEMENTATION_PROMPT }) }));`,
+      `console.log(JSON.stringify({ type: "turn.completed", usage: { input_tokens: 20, output_tokens: 5, reasoning_tokens: 2, cost_usd: 0.01 } }));`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider({ maxInputContextTokens: 80 });
+    const result = await execute(await repository(), "EXECUTOR-CONTEXT-1", `bounded task ${"oversized-context ".repeat(400)}`, ["node -e \"process.exit(0)\""], [], (value) => { value.discovery = { profile: "small-scope", maxFiles: 3, maxBytes: 300000, maxTokens: 6000, explicitFiles: ["calculator.js"], stopCondition: "stop" }; value.execution.requestedProfile = "fast"; value.execution.maxCallsPerPhase = 4; value.execution.earlyProgressDeadlineMs = 60_000; });
+    const call = result.providerCalls[0];
+    expect(call).toMatchObject({ executionEnvelope: { profile: "fast", classification: "bounded-small", model: null, limits: { maxInputContextTokens: 80, earlyProgressDeadlineMs: 60_000 } } });
+    expect(call).not.toHaveProperty("stdout"); expect(call).not.toHaveProperty("stderr");
+    expectReceipt(result, { outcome: "completed", patchAvailable: true, inputTokens: 20, outputTokens: 5, reasoningTokens: 2, cost: 0.01 });
+  });
+
+  it("uses the normalized TaskSpec early-progress deadline for the actual gate", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-task-spec-early-gate-")); const agent = await makeAgent(root, [
+      `console.log(JSON.stringify({ type: "usage", usage: { input_tokens: 7, output_tokens: 3, cost_usd: 0.001 } }));`,
+      `setInterval(() => {}, 1000);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "40";
+    const result = await execute(await repository(), "EXECUTOR-TASK-SPEC-EARLY-1", "fix", ["node -e \"process.exit(0)\""] , [], (value) => { value.execution.earlyProgressDeadlineMs = 60_000; });
+    expect(result.providerCalls[0]).toMatchObject({ durationMs: expect.any(Number), noProgress: true, tokenUsage: 10, executionEnvelope: { limits: { earlyProgressDeadlineMs: 40 } } });
+    expect(result.providerCalls[0].durationMs).toBeLessThan(500);
+    expectReceipt(result, { outcome: "no_progress", inputTokens: 7, outputTokens: 3, cost: 0.001 });
+  });
+
+  it("fast-fails no-progress once without a hidden same-profile retry", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-no-progress-")); const agent = await makeAgent(root, [
+      `console.log(JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "I am investigating and will edit the implementation soon" } }));`,
+      `setInterval(() => {}, 1000);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "30";
+    const result = await execute(await repository(), "EXECUTOR-NO-PROGRESS-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls).toHaveLength(1);
+    expect(result.providerCalls[0]).toMatchObject({ failureReason: expect.stringContaining("no_progress"), noProgress: true });
+    expect(JSON.stringify(result.implementation)).toContain("no_progress");
+    expect(result.diagnostics.retryPlan).toMatchObject({ automatic: false, sameModelProfileAllowed: false, options: expect.arrayContaining([expect.stringContaining("smaller context"), expect.stringContaining("faster model")]) });
+    expectReceipt(result, { outcome: "no_progress", failureClassification: "no_progress", patchAvailable: false, testsStarted: 0, testsCompleted: 0 });
+  });
+
+  it("publishes a provider failure receipt without raw provider output", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-provider-failure-")); const agent = await makeAgent(root, [
+      `console.error("provider unavailable");`,
+      `process.exitCode = 2;`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    const result = await execute(await repository(), "EXECUTOR-PROVIDER-FAILED-1", "fix", ["node -e \"process.exit(0)\""]);
+    expectReceipt(result, { outcome: "provider_failed", failureClassification: "provider_failed", patchAvailable: false, checkpointId: null });
+    expect(result.providerCalls[0]).not.toHaveProperty("stdout"); expect(result.providerCalls[0]).not.toHaveProperty("stderr");
+    expect(result.diagnostics).not.toHaveProperty("agentSummary");
+  });
+
+  it("treats a streamed RED test as progress", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-red-progress-")); const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `console.log(JSON.stringify({ type: "test", status: "red", file: "calculator.test.js", line: 4, message: "RED test proves add is broken" }));`,
+      `setTimeout(() => { appendFileSync("calculator.js", "\\n// candidate after RED\\n"); console.log(JSON.stringify({ type: "turn.completed", usage: { total_tokens: 10 } })); }, 60);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500";
+    const result = await execute(await repository(), "EXECUTOR-RED-PROGRESS-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls[0]).toMatchObject({ noProgress: false, progressSignals: expect.objectContaining({ redTest: expect.any(String) }) });
+    expectReceipt(result, { outcome: "completed", patchAvailable: true });
+    expect(result.receipt.testsStarted).toBeGreaterThanOrEqual(1);
+  });
+
+  it("treats a nested Codex file_change as progress and streams a checkpoint", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-nested-file-change-")); const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `appendFileSync("calculator.js", "\\n// nested Codex file change\\n");`,
+      `console.log(JSON.stringify({ type: "item.completed", item: { id: "item_1", type: "file_change", changes: [{ path: "calculator.js", kind: "update" }], status: "completed" } }));`,
+      `setTimeout(() => console.log(JSON.stringify({ type: "turn.completed", usage: { total_tokens: 10 } })), 80);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "30";
+    const result = await execute(await repository(), "EXECUTOR-NESTED-FILE-CHANGE-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls[0]).toMatchObject({ noProgress: false, progressSignals: expect.objectContaining({ filesChanged: ["calculator.js"], candidateDiff: "calculator.js" }) });
+    expect(result.artifact.checkpoints).toEqual(expect.arrayContaining([expect.objectContaining({ id: expect.stringContaining("stream") })]));
+  });
+
+  it("treats nested Codex RED command output as progress", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-nested-red-command-")); const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `console.log(JSON.stringify({ type: "item.completed", item: { id: "item_1", type: "command_execution", command: "corepack pnpm vitest run tests/calculator.test.ts", aggregated_output: "FAIL tests/calculator.test.ts\\nexpected 3, received 2", exit_code: 1, status: "failed" } }));`,
+      `setTimeout(() => { appendFileSync("calculator.js", "\\n// candidate after nested RED\\n"); console.log(JSON.stringify({ type: "turn.completed", usage: { total_tokens: 10 } })); }, 80);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "30";
+    const result = await execute(await repository(), "EXECUTOR-NESTED-RED-COMMAND-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls[0]).toMatchObject({ noProgress: false, progressSignals: expect.objectContaining({ redTest: expect.stringContaining("FAIL tests/calculator.test.ts"), tests: expect.arrayContaining([expect.stringContaining("vitest")]) }) });
+  });
+
+  it("preserves a streamed partial patch through provider timeout", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-partial-timeout-")); const agent = await makeAgent(root, [
+      `import { appendFileSync } from "node:fs";`,
+      `appendFileSync("calculator.js", "\\n// durable partial patch\\n");`,
+      `console.log(JSON.stringify({ type: "partial_patch", file: "calculator.js", message: "partial patch ready" }));`,
+      `setInterval(() => {}, 1000);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500"; process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider({ maxWallClockMs: 200 });
+    const result = await execute(await repository(), "EXECUTOR-PARTIAL-TIMEOUT-1", "fix", ["node -e \"process.exit(0)\""]);
+    expect(result.providerCalls).toHaveLength(1); expect(result.providerCalls[0]).toMatchObject({ timedOut: true });
+    expect(result.artifact.checkpoints.length).toBeGreaterThanOrEqual(2);
+    expect(JSON.stringify(result.implementation)).toContain("checkpoint_available");
+    expect(JSON.stringify(result.implementation)).toContain("durable partial patch");
+    expectReceipt(result, { outcome: "checkpoint_available", failureClassification: "deadline_exceeded", patchAvailable: true, checkpointId: expect.any(String), testsCompleted: 0 });
+  });
+
+  it("classifies a provider deadline with no files as validation not started", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-empty-timeout-")); const agent = await makeAgent(root, [
+      `console.log(JSON.stringify({ type: "test", status: "red", file: "calculator.test.js", message: "RED before timeout" }));`,
+      `setInterval(() => {}, 1000);`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`; process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS = "500"; process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = capableProvider({ maxWallClockMs: 200 });
+    const result = await execute(await repository(), "EXECUTOR-EMPTY-TIMEOUT-1", "fix", ["node -e \"process.exit(0)\""]);
+    expectReceipt(result, { outcome: "deadline_exceeded", failureClassification: "validation_not_started", patchAvailable: false, checkpointId: null, testsCompleted: 0 });
+  });
+
+  it("stops after reported usage exhausts the phase budget before another call", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-post-response-budget-")); const counter = join(root, "calls");
+    const agent = await makeAgent(root, [
+      `import { appendFileSync, existsSync, readFileSync, writeFileSync } from "node:fs";`,
+      `const path = ${JSON.stringify(counter)}; const calls = existsSync(path) ? Number(readFileSync(path, "utf8")) + 1 : 1; writeFileSync(path, String(calls));`,
+      `appendFileSync("calculator.js", "\\n// invalid candidate " + calls + "\\n");`,
+      `console.log(JSON.stringify({ type: "candidate_diff", message: "candidate", usage: { input_tokens: 70, output_tokens: 50 } }));`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    const result = await execute(await repository(), "EXECUTOR-POST-BUDGET-1", "fix", ["node -e \"process.exit(1)\""], [], (value) => { value.execution.phaseBudgets = { implementation: 100, repair: 100 }; });
+    expect(await readFile(counter, "utf8")).toBe("1"); expect(result.providerCalls).toHaveLength(1);
+    expect(result.implementation).toMatchObject({ status: "blocked_with_owner_gate" });
+    expectReceipt(result, { outcome: "budget_exhausted", failureClassification: "budget_exhausted", calls: 1, patchAvailable: true });
+  });
   it("preserves approved preset ownership through the shared resolver", () => {
     expect(executionPhaseOwner("assist-only", "localBranch")).toBe("external_session");
     expect(executionPhaseOwner("assist-only", "localCommit")).toBe("external_session");
@@ -139,6 +315,32 @@ describe("implementation executor", () => {
     expect(result.publication).toMatchObject({ status: "on_hold", performed: false });
   }, 20_000);
 
+  it("excludes RunForge dependency preparation artifacts from patches, checkpoints, and commits", async () => {
+    const root = await mkdtemp(join(tmpdir(), "runforge-dependency-filter-"));
+    const agent = await makeAgent(root, [
+      `import { appendFileSync, mkdirSync, writeFileSync } from "node:fs";`,
+      `appendFileSync("calculator.js", "\\n// bounded candidate\\n");`,
+      `mkdirSync(".pnpm-store/v11", { recursive: true }); writeFileSync(".pnpm-store/v11/index.db", "generated");`,
+      `mkdirSync("node_modules/pkg", { recursive: true }); writeFileSync("node_modules/pkg/index.js", "generated");`,
+      `mkdirSync("packages/pkg/node_modules/nested", { recursive: true }); writeFileSync("packages/pkg/node_modules/nested/index.js", "generated");`,
+      `console.log(JSON.stringify({ type: "candidate_diff", message: "candidate ready" }));`,
+    ]);
+    process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${agent}`;
+    const repo = await repository();
+    const result = await execute(repo, "EXECUTOR-DEPENDENCY-FILTER-1", "fix add", ["node -e \"process.exit(0)\""]);
+    const patch = await readFile(String(result.implementation.patchPackage), "utf8");
+    expect(result.implementation).toMatchObject({ status: "implemented_and_validated", changedFiles: ["calculator.js"] });
+    expect(result.handoff.changedFiles).toEqual(["calculator.js"]);
+    expect(result.artifact.checkpoints.every((checkpoint: Record<string, any>) => !JSON.stringify(checkpoint).match(/(?:\.pnpm-store|node_modules)/))).toBe(true);
+    for (const checkpoint of result.artifact.checkpoints as Array<Record<string, any>>) {
+      const checkpointPatch = await readFile(join(dirname(String(result.implementation.patchPackage)), checkpoint.patchPath), "utf8");
+      expect(checkpointPatch).not.toMatch(/(?:\.pnpm-store|node_modules)/);
+    }
+    expect(patch).toContain("calculator.js");
+    expect(patch).not.toMatch(/(?:\.pnpm-store|node_modules)/);
+    expect(await git(repo, ["show", "--format=", "--name-only", String(result.git.commit)])).toBe("calculator.js\n");
+  });
+
   it("returns an assist-only patch without creating an externally owned branch or commit", async () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const repo = await repository(); const before = await git(repo, ["rev-parse", "HEAD"]); const refsBefore = await git(repo, ["for-each-ref", "--format=%(refname) %(objectname)"]);
@@ -168,11 +370,11 @@ describe("implementation executor", () => {
     const result = await execute(repo, "EXECUTOR-SEMANTIC-UNAVAILABLE-1", "SEMANTIC_UNAVAILABLE fix add", ["node test.js"]);
     expect(result).toMatchObject({
       status: "awaiting_owner",
-      implementation: { status: "blocked_with_owner_gate", performed: true },
+      implementation: { status: "implemented_and_validated", performed: true },
       review: { structural: { kind: "structural", status: "passed" }, semantic: { kind: "semantic", status: "unavailable", performed: false, selectedReviewer: { provider: "local-coding-agent", model: null }, confidence: "unknown", limitations: [expect.stringContaining("semantic_review_required")], findings: [], delegation: { party: "owner" } } },
       handoff: { semanticReview: { status: "unavailable", performed: false, delegation: { party: "owner" } } },
       handoffPackage: { semanticReview: { status: "unavailable" }, nextResponsibleParty: "owner" },
-      agreement: { runforgeCompletedPhases: [], awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
+      agreement: { runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage"]), awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
     });
   });
 
@@ -194,11 +396,11 @@ describe("implementation executor", () => {
     const result = await execute(repo, "EXECUTOR-SEMANTIC-TIMEOUT-1", "SEMANTIC_TIMEOUT fix add", ["node test.js"]);
     expect(result).toMatchObject({
       status: "awaiting_owner",
-      implementation: { status: "blocked_with_owner_gate", performed: true },
+      implementation: { status: "implemented_and_validated", performed: true },
       artifact: { status: "available", bestValidatedCheckpointId: "implementation-0", checkpoints: [expect.objectContaining({ id: "implementation-0", validationPassed: true })] },
       review: { structural: { status: "passed" }, semantic: { status: "unavailable", performed: false, limitations: [expect.stringContaining("timed out")], delegation: { party: "owner" } } },
       handoffPackage: { bestValidatedCheckpoint: "implementation-0", latestSafePatch: expect.stringContaining("implementation-0"), semanticReview: { status: "unavailable", performed: false }, nextResponsibleParty: "owner" },
-      agreement: { runforgeCompletedPhases: [], awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
+      agreement: { runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage"]), awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
       providerCalls: expect.arrayContaining([expect.objectContaining({ purpose: "semantic-review", provider: "local-coding-agent", model: null, success: false, timedOut: true, timeoutMs: expect.any(Number), validatedCheckpointId: "implementation-0" })]),
     });
     const reviewCall = result.providerCalls.find((call: Record<string, unknown>) => call.purpose === "semantic-review");
@@ -341,6 +543,7 @@ describe("implementation executor", () => {
     process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`;
     const result = await execute(await repository(), `EXECUTOR-${task}-1`, task, ["node test.js"], task === "FORBIDDEN_CHANGE" ? ["secrets.txt"] : []);
     expect(result.status).toBe(status); expect(result.implementation).toMatchObject({ status: outcome });
+    if (task === "FALSE_POSITIVE") expectReceipt(result, { outcome: "completed", patchAvailable: false, checkpointId: null, testsStarted: 0, testsCompleted: 0 });
   });
 
   it("ignores credential-like assignments that appear only as unchanged patch context", async () => {
@@ -385,6 +588,7 @@ describe("implementation executor", () => {
     const result = await execute(await repository(), "EXECUTOR-EMPTY-DIAGNOSTIC-1", "fix add", ["node -e \"process.exit(1)\""]);
     expect(result).toMatchObject({ status: "failed", implementation: { status: "failed_with_diagnostics" } });
     expect(result.validation).toMatchObject([{ exitCode: 1, stdout: "", stderr: "", infrastructureDefect: "non-zero exit produced empty stdout and stderr" }]);
+    expectReceipt(result, { outcome: "infrastructure_failure", failureClassification: "infrastructure_failure", patchAvailable: true, testsStarted: 1, testsCompleted: 1 });
   });
 
   it("runs end-to-end through localhost HTTP with visible selection and publication separation", async () => {
@@ -430,6 +634,10 @@ describe("implementation executor", () => {
         implementation: { status: "implemented_and_validated", unresolvedAcceptanceCriteria: [] },
         publication: { status: "on_hold", performed: false },
       });
+      expectReceipt(result, { outcome: "completed", patchAvailable: true, calls: 1, testsStarted: 2, testsCompleted: 2 });
+      const resultSchema = JSON.parse(await readFile(resolve(here, "../../schemas/task-result-v1.schema.json"), "utf8"));
+      const validateResult = new Ajv2020({ strict: true, strictRequired: false }).compile(resultSchema);
+      expect(validateResult(result), validateResult.errors?.map((item: { instancePath: string; message?: string }) => `${item.instancePath} ${item.message}`).join("; ")).toBe(true);
       expect(result.workflow.agreement.awaitingPhases).toEqual(expect.arrayContaining([
         expect.objectContaining({ phaseId: "remotePush", responsibleParty: "external_session" }),
       ]));
@@ -650,8 +858,8 @@ async function repository(withSensitiveContext = false): Promise<string> { const
 async function withOfflineCorepack<T>(root: string, run: () => Promise<T>): Promise<T> { const bin = join(root, "offline-bin"), corepack = join(bin, "corepack"), previousPath = process.env.PATH; await mkdir(bin); await writeFile(corepack, "#!/bin/sh\n[ \"$1\" = pnpm ] || exit 64\nshift\n[ \"$1\" = run ] && shift\nexec npm run \"$@\"\n"); await chmod(corepack, 0o755); process.env.PATH = `${bin}:${previousPath ?? ""}`; try { return await run(); } finally { if (previousPath === undefined) delete process.env.PATH; else process.env.PATH = previousPath; } }
 async function git(cwd: string, args: string[]): Promise<string> { return (await exec("git", args, { cwd })).stdout; }
 function spec(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []) { return { schemaVersion: 2, taskId, task: { text, goal: "Make the deterministic fixture satisfy acceptance", acceptanceCriteria: ["validation is green", "local patch evidence exists"] }, target: { repository: repo, workingDirectory: "." }, execution: { mode: "implementation", maxRepairIterations: 2 }, providerRouting: { provider: "local", fallbackPolicy: "none", models: {}, maxCalls: 32, tokenBudget: { total: 100_000, perPhase: { logCompression: 10_000 } }, timeoutMs: 300_000, retry: { maxAttempts: 1 } }, runtime: { preference: "local-disposable", externalNetwork: "allowed", dependencyPreparation: "disabled" }, validation: { mode: "explicit", commands }, authority: { profile: "bounded-implementation", allowProviderCalls: true, allowNetwork: true, forbiddenAreas }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
-async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = []): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); if (text.includes("SEMANTIC_TIMEOUT")) { value.execution.timeoutMs = 1_000; value.providerRouting.timeoutMs = 1_000; } value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath, { logCompressionInvoker: testLogCompressionInvoker }); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
-async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string, executionMode: "implementation" | "repair" = "implementation", attempt?: number, dirtyPolicy?: string): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); value.execution.mode = executionMode; value.executionAgreement = executionAgreement; if (dirtyPolicy) value.target.dirtyPolicy = dirtyPolicy; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId, attempt, logCompressionInvoker: testLogCompressionInvoker }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
+async function execute(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[] = [], mutate?: (value: Record<string, any>) => void): Promise<Record<string, any>> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-artifacts-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); mutate?.(value); if (text.includes("SEMANTIC_TIMEOUT")) { value.execution.timeoutMs = 1_000; value.providerRouting.timeoutMs = 1_000; } value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); await runTaskSpecFile(specPath, { logCompressionInvoker: testLogCompressionInvoker }); return JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")); }
+async function executeWithExecution(repo: string, taskId: string, text: string, commands: string[], forbiddenAreas: string[], executionAgreement: Record<string, unknown>, executionId?: string, executionMode: "implementation" | "repair" = "implementation", attempt?: number, dirtyPolicy?: string, mutate?: (value: Record<string, any>) => void): Promise<{ execution: Awaited<ReturnType<typeof runTaskSpecFile>>; result: Record<string, any> }> { const root = await mkdtemp(join(tmpdir(), "runforge-implementation-agreement-")); const specPath = join(root, "task.json"); const value: Record<string, any> = spec(repo, taskId, text, commands, forbiddenAreas); mutate?.(value); value.execution.mode = executionMode; value.executionAgreement = executionAgreement; if (dirtyPolicy) value.target.dirtyPolicy = dirtyPolicy; value.artifacts = { root: join(root, "artifacts"), resultFormat: "normalized-v1" }; await import("node:fs/promises").then(({ writeFile }) => writeFile(specPath, JSON.stringify(value))); const execution = await runTaskSpecFile(specPath, { executionId, attempt, logCompressionInvoker: testLogCompressionInvoker }); return { execution, result: JSON.parse(await readFile(join(root, "artifacts", "results.json"), "utf8")) }; }
 async function poll(url: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("task did not finish"); }
 async function pollPhase(url: string, phase: string): Promise<void> { for (let index = 0; index < 200; index += 1) { const task = await fetch(url).then((response) => response.json()) as Record<string, any>; if (task.progress?.phase === phase) return; await new Promise((done) => setTimeout(done, 25)); } throw new Error(`task did not reach ${phase}`); }
 async function downgradeCheckpointToLegacy(state: string, taskId: string, checkpointId: string): Promise<{ checkpointPath: string; manifestPath: string; manifest: Record<string, unknown> }> { const artifacts = join(state, "tasks", taskId, "attempts", "1", "artifacts"); const checkpointPath = join(artifacts, "checkpoints", checkpointId); const record = (await readdir(checkpointPath, { withFileTypes: true })).find((item) => item.isDirectory() && /^[a-f0-9]{64}$/.test(item.name)); if (!record) throw new Error("missing immutable checkpoint record"); const recordPath = join(checkpointPath, record.name), manifestPath = join(checkpointPath, "manifest.json"); const current = JSON.parse(await readFile(join(recordPath, "manifest.json"), "utf8")) as Record<string, unknown>; const { taskId: _taskId, executionAgreementId: _agreementId, workspace, ...legacy } = current; legacy.schemaVersion = 1; legacy.status = "available"; legacy.workspaceSha = objectValue(workspace).sha ?? null; legacy.workspaceState = objectValue(workspace).state ?? "dirty"; await chmod(checkpointPath, 0o700); for (const name of ["patch.diff", "changed-files.json", "validation.json", "usage.json", "executor.json", "safety.json", "unresolved-findings.json"]) { const target = join(checkpointPath, name); await cp(join(recordPath, name), target); await chmod(target, 0o600); } await chmod(recordPath, 0o700); await rm(recordPath, { recursive: true }); legacy.files = (legacy.files as Array<Record<string, unknown>>).filter((entry) => ["patch.diff", "changed-files.json", "validation.json", "usage.json", "executor.json", "safety.json", "unresolved-findings.json"].includes(String(entry.path))); await writeFile(manifestPath, JSON.stringify(legacy, null, 2) + "\n"); for (const resultPath of [join(artifacts, "results.json"), join(state, "tasks", taskId, "result.json")]) { const document = JSON.parse(await readFile(resultPath, "utf8")) as Record<string, any>; const result = document.result ?? document; for (const checkpoint of result.artifact.checkpoints) { checkpoint.path = `checkpoints/${checkpointId}`; checkpoint.patchPath = `checkpoints/${checkpointId}/patch.diff`; delete checkpoint.digest; } result.artifacts.checkpoints = [`checkpoints/${checkpointId}`]; await writeFile(resultPath, JSON.stringify(document, null, 2) + "\n"); } return { checkpointPath, manifestPath, manifest: legacy }; }
@@ -661,3 +869,5 @@ async function rewriteLegacyPayload(checkpointPath: string, name: string, value:
 function digestFile(value: string | Buffer): string { return createHash("sha256").update(value).digest("hex"); }
 async function pollManager(manager: ControlPlaneManager, taskId: string): Promise<Record<string, any>> { for (let index = 0; index < 200; index += 1) { const task = await manager.getTask(taskId); if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("manager task did not finish"); }
 function objectValue(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
+function makeAgent(root: string, lines: string[]): Promise<string> { return (async () => { const agent = join(root, "agent.mjs"); await writeFile(agent, `${lines.join("\n")}\n`); return agent; })(); }
+function expectReceipt(result: Record<string, any>, partial: Record<string, any>): void { expect(result.receipt ?? result).toEqual(expect.objectContaining(partial)); }

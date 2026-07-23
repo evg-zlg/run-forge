@@ -171,6 +171,10 @@ describe("TaskSpec v2", () => {
       gitEvidence: { binding: ["canonicalRepositoryIdentity", "expectedTargetSha"], execution: "argv-only", network: false, mutations: false },
     });
     expect(contract.implementationRequest.taskSpec.executionAgreement).toEqual({ schemaVersion: 1, profile: "local-ready" });
+    expect(contract.implementationExecutor).toMatchObject({
+      profiles: { fast: { modelSelection: "economical" }, heavy: { requiresComplexitySignal: "heavy" } },
+      defaultEarlyProgressDeadlineMs: 75_000
+    });
     const validate = new Ajv2020({ strict: true, strictRequired: false }).compile(fileSchema);
     expect(validate(contract.implementationRequest.taskSpec), JSON.stringify(validate.errors)).toBe(true);
   });

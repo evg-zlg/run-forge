@@ -15,8 +15,9 @@ await writeFile(join(repo, "verify.mjs"), `import { readFileSync } from "node:fs
 await git(repo, ["init", "-b", "main"]); await git(repo, ["add", "."]); await git(repo, ["-c", "user.name=RunForge Dogfood", "-c", "user.email=runforge@localhost", "commit", "-m", "synthetic base"]);
 const adapter = join(root, "synthetic-adapter.mjs");
 await writeFile(adapter, `import { readFileSync, writeFileSync } from "node:fs"; for (const name of ["infra-a.js","infra-b.js","infra-c.js","infra-d.js"]) writeFileSync(name, readFileSync(name,"utf8").replace("false","true")); console.log("implemented exactly four scoped files"); console.log(JSON.stringify({type:"turn.completed",usage:{input_tokens:119900,output_tokens:100}}));\n`);
-const previousCommand = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND, previousAccounting = process.env.RUNFORGE_USAGE_ACCOUNTING;
+const previousCommand = process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND, previousAccounting = process.env.RUNFORGE_USAGE_ACCOUNTING, previousCapabilities = process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES;
 process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = `${process.execPath} ${adapter}`; process.env.RUNFORGE_USAGE_ACCOUNTING = "synthetic";
+process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = JSON.stringify({ maxInputContextTokens: 200_000, maxOutputTokens: 200_000, maxReasoningTokens: 200_000, maxWallClockMs: 300_000, maxCallsPerPhase: 3, maxCostUsd: 10, guarantees: { inputTokens: true, outputTokens: true, reasoningTokens: true, wallClock: true, calls: true, cost: true } });
 const server = await startControlPlaneServer({ port: 0, stateRoot });
 try {
   const before = { head: await git(repo, ["rev-parse", "HEAD"]), status: await git(repo, ["status", "--porcelain=v1"]) };
@@ -29,6 +30,7 @@ try {
   request.taskSpec.validation = { mode: "explicit", commands: ["node verify.mjs"] }; request.publication = "none";
   const createResponse = await fetch(`${server.url}/v1/tasks`, { method: "POST", headers: jsonHeaders, body: JSON.stringify(request) }); if (createResponse.status !== 202) throw new Error(`create failed: ${JSON.stringify(await json(createResponse))}`);
   const acceptedTask = await json(createResponse); const terminal = await poll(`${server.url}/v1/tasks/${acceptedTask.id}`); const result = await fetch(`${server.url}/v1/tasks/${acceptedTask.id}/result`).then(json);
+  if (!result.artifact || !Array.isArray(result.providerCalls)) throw new Error(`unexpected result shape: ${JSON.stringify({ keys: Object.keys(result), status: result.status, error: result.error, errors: result.errors, workflow: result.workflow })}`);
   const checkpointId = result.artifact.bestValidatedCheckpointId; const providerCallsBeforeAccept = result.providerCalls.length;
   const accepted = await fetch(`${server.url}/v1/tasks/${acceptedTask.id}/accept-completed-result`, { method: "POST", headers: jsonHeaders, body: JSON.stringify({ decisionId: "dogfood-accept-1", checkpointId, delivery: "patch" }) }).then(json);
   const after = { head: await git(repo, ["rev-parse", "HEAD"]), status: await git(repo, ["status", "--porcelain=v1"]) };
@@ -37,9 +39,13 @@ try {
   if (process.env.RUNFORGE_DOGFOOD_OUT) await writeFile(process.env.RUNFORGE_DOGFOOD_OUT, JSON.stringify(evidence, null, 2) + "\n");
   process.stdout.write(JSON.stringify(evidence, null, 2) + "\n");
 } finally {
-  await server.close(); if (previousCommand === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousCommand; if (previousAccounting === undefined) delete process.env.RUNFORGE_USAGE_ACCOUNTING; else process.env.RUNFORGE_USAGE_ACCOUNTING = previousAccounting;
+  await server.close(); if (previousCommand === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND; else process.env.RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND = previousCommand; if (previousAccounting === undefined) delete process.env.RUNFORGE_USAGE_ACCOUNTING; else process.env.RUNFORGE_USAGE_ACCOUNTING = previousAccounting; if (previousCapabilities === undefined) delete process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES; else process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES = previousCapabilities;
 }
 
 async function git(cwd: string, args: string[]): Promise<string> { return (await exec("git", args, { cwd })).stdout; }
-async function json(response: Response): Promise<any> { return response.json(); }
+async function json(response: Response): Promise<any> {
+  const body = await response.json();
+  if (!response.ok) throw new Error(`HTTP ${response.status}: ${JSON.stringify(body)}`);
+  return body;
+}
 async function poll(url: string): Promise<any> { for (let index = 0; index < 400; index += 1) { const task = await fetch(url).then(json); if (["completed", "failed", "awaiting_owner_decision", "interrupted"].includes(task.status)) return task; await new Promise((done) => setTimeout(done, 25)); } throw new Error("dogfood task did not finish"); }

@@ -15,6 +15,7 @@
     "dev:triage": "tsx src/cli/index.ts triage",
     "dogfood": "pnpm check:governance && pnpm check:structure && pnpm typecheck && pnpm test && pnpm build && pnpm validation:run && pnpm demo:typecheck-failure && pnpm demo:test-failure && pnpm demo:env-config-failure",
     "dogfood:rails": "pnpm build && tsx scripts/dogfood-rails.ts",
+    "dogfood:result-durability": "tsx scripts/result-durability-dogfood.ts",
     "demo:test-failure": "tsx src/cli/index.ts triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/test-failure.log --out ./artifacts/demo-test",
     "demo:typecheck-failure": "tsx src/cli/index.ts triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/typecheck-failure.log --out ./artifacts/demo-typecheck",
     "demo:env-config-failure": "tsx src/cli/index.ts triage --repo ./fixtures/repos/sample-js --log ./fixtures/logs/env-config-failure.log --out ./artifacts/demo-env-config",

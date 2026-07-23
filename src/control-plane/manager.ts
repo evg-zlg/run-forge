@@ -17,9 +17,9 @@ import { acceptCompletedResult, discardCompletedResult } from "./completed-resul
 import { exposeCheckpointRepairDigests, startCheckpointRepair, type CheckpointRepairRequest } from "./checkpoint-repair.js";
 import { buildTimeoutContract } from "./timeout-contract.js"; import { acceptValidationCapabilities } from "./validation-negotiation.js";
 import { openRouterReadiness, providerForExecutor, publicImplementationExecutors } from "./provider-routing-projection.js"; import { providerRoutingPhases, selectProviderModel } from "../product/provider-routing.js"; export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
-import { classifyPreProviderFailure, negotiateSemanticReviewer, requestedRuntimeCorrection, requestedSemanticValidationRuntimeCorrection, reviewerUnavailableReason } from "./http-task-preflight.js";
+import { assertFactoryVpsExecutor, classifyPreProviderFailure, negotiateSemanticReviewer, requestedRuntimeCorrection, requestedSemanticValidationRuntimeCorrection, reviewerUnavailableReason } from "./http-task-preflight.js";
 import { negotiateCorrectedRetryValidation } from "./retry-validation-negotiation.js";
-import { WorkspaceSetupError } from "../run/task-run-workspace.js";
+import { WorkspaceSetupError } from "../run/task-run-workspace.js"; import { object, reconstructTerminalReceipt } from "./terminal-receipt.js";
 const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs, heartbeatIntervalMs = 1_000, staleHeartbeatMs = 15_000, cleanupGraceMs = 2_000; type ActiveWorker = { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController }; type ContinuationBinding = { taskId: string; projectId: string | null; repository: string; workingDirectory: string; sourceBranch: string; sourceSha: string };
 export class ControlPlaneManager {
   private readonly active = new Map<string, ActiveWorker>(); private readonly settledExecutions = new Set<string>();
@@ -89,7 +89,7 @@ export class ControlPlaneManager {
     const requestedInSpec = object(raw.git).publication; const publicationRequested = input.publicationRequested === "draft-pr" || requestedInSpec === "draft-pr" ? "draft-pr" : "none";
     raw.git = { publication: "none" }; raw.merge = { policy: "never" }; raw.deploy = { policy: "never" }; const artifactRoot = join(this.store.taskDir(taskId), "attempts", "1", "artifacts"); raw.artifacts = { ...object(raw.artifacts), root: artifactRoot, resultFormat: "normalized-v1" };
     let normalized: Awaited<ReturnType<typeof normalizeTaskSpecV2>>; try { normalized = await normalizeTaskSpecV2(raw); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error), { operation: "start_new_task", newTaskRequired: true }); }
-    raw.target = { ...object(raw.target), repository: normalized.target.repository, workingDirectory: normalized.target.workingDirectory, expectedSha: normalized.target.expectedSha };
+    raw.target = { ...object(raw.target), repository: normalized.target.repository, workingDirectory: normalized.target.workingDirectory, expectedSha: normalized.target.expectedSha }; await assertFactoryVpsExecutor(normalized, taskId);
     const implementation = ["implementation", "repair"].includes(normalized.execution.mode);
     const automaticContext = project ? await buildExecutionAgreementContext({ project, publicationTarget: { kind: "none" } }) : undefined;
     const preflightAgreement = negotiateTaskAgreement(normalized, input.authority, automaticContext);
@@ -264,8 +264,9 @@ export class ControlPlaneManager {
     const artifacts = await readdir(task.artifactRoot, { recursive: true }).catch(() => [] as string[]); const checkpoints = await listDurableCheckpoints(task.artifactRoot);
     const spec = await this.store.readSpec(task.id); const criteria = object(object(spec).task).acceptanceCriteria;
     const incomplete = Array.isArray(criteria) ? criteria.map(String) : ["Execution did not reach a trusted terminal result."];
+    const receipt = await reconstructTerminalReceipt(task, this.store, checkpoints);
     await this.store.writePublishedResult(task.id, executionId, {
-      schemaVersion: 1, taskId: task.id, status: "interrupted", lastCompletedPhase: task.recovery?.lastPhase ?? task.progress.phase,
+      schemaVersion: 1, taskId: task.id, status: "interrupted", actualExecutorMode: "implementation", receipt, lastCompletedPhase: task.recovery?.lastPhase ?? task.progress.phase,
       interruption: { reason: task.recovery?.reason, originalExecutionId: executionId, lastHeartbeatAt: task.progress.lastHeartbeatAt, deadlineAt: task.progress.deadlineAt },
       execution: { id: executionId, attempt: task.progress.attempt, operation: task.progress.operation },
       targetMutation: { status: "not_inferred", assertion: "Interrupted execution never implies that target mutations completed." },
@@ -315,7 +316,7 @@ export class ControlPlaneManager {
     const spec = await this.store.readSpec(task.id); const target = object(object(spec).target); const repository = typeof target.repository === "string" ? target.repository : null; const workingDirectory = typeof target.workingDirectory === "string" ? target.workingDirectory : null; const expectedSha = typeof target.expectedSha === "string" ? target.expectedSha : null;
     const inspection = repository && workingDirectory ? await inspectProject(repository, workingDirectory).catch(() => null) : null;
     const project = task.projectId ? await this.store.getProject(task.projectId) : null;
-    if (spec?.taskId === task.id && repository && workingDirectory && expectedSha && inspection?.repositoryRoot === repository && inspection.workingDirectory === workingDirectory && inspection.head === expectedSha && (!task.projectId || project?.repository === repository && project?.workingDirectory === workingDirectory)) return true;
+    if (spec?.taskId === task.id && repository && workingDirectory && expectedSha && inspection && inspection.repositoryRoot === repository && inspection.workingDirectory === workingDirectory && inspection.head === expectedSha && (!task.projectId || project?.repository === repository && project?.workingDirectory === workingDirectory)) return true;
     task.recovery = { reason: expectedSha ? "target_sha_changed" : "accepted_source_identity_missing", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, originalExecutionId: task.progress.executionId, actions: ["cancel", "start_new_task"], retryAvailable: false, cleanupStatus: "completed", operation: "start_new_task", prerequisites: ["Submit a new TaskSpec against the intended current source."], newTaskRequired: true, previousArtifactsReusable: false, targetShaChanged: expectedSha ? true : null };
     await this.persist(task, "retry_blocked", task.recovery.reason); await this.writeInterruptedResult(task); return false;
   }
@@ -325,7 +326,7 @@ export class ControlPlaneManager {
   private async readTask(id: string): Promise<ControlTaskRecord> { const task = await this.store.getTask(id); if (!task) throw new ControlPlaneError(404, "task_not_found", `Task not found: ${id}`, undefined, false, id); return normalizeTask(task); }
   private async requireProject(id: string): Promise<ProjectRecord> { const project = await this.store.getProject(id); if (!project) throw new ControlPlaneError(404, "project_not_found", `Project not found: ${id}`); return project; }
 }
-function progress(now: string, timeoutMs = executionTimeoutMs): ControlTaskRecord["progress"] { return { phase: "queued", operation: "execution", startedAt: null, updatedAt: now, lastHeartbeatAt: null, executionId: null, attempt: 0, workerStatus: "idle", timeoutMs, deadlineAt: null, summary: "Queued for execution.", diagnostic: null }; }
+function progress(now: string, timeoutMs: number = executionTimeoutMs): ControlTaskRecord["progress"] { return { phase: "queued", operation: "execution", startedAt: null, updatedAt: now, lastHeartbeatAt: null, executionId: null, attempt: 0, workerStatus: "idle", timeoutMs, deadlineAt: null, summary: "Queued for execution.", diagnostic: null }; }
 function runforgeOwns(agreement: ExecutionAgreement, phaseId: "localBranch" | "localCommit"): boolean { const phase = agreement.phases.find((item) => item.phaseId === phaseId); return phase?.requested === true && phase.responsibleParty === "runforge"; }
 function implementationParty(agreement: ExecutionAgreement): "external_session" | "external_system" | null { const phase = agreement.phases.find((item) => item.phaseId === "implementation"); return phase?.requested === true && (phase.responsibleParty === "external_session" || phase.responsibleParty === "external_system") ? phase.responsibleParty : null; }
 function normalizeTask(task: ControlTaskRecord): ControlTaskRecord {
@@ -335,7 +336,6 @@ function normalizeTask(task: ControlTaskRecord): ControlTaskRecord {
   if (task.recovery) { const retryAvailable = task.recovery.retryAvailable ?? Boolean(task.recovery.operation); const cleanupPending = ["pending", "detached"].includes(task.recovery.cleanupStatus); task.recovery = { ...task.recovery, originalExecutionId: task.recovery.originalExecutionId ?? task.progress.executionId, retryAvailable, cleanupStatus: task.recovery.cleanupStatus ?? "not_required", ...(!task.recovery.operation && !cleanupPending ? { operation: retryAvailable ? `/v1/tasks/${task.id}/retry` : "start_new_task" } : {}), prerequisites: task.recovery.prerequisites ?? (retryAvailable ? ["Previous worker cleanup must be complete.", "Target SHA must still match the accepted TaskSpec."] : cleanupPending ? ["Poll until bounded worker cleanup completes."] : ["Correct the reported failure.", "Submit a current TaskSpec v2."]), newTaskRequired: task.recovery.newTaskRequired ?? (!retryAvailable && !cleanupPending), previousArtifactsReusable: task.recovery.previousArtifactsReusable ?? true, targetShaChanged: task.recovery.targetShaChanged ?? null }; }
   task.recovery ??= null; task.continuation ??= { schemaVersion: 1, state: "none", decisionId: null, executionId: null, sourceExecutionId: null }; task.continuation.sourceExecutionId ??= null; task.progress.agreement ??= projectAgreementLifecycle(task); return task;
 }
-function object(value: unknown): Record<string, any> { return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}; }
 function requiredString(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new ControlPlaneError(400, "invalid_request", `${name} is required.`); return value.trim(); }
 function continuationBindingHash(binding: ContinuationBinding, authority: ControlAuthority, taskSpec: Record<string, unknown>): string { return createHash("sha256").update(JSON.stringify({ binding, authority, taskSpec })).digest("hex"); }
 function nativeMatchesContinuationContext(native: Record<string, unknown>, binding: ContinuationBinding): boolean {

@@ -30,7 +30,7 @@ export type TaskSpecV2 = {
   taskId: string;
   task: { text: string; goal: string; acceptanceCriteria: string[] };
   target: { repository: string; workingDirectory: string; expectedSha: string; dirtyPolicy?: "require_clean" | "allow_known_generated" | "snapshot_from_sha" | "use_disposable_from_base_sha" };
-  execution: { mode: TaskExecutionMode; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number; budgetMode: "soft" | "hard"; phaseBudgets: Record<"startup" | "analysis" | "implementation" | "validation" | "repair" | "review" | "publication", number> };
+  execution: { mode: TaskExecutionMode; executor: "local-coding-agent" | "runforge-factory-vps"; maxRepairIterations: number; timeoutMs: number; maxChangedFiles: number; maxPatchBytes: number; maxProviderTokens: number; budgetMode: "soft" | "hard"; phaseBudgets: Record<"startup" | "analysis" | "implementation" | "validation" | "repair" | "review" | "publication", number>; maxInputContextTokens?: number; maxOutputTokens?: number; maxReasoningTokens?: number; reasoningSetting?: string; maxCallsPerPhase?: number; maxPhaseTokens?: number; maxTaskTokens?: number; earlyProgressDeadlineMs?: number; maxCostUsd?: number; requestedProfile?: "fast" | "standard" | "heavy" };
   providerRouting: ProviderRouting;
   executionAgreement: TaskSpecExecutionAgreement;
   discovery: { policy: "auto" | "explicit"; profile: "small-scope" | "standard"; explicitFiles: string[]; /** Present only when a campaign has an explicit write boundary. */ writeScopes?: string[]; maxFiles: number; maxBytes: number; maxTokens: number; stopCondition: string };
@@ -80,7 +80,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const expectedSha = optionalString(target.expectedSha, "target.expectedSha") ?? inspection.head;
   if (expectedSha !== inspection.head) throw new Error(`target.expectedSha mismatch: expected ${expectedSha}, current ${inspection.head}.`);
   const executionRaw = object(raw.execution, "execution is required and must be an object.");
-  rejectUnknown(executionRaw, ["mode", "maxRepairIterations", "timeoutMs", "maxChangedFiles", "maxPatchBytes", "maxProviderTokens", "budgetMode", "phaseBudgets"], "execution");
+  rejectUnknown(executionRaw, ["mode", "executor", "maxRepairIterations", "timeoutMs", "maxChangedFiles", "maxPatchBytes", "maxProviderTokens", "budgetMode", "phaseBudgets", "maxInputContextTokens", "maxOutputTokens", "maxReasoningTokens", "reasoningSetting", "maxCallsPerPhase", "maxPhaseTokens", "maxTaskTokens", "earlyProgressDeadlineMs", "maxCostUsd", "requestedProfile"], "execution");
   const artifactsRaw = optionalObject(raw.artifacts, "artifacts");
   rejectUnknown(artifactsRaw, ["root", "resultFormat"], "artifacts");
   const artifactInput = optionalString(artifactsRaw.root, "artifacts.root") ?? join(defaultArtifactRoot(inspection.path), taskId);
@@ -171,6 +171,7 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
   const allowNetwork = authorityRaw.allowNetwork === undefined ? false : boolean(authorityRaw.allowNetwork, "authority.allowNetwork");
   const externalNetwork = choice(runtimeRaw.externalNetwork ?? "denied", ["denied", "dependency-preparation-only", "allowed"], "runtime.externalNetwork");
   if (externalNetwork === "allowed" && !allowNetwork) throw new Error("runtime.externalNetwork='allowed' requires authority.allowNetwork=true.");
+  const discovery = normalizeDiscovery(discoveryRaw);
   const spec: TaskSpecV2 = {
     schemaVersion: 2,
     taskId,
@@ -207,11 +208,18 @@ export async function normalizeTaskSpecV2(value: unknown, baseDir = process.cwd(
 
 const budgetPhases = ["startup", "analysis", "implementation", "validation", "repair", "review", "publication"] as const;
 function normalizeExecution(raw: Record<string, unknown>, mode: TaskExecutionMode): TaskSpecV2["execution"] {
-  const total = integer(raw.maxProviderTokens, "execution.maxProviderTokens", 1_000, 200_000, 100_000);
+  const total = integer(raw.maxProviderTokens ?? raw.maxTaskTokens, "execution.maxProviderTokens", 1_000, 200_000, 100_000);
   const phaseRaw = optionalObject(raw.phaseBudgets, "execution.phaseBudgets"); rejectUnknown(phaseRaw, [...budgetPhases], "execution.phaseBudgets");
   const defaults = { startup: .05, analysis: .1, implementation: .45, validation: .1, repair: .2, review: .07, publication: .03 };
   const phaseBudgets = Object.fromEntries(budgetPhases.map((phase) => [phase, integer(phaseRaw[phase], `execution.phaseBudgets.${phase}`, 0, 200_000, Math.floor(total * defaults[phase]))])) as TaskSpecV2["execution"]["phaseBudgets"];
-  return { mode, maxRepairIterations: integer(raw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(raw.timeoutMs, "execution.timeoutMs", 1_000, implementationExecutorContract.maxLimits.timeoutMs, 300_000), maxChangedFiles: integer(raw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(raw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: total, budgetMode: choice(raw.budgetMode ?? "soft", ["soft", "hard"], "execution.budgetMode"), phaseBudgets };
+  const maxCallsPerPhase = optionalInteger(raw.maxCallsPerPhase, "execution.maxCallsPerPhase");
+  const maxPhaseTokens = optionalInteger(raw.maxPhaseTokens, "execution.maxPhaseTokens");
+  const maxTaskTokens = optionalInteger(raw.maxTaskTokens, "execution.maxTaskTokens");
+  if (maxTaskTokens !== undefined && maxTaskTokens !== total) throw new Error("execution.maxTaskTokens must match execution.maxProviderTokens when both are provided.");
+  if (maxPhaseTokens !== undefined && maxPhaseTokens > total) throw new Error("execution.maxPhaseTokens must not exceed execution.maxProviderTokens.");
+  if (maxCallsPerPhase !== undefined && (maxCallsPerPhase < 1 || maxCallsPerPhase > 32)) throw new Error("execution.maxCallsPerPhase must be an integer from 1 to 32.");
+  const requestedProfile = choice(raw.requestedProfile ?? "standard", ["fast", "standard", "heavy"], "execution.requestedProfile") as "fast" | "standard" | "heavy";
+  return { mode, executor: choice(raw.executor ?? "local-coding-agent", ["local-coding-agent", "runforge-factory-vps"], "execution.executor"), maxRepairIterations: integer(raw.maxRepairIterations, "execution.maxRepairIterations", 0, 3, 2), timeoutMs: integer(raw.timeoutMs, "execution.timeoutMs", 1_000, implementationExecutorContract.maxLimits.timeoutMs, 300_000), maxChangedFiles: integer(raw.maxChangedFiles, "execution.maxChangedFiles", 1, 100, 20), maxPatchBytes: integer(raw.maxPatchBytes, "execution.maxPatchBytes", 1_000, 5_000_000, 500_000), maxProviderTokens: total, budgetMode: choice(raw.budgetMode ?? "soft", ["soft", "hard"], "execution.budgetMode"), phaseBudgets, ...(optionalInteger(raw.maxInputContextTokens, "execution.maxInputContextTokens") !== undefined ? { maxInputContextTokens: optionalInteger(raw.maxInputContextTokens, "execution.maxInputContextTokens") ?? undefined } : {}), ...(optionalInteger(raw.maxOutputTokens, "execution.maxOutputTokens") !== undefined ? { maxOutputTokens: optionalInteger(raw.maxOutputTokens, "execution.maxOutputTokens") ?? undefined } : {}), ...(optionalInteger(raw.maxReasoningTokens, "execution.maxReasoningTokens") !== undefined ? { maxReasoningTokens: optionalInteger(raw.maxReasoningTokens, "execution.maxReasoningTokens") ?? undefined } : {}), ...(optionalString(raw.reasoningSetting, "execution.reasoningSetting") !== undefined ? { reasoningSetting: optionalString(raw.reasoningSetting, "execution.reasoningSetting") } : {}), ...(maxCallsPerPhase !== undefined ? { maxCallsPerPhase } : {}), ...(maxPhaseTokens !== undefined ? { maxPhaseTokens } : {}), ...(maxTaskTokens !== undefined ? { maxTaskTokens } : {}), ...(optionalInteger(raw.earlyProgressDeadlineMs, "execution.earlyProgressDeadlineMs") !== undefined ? { earlyProgressDeadlineMs: optionalInteger(raw.earlyProgressDeadlineMs, "execution.earlyProgressDeadlineMs") ?? undefined } : {}), ...(optionalPositiveNumber(raw.maxCostUsd, "execution.maxCostUsd") !== undefined ? { maxCostUsd: optionalPositiveNumber(raw.maxCostUsd, "execution.maxCostUsd") } : {}), requestedProfile };
 }
 function normalizeDiscovery(raw: Record<string, unknown>): TaskSpecV2["discovery"] {
   const profile = choice(raw.profile ?? "standard", ["small-scope", "standard"], "discovery.profile");
@@ -229,8 +237,12 @@ function optionalObject(value: unknown, name: string): Record<string, unknown> {
 function string(value: unknown, name: string): string { if (typeof value !== "string" || !value.trim()) throw new Error(`${name} must be a non-empty string.`); return value.trim(); }
 function optionalString(value: unknown, name: string): string | undefined { return value === undefined ? undefined : string(value, name); }
 function nullableString(value: unknown, name: string): string | null { return value === undefined || value === null ? null : string(value, name); }
+function optionalInteger(value: unknown, name: string): number | undefined { return value === undefined ? undefined : integer(value, name, 0, 200_000, 0); }
+function optionalPositiveNumber(value: unknown, name: string): number | undefined { return value === undefined ? undefined : cappedNumber(value, name, 1_000, 1); }
 function boolean(value: unknown, name: string): boolean { if (typeof value !== "boolean") throw new Error(`${name} must be boolean.`); return value; }
 function integer(value: unknown, name: string, min: number, max: number, fallback: number): number { const parsed = value === undefined ? fallback : value; if (!Number.isInteger(parsed) || Number(parsed) < min || Number(parsed) > max) throw new Error(`${name} must be an integer from ${min} to ${max}.`); return Number(parsed); }
+function cappedInteger(value: unknown, name: string, min: number, max: number, fallback: number): number { const parsed = value === undefined ? fallback : value; if (!Number.isInteger(parsed) || Number(parsed) < min) throw new Error(`${name} must be an integer of at least ${min}.`); return Math.min(Number(parsed), max); }
+function cappedNumber(value: unknown, name: string, max: number, fallback: number): number { const parsed = value === undefined ? fallback : value; if (typeof parsed !== "number" || !Number.isFinite(parsed) || parsed <= 0) throw new Error(`${name} must be a positive finite number.`); return Math.min(parsed, max); }
 function strings(value: unknown, name: string, nonEmpty = false): string[] { if (!Array.isArray(value) || (nonEmpty && !value.length) || value.some((item) => typeof item !== "string" || !item.trim())) throw new Error(`${name} must be ${nonEmpty ? "a non-empty " : "an "}array of non-empty strings.`); return value.map((item) => item.trim()); }
 function safeWriteScope(value: string): boolean { const normalized = value.replace(/\\/g, "/").replace(/^\.\//, "").replace(/\/$/, ""); return Boolean(normalized) && !normalized.startsWith("/") && !normalized.split("/").includes("..") && !normalized.split("/").includes(".git"); }
 function choice<T extends string>(value: unknown, choices: readonly T[], name: string): T { if (typeof value !== "string" || !choices.includes(value as T)) throw new Error(`${name} must be one of: ${choices.join(", ")}.`); return value as T; }

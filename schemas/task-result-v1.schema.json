@@ -4,6 +4,15 @@
   "title": "RunForge normalized task result v1",
   "type": "object",
   "required": ["schemaVersion", "taskId", "status"],
+  "allOf": [
+    {
+      "if": { "required": ["actualExecutorMode"], "properties": { "actualExecutorMode": { "const": "implementation" } } },
+      "then": {
+        "required": ["receipt"],
+        "properties": { "receipt": { "$ref": "#/$defs/implementationReceipt" } }
+      }
+    }
+  ],
   "anyOf": [
     {
       "required": ["contract", "agreement", "handoff", "next"],
@@ -46,6 +55,8 @@
     "contract": { "const": "runforge-task-result" },
     "taskId": { "type": "string", "minLength": 1 },
     "status": { "type": "string" },
+    "actualExecutorMode": { "type": "string" },
+    "receipt": { "$ref": "#/$defs/implementationReceipt" },
     "agreement": { "$ref": "#/$defs/agreementSummary" },
     "handoff": { "$ref": "#/$defs/handoff" },
     "next": { "$ref": "#/$defs/nextAction" },
@@ -148,6 +159,60 @@
     "legacyStatus": {
       "enum": ["completed", "failed", "awaiting_owner_decision", "blocked", "implementation_not_started", "no_change_required", "blocked_by_capability", "blocked_by_policy"]
     },
+    "implementationReceipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "queueDuration", "providerExecutionDuration", "totalDuration",
+        "provider", "model", "phase", "calls",
+        "inputTokens", "cachedTokens", "outputTokens", "reasoningTokens", "billedTokens", "cost", "availability",
+        "filesRead", "filesChanged", "patchAvailable", "checkpointId", "testsStarted", "testsCompleted",
+        "outcome", "stopReason", "failureClassification", "lastCompletedStage", "nextSafeAction"
+      ],
+      "properties": {
+        "queueDuration": { "type": "integer", "minimum": 0 },
+        "providerExecutionDuration": { "type": "integer", "minimum": 0 },
+        "totalDuration": { "type": "integer", "minimum": 0 },
+        "provider": { "type": "string", "minLength": 1 },
+        "model": { "type": ["string", "null"] },
+        "phase": { "enum": ["implementation", "repair"] },
+        "calls": { "type": "integer", "minimum": 0 },
+        "inputTokens": { "$ref": "#/$defs/nullableMetric" },
+        "cachedTokens": { "$ref": "#/$defs/nullableMetric" },
+        "outputTokens": { "$ref": "#/$defs/nullableMetric" },
+        "reasoningTokens": { "$ref": "#/$defs/nullableMetric" },
+        "billedTokens": { "$ref": "#/$defs/nullableMetric" },
+        "cost": { "$ref": "#/$defs/nullableMetric" },
+        "availability": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["queueDuration", "inputTokens", "cachedTokens", "outputTokens", "reasoningTokens", "billedTokens", "cost"],
+          "properties": {
+            "queueDuration": { "$ref": "#/$defs/metricAvailability" },
+            "inputTokens": { "$ref": "#/$defs/metricAvailability" },
+            "cachedTokens": { "$ref": "#/$defs/metricAvailability" },
+            "outputTokens": { "$ref": "#/$defs/metricAvailability" },
+            "reasoningTokens": { "$ref": "#/$defs/metricAvailability" },
+            "billedTokens": { "$ref": "#/$defs/metricAvailability" },
+            "cost": { "$ref": "#/$defs/metricAvailability" }
+          }
+        },
+        "filesRead": { "$ref": "#/$defs/strings" },
+        "filesChanged": { "$ref": "#/$defs/strings" },
+        "patchAvailable": { "type": "boolean" },
+        "checkpointId": { "type": ["string", "null"], "minLength": 1 },
+        "testsStarted": { "type": "integer", "minimum": 0 },
+        "testsCompleted": { "type": "integer", "minimum": 0 },
+        "outcome": { "$ref": "#/$defs/receiptOutcome" },
+        "stopReason": { "$ref": "#/$defs/receiptOutcome" },
+        "failureClassification": { "anyOf": [{ "$ref": "#/$defs/receiptOutcome" }, { "type": "null" }] },
+        "lastCompletedStage": { "enum": ["queued", "provider", "implementation", "checkpoint", "validation", "completed"] },
+        "nextSafeAction": { "enum": ["review_result", "review_checkpoint", "retry_with_reduced_context", "retry_with_bounded_deadline", "preserve_cancellation", "repair_infrastructure_then_retry", "inspect_diagnostics_then_retry"] }
+      }
+    },
+    "nullableMetric": { "type": ["number", "null"], "minimum": 0 },
+    "metricAvailability": { "enum": ["reported", "partially_reported", "not_reported", "derived"] },
+    "receiptOutcome": { "enum": ["completed", "no_progress", "budget_exhausted", "deadline_exceeded", "provider_failed", "implementation_failed", "checkpoint_available", "validation_not_started", "cancellation", "infrastructure_failure"] },
     "legacyArtifacts": {
       "type": "object",
       "required": ["summary", "results"],

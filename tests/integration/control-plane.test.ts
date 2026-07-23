@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { ControlPlaneManager } from "../../src/control-plane/manager.js";
 import { startControlPlaneServer, type ControlPlaneServerInstance } from "../../src/control-plane/server.js";
 import { ControlPlaneStore } from "../../src/control-plane/state.js";
+import { persistDurableCheckpoint } from "../../src/implementation/durable-checkpoint.js";
 import { validateTaskResultContract } from "../../src/product/task-result-contract.js";
 import { WorkspaceSetupError } from "../../src/run/task-run-workspace.js";
 import { PreProviderSetupFailure } from "../../src/control-plane/http-task-preflight.js";
@@ -804,7 +805,7 @@ for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace=
   it("recovers a deadline interruption through HTTP without allowing a late worker to overwrite the retry", async () => {
     const stateRoot = roots[roots.push(await mkdtemp(join(tmpdir(), "runforge-interrupted-retry-"))) - 1]!; const store = new ControlPlaneStore(stateRoot); let runs = 0; let releaseFirstRun!: () => void; const firstRunBlocked = new Promise<void>((resolve) => { releaseFirstRun = resolve; });
     const manager = new ControlPlaneManager(store, {
-      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const run = ++runs; await mkdir(root, { recursive: true }); if (run === 1) await firstRunBlocked; await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", marker: run === 1 ? "late-old" : "new-attempt", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
+      runTaskSpec: async (specPath) => { const spec = JSON.parse(await readFile(specPath, "utf8")); const root = spec.artifacts.root as string; const run = ++runs; await mkdir(root, { recursive: true }); if (run === 1) { await writeFile(join(root, "results.json"), JSON.stringify({ providerCalls: [{ stdout: "RAW_PROVIDER_OUTPUT_MUST_NOT_ESCAPE" }] })); await firstRunBlocked; } await writeFile(join(root, "results.json"), JSON.stringify({ schemaVersion: 1, taskId: spec.taskId, status: "completed", marker: run === 1 ? "late-old" : "new-attempt", ownerGate: { required: false, status: "not_required" } })); return {} as never; },
       recordOwnerDecision: async () => ({} as never), continueExecution: async () => ({} as never)
     }, { heartbeatIntervalMs: 5, staleHeartbeatMs: 1_000, executionTimeoutMs: 30, cleanupGraceMs: 2_000 });
     const repository = await syntheticRepository(); const instance = await startControlPlaneServer({ port: 0, stateRoot, manager }); servers.push(instance); await submit(instance.url, "CONTROL-DEADLINE-RETRY-1", repository);
@@ -814,7 +815,8 @@ for item in "$@"; do case "$item" in type=bind,src=*,dst=/workspace*) workspace=
     expect(interrupted.recovery).toMatchObject({ reason: "execution_deadline_exceeded", retryAvailable: false, cleanupStatus: "pending" }); expect(interrupted.recovery.operation).toBeUndefined();
     expect(await json(await fetch(`${instance.url}/healthz`))).toMatchObject({ tasks: { active: 0, cleanupPending: 1 } });
     const interruptedResult = await json(await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/result`));
-    expect(interruptedResult).toMatchObject({ status: "interrupted", interruption: { originalExecutionId: oldExecutionId }, targetMutation: { status: "not_inferred" }, safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true } });
+    expect(interruptedResult).toMatchObject({ status: "interrupted", interruption: { originalExecutionId: oldExecutionId }, targetMutation: { status: "not_inferred" }, receipt: { filesChanged: [], patchAvailable: false, checkpointId: null, testsStarted: 0, testsCompleted: 0, outcome: "no_progress", stopReason: "deadline_exceeded", failureClassification: "deadline_exceeded", lastCompletedStage: "provider", nextSafeAction: "retry_with_bounded_deadline" }, safetyAssertions: { staleLeaseRevoked: true, lateWorkerResultIgnored: true } });
+    expectCompleteReceipt(interruptedResult.receipt); expect(interruptedResult.receipt.totalDuration).toBe(interruptedResult.receipt.queueDuration + interruptedResult.receipt.providerExecutionDuration); expect(JSON.stringify(interruptedResult)).not.toContain("RAW_PROVIDER_OUTPUT_MUST_NOT_ESCAPE");
     await expectValidPublicResult(interruptedResult);
     const pendingRetry = await fetch(`${instance.url}/v1/tasks/CONTROL-DEADLINE-RETRY-1/retry`, { method: "POST" }); expect(pendingRetry.status).toBe(409); expect(await json(pendingRetry)).toMatchObject({ error: { code: "recovery_pending", retryable: true } });
     releaseFirstRun();
@@ -918,6 +920,14 @@ async function settlementScenario(taskId: string, input: { requestedOwnership: R
   return { manager, agreement, task: await manager.getTask(taskId), result: await manager.getResult(taskId) };
 }
 async function expectValidPublicResult(result: Record<string, unknown>): Promise<void> { validateTaskResultContract(result); const schema = JSON.parse(await readFile("schemas/task-result-v1.schema.json", "utf8")); const validate = new Ajv2020({ strict: true }).compile(schema); expect(validate(result), JSON.stringify(validate.errors)).toBe(true); }
+function expectCompleteReceipt(receipt: Record<string, any>): void {
+  expect(receipt).toEqual(expect.objectContaining({
+    queueDuration: expect.any(Number), providerExecutionDuration: expect.any(Number), totalDuration: expect.any(Number), provider: expect.any(String),
+    phase: expect.stringMatching(/^(implementation|repair)$/), calls: expect.any(Number), availability: expect.objectContaining({ queueDuration: expect.any(String), inputTokens: expect.any(String), cachedTokens: expect.any(String), outputTokens: expect.any(String), reasoningTokens: expect.any(String), billedTokens: expect.any(String), cost: expect.any(String) }),
+    filesRead: expect.any(Array), filesChanged: expect.any(Array), patchAvailable: expect.any(Boolean), testsStarted: expect.any(Number), testsCompleted: expect.any(Number), outcome: expect.any(String), stopReason: expect.any(String), lastCompletedStage: expect.any(String), nextSafeAction: expect.any(String),
+  }));
+  for (const field of ["model", "inputTokens", "cachedTokens", "outputTokens", "reasoningTokens", "billedTokens", "cost", "checkpointId", "failureClassification"]) expect(receipt).toHaveProperty(field);
+}
 async function eventually(check: () => Promise<boolean>): Promise<void> { for (let attempt = 0; attempt < 1_500; attempt += 1) { if (await check()) return; await new Promise((done) => setTimeout(done, 10)); } throw new Error("timed out"); }
 async function submit(base: string, taskId: string, repository = process.cwd()): Promise<void> { const response = await fetch(`${base}/v1/tasks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ taskSpec: taskSpec(taskId, repository), authority: { implementation: true } }) }); if (response.status !== 202) throw new Error(`Task submission failed (${response.status}): ${JSON.stringify(await json(response))}`); }
 function taskSpec(taskId: string, repository = process.cwd()): Record<string, unknown> { return { schemaVersion: 2, taskId, task: { text: "Synthetic lifecycle", goal: "Exercise control plane", acceptanceCriteria: ["formal result"] }, target: { repository, workingDirectory: "." }, execution: { mode: "validation" }, authority: { profile: "read-only", allowProviderCalls: false }, validation: { mode: "explicit", commands: ["git status --short"] }, git: { publication: "none" }, merge: { policy: "never" }, deploy: { policy: "never" } }; }
