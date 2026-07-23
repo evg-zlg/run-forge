@@ -6,73 +6,40 @@ import { fileURLToPath } from "node:url";
 import { loadAdminConfig } from "../admin/config.js";
 import { openRouterCapability, runOpenRouterAgent, selectOpenRouterExecutor, type OpenRouterPhase } from "./openrouter-executor.js";
 import { scanSecrets } from "../security/secret-scan.js";
-import type { TaskSpecV2, TaskExecutionMode } from "../product/task-spec-v2.js";
+import type { TaskSpecV2 } from "../product/task-spec-v2.js";
 import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor } from "../product/task-spec-contract.js";
 import { durableCheckpointContext, persistDurableCheckpoint } from "./durable-checkpoint.js";
 import { executionPhaseOwner } from "../product/execution-agreement.js";
-import {
-  aggregateValidationOutcomes, buildMultiLaneValidationPreflightPlan, runtimeCapabilities, validationSatisfiesImplementationCheckpoint,
-  type ValidationAggregateStatus, type ValidationPreflightPlan,
-} from "../validation/capability-contract.js";
+import { aggregateValidationOutcomes, buildMultiLaneValidationPreflightPlan, runtimeCapabilities, validationSatisfiesImplementationCheckpoint, type ValidationAggregateStatus, type ValidationPreflightPlan } from "../validation/capability-contract.js";
 import { createGitEvidenceBinding, parseGitEvidenceCommand } from "../validation/git-evidence-lane.js";
 import { detectPackageValidationCapabilities } from "./validation-runtime-capabilities.js";
 import { runValidation, type CommandDiagnostic } from "./validation-command-runner.js";
 import { blockedRequiredSemanticReview, runSemanticReview, SemanticReviewRequiredError, semanticReviewBudgetOverrun, semanticReviewPhaseTimeoutMs, semanticTaskSpecContext, semanticValidationOutcome, uniqueReviewLimitations, type SemanticReviewResult } from "./semantic-review.js";
 import { extractTokenUsage, runLocalAgent } from "./local-agent.js";
+import { assertMandatoryProviderCaps, configuredProviderCapabilities, deriveExecutionEnvelope } from "./execution-guardrails.js";
 import { aggregateProviderAccounting, boundedProviderText, phaseTokenOverrun, routingBudgetOverrun } from "./executor-accounting.js";
 import { buildContextPlan } from "./bounded-context.js";
 import type { LogCompressionInvoker, LogDigestV1 } from "./raw-log-compressor.js";
 import { gateValidationRawLogs, repairDigestContext, requireRawLogDigest } from "./raw-log-gate.js"; import { selectProviderModel } from "../product/provider-routing.js";
 import { cleanupPreparedExternalWorkspace, prepareUnpreparedExternalWorkspace, preparedWorkspaceArtifactPaths, removePreparedWorkspaceArtifacts, WorkspaceSetupError } from "../run/task-run-workspace.js";
 import { localBranchName, localRefExists } from "./executor-git-utils.js";
+import type { ExecutorStatus, ImplementationExecutorCapability, ImplementationExecutorRequest, ImplementationExecutorResult } from "./executor-types.js";
+export type { ExecutorStatus, ImplementationExecutorCapability, ImplementationExecutorRequest, ImplementationExecutorResult } from "./executor-types.js";
 const execFileAsync = promisify(execFile);
 const credentialCache = new Map<string, { at: number; ready: boolean }>();
-export type ExecutorStatus = "ready" | "degraded" | "unavailable"; export type ImplementationExecutorCapability = {
-  id: string; status: ExecutorStatus; supports: TaskExecutionMode[]; providerCalls: boolean;
-  runtime: string[]; providerRequirements: string[]; networkRequirements: string[];
-  maxLimits: Readonly<Record<keyof typeof implementationExecutorContract.maxLimits, number>>;
-  limitations: string[]; command: string | null; model: string | null;
-};
-export type ImplementationExecutorRequest = {
-  spec: TaskSpecV2; targetRepository: string; workingDirectory: string; projectProfile: Record<string, unknown>;
-  acceptanceCriteria: string[]; authorityEnvelope: TaskSpecV2["authority"]; forbiddenZones: string[];
-  runtimePolicy: TaskSpecV2["runtime"]; validationProfile: TaskSpecV2["validation"]; artifactRoot: string;
-  attempt: number; generation: string; signal?: AbortSignal; onProgress?: (phase: string, detail: string) => void | Promise<void>;
-  executionAgreementId: string;
-  logCompressionInvoker?: LogCompressionInvoker;
-  checkpointRepair?: { patchPath: string; checkpointId: string; checkpointDigest: string; repairIntent: string | null };
-};
-export type ImplementationExecutorResult = {
-  plan: string[]; changedFiles: string[]; patch: string; validationResults: CommandDiagnostic[];
-  validationPlan: ValidationPreflightPlan; validationAggregate: ValidationAggregateStatus;
-  unresolvedFindings: string[]; status: "implemented_and_validated" | "no_change_required" | "blocked_with_owner_gate" | "failed_with_diagnostics";
-  ownerGate: { required: boolean; reason: string | null }; safetyAssertions: Record<string, boolean>;
-  diagnostics: Record<string, unknown>; localBranch: string | null; localCommit: string | null; patchPackage: string | null;
-  providerCalls: Array<Record<string, unknown>>; selectedExecutor: { id: string; model: string | null };
-  review: { structural: { kind: "structural"; status: ValidationAggregateStatus; evidence: string[] }; semantic: SemanticReviewResult };
-  checkpoints: Array<{ id: string; path: string; patchPath: string; digest: string; iteration: number; validationPassed: boolean }>;
-  budget: { exceeded: boolean; overrunPhase: "implementation" | "repair" | "review" | "logCompression" | null; requestedTokens: number; actualTokens: number; accounting: "provider" | "synthetic"; costUsd: number | null };
-};
 export async function discoverImplementationExecutors(): Promise<ImplementationExecutorCapability[]> {
-  const configured = await configuredCommand();
+  const configured=await configuredCommand();
   if (!configured) return [capability(null, "unavailable", ["No coding-agent CLI was found. Install/configure codex-cli or set RUNFORGE_IMPLEMENTATION_EXECUTOR_COMMAND."]), openRouterCapability()];
-  const argv = splitCommand(configured.command);
+  const argv=splitCommand(configured.command);
   if (!argv.length || !(await executableAvailable(argv[0]!))) return [capability(configured.command, "unavailable", [`Executor command is unavailable: ${argv[0] ?? "empty"}.`], configured.model), openRouterCapability()];
   if (/(?:^|\/)codex$/.test(argv[0]!) && !(await codexCredentialReady(argv))) return [capability(configured.command, "unavailable", ["Codex CLI credential status is unavailable; authenticate through the existing local credential mechanism."], configured.model), openRouterCapability()];
   return [capability(configured.command, "ready", [], configured.model), openRouterCapability()];
 }
 export async function selectImplementationExecutor(spec: TaskSpecV2): Promise<{ selected: ImplementationExecutorCapability | null; reason: string; rejected: Array<{ id: string; reason: string }> }> {
   if (spec.providerRouting.provider === "openrouter") return selectOpenRouterExecutor(spec);
-  const executors = await discoverImplementationExecutors();
-  const rejected: Array<{ id: string; reason: string }> = [];
+  const executors=await discoverImplementationExecutors(),rejected:Array<{id:string;reason:string}>=[];
   for (const executor of executors) {
-    const reasons: string[] = [];
-    if (executor.status !== "ready") reasons.push(...executor.limitations);
-    if (!executor.supports.includes(spec.execution.mode)) reasons.push(`mode ${spec.execution.mode} is unsupported`);
-    if (!runtimeCompatibleWithImplementationExecutor(spec.runtime.preference)) reasons.push(`runtime ${spec.runtime.preference} is unsupported; ${executor.id} accepts: ${executor.runtime.join(", ")}`);
-    if (spec.execution.maxProviderTokens > executor.maxLimits.providerTokens) reasons.push(`provider token budget exceeds executor limit ${executor.maxLimits.providerTokens}`);
-    if (executor.providerCalls && !spec.authority.allowProviderCalls) reasons.push("provider calls denied by TaskSpec authority");
-    if (executor.providerCalls && (!spec.authority.allowNetwork || spec.runtime.externalNetwork !== "allowed")) reasons.push("provider network denied by TaskSpec authority/runtime policy");
+    const reasons:string[]=[]; if(executor.status!=="ready")reasons.push(...executor.limitations); if(!executor.supports.includes(spec.execution.mode))reasons.push(`mode ${spec.execution.mode} is unsupported`); if(!runtimeCompatibleWithImplementationExecutor(spec.runtime.preference))reasons.push(`runtime ${spec.runtime.preference} is unsupported; ${executor.id} accepts: ${executor.runtime.join(", ")}`); if(spec.execution.maxProviderTokens>executor.maxLimits.providerTokens)reasons.push(`provider token budget exceeds executor limit ${executor.maxLimits.providerTokens}`); if(executor.providerCalls&&!spec.authority.allowProviderCalls)reasons.push("provider calls denied by TaskSpec authority"); if(executor.providerCalls&&(!spec.authority.allowNetwork||spec.runtime.externalNetwork!=="allowed"))reasons.push("provider network denied by TaskSpec authority/runtime policy");
     if (reasons.length) { rejected.push({ id: executor.id, reason: reasons.join("; ") }); continue; }
     return { selected: executor, reason: `Deterministic policy selected the first ready executor supporting ${spec.execution.mode}, local disposable runtime, provider and network authority, and requested limits.`, rejected };
   }
@@ -84,6 +51,10 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   if (!selection.selected || (!openRouter && !selection.selected.command)) throw new Error(`${openRouter ? "openrouter" : "executor"}_unavailable: ${selection.reason} ${selection.rejected.map((item) => `${item.id}: ${item.reason}`).join("; ")}`);
   const executor = selection.selected;
   const executorCommand = executor.command ?? "";
+  const localProviderCapability = openRouter ? null : configuredProviderCapabilities(executor);
+  if (localProviderCapability) assertMandatoryProviderCaps(localProviderCapability);
+  const normalizedExecution = request.spec.execution as any;
+  if (!normalizedExecution.plan) normalizedExecution.plan={profile:normalizedExecution.requestedProfile??request.spec.discovery.profile,classification:request.spec.discovery.profile==="small-scope"?"bounded-small":`bounded-${request.spec.discovery.profile}`};
   const sourceBefore = await git(request.targetRepository, ["rev-parse", "HEAD"]);
   const sourceRunforgeSha = (await git(dirname(fileURLToPath(import.meta.url)), ["rev-parse", "HEAD"])).trim();
   if (sourceBefore.trim() !== request.spec.target.expectedSha) throw new Error(`target_sha_mismatch: expected ${request.spec.target.expectedSha}, current ${sourceBefore.trim()}`);
@@ -185,6 +156,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
   let overrunActual = 0, overrunLimit = request.spec.execution.maxProviderTokens, plannerSummary = "", budgetReason: string | null = null;
   let validationLogDigestRef: string | undefined;
   let validationLogDigest: LogDigestV1 | undefined;
+  let noProgressSeen=false, streamCheckpointSequence=0; const taskStarted=Date.now(), phaseCalls:Record<"implementation"|"repair",number>={implementation:0,repair:0};
   let semanticReview: SemanticReviewResult = { kind: "semantic", status: "forbidden", performed: false, selectedReviewer: { provider: null, model: null }, reviewer: { provider: null, model: null, invocationId: null }, confidence: "unknown", limitations: ["Semantic review has not been reached."], findings: [], evidence: [], delegation: { party: "external_session", reason: "Semantic review has not been reached.", exactAction: "Perform an independent semantic review and attach structured findings." } };
   try {
     if (openRouter && request.spec.providerRouting.tokenBudget.perPhase.planner > 0) {
@@ -200,12 +172,37 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       const digestContext = repairDigestContext(iteration, validationLogDigestRef, validationLogDigest);
       const prompt = buildPrompt(request, iteration, validations, plannerSummary, [boundedContext.implementationPrompt, digestContext].filter(Boolean).join("\n\n"));
       const phaseKey: OpenRouterPhase = iteration === 0 ? "implementer" : "repair";
+      const localPhase=iteration===0?"implementation":"repair", priorTokens=providerCalls.reduce((sum,item)=>sum+(typeof item.tokenUsage==="number"?item.tokenUsage:0),0), priorPhaseTokens=providerCalls.filter(item=>item.phase===phaseKey).reduce((sum,item)=>sum+(typeof item.tokenUsage==="number"?item.tokenUsage:0),0), localPhaseBudget=request.spec.execution.phaseBudgets[localPhase], localTaskRemaining=request.spec.execution.maxProviderTokens-priorTokens, localPhaseRemaining=localPhaseBudget-priorPhaseTokens, localTimeRemaining=request.spec.execution.timeoutMs-(Date.now()-taskStarted), maxCostUsd=typeof (request.spec.execution as any).maxCostUsd==="number"?(request.spec.execution as any).maxCostUsd:null, costSpent=providerCalls.reduce((sum,item)=>sum+(typeof item.costUsd==="number"?item.costUsd:0),0);
+      if (!openRouter && (!localProviderCapability || phaseCalls[localPhase] >= localProviderCapability.maxCallsPerPhase || localTaskRemaining <= 0 || localPhaseRemaining <= 0 || localTimeRemaining <= 0 || (maxCostUsd !== null && costSpent >= maxCostUsd))) {
+        budgetExceeded = true; overrunPhase = localPhase; overrunActual = Math.max(priorTokens, priorPhaseTokens); overrunLimit = Math.min(request.spec.execution.maxProviderTokens, localPhaseBudget); budgetReason = `pre_call_budget_stop: no bounded ${localPhase} provider call remains.`; status = "blocked_with_owner_gate"; break;
+      }
+      const localEnvelope = !openRouter && localProviderCapability
+        ? deriveExecutionEnvelope(request, executor, localProviderCapability, localPhase, ++phaseCalls[localPhase], localPhaseRemaining, localTaskRemaining, localTimeRemaining, maxCostUsd === null ? null : maxCostUsd - costSpent)
+        : null;
       const call = openRouter
         ? await runOpenRouterAgent(request, executionRoot, prompt, phaseKey, providerCalls, iteration)
-        : await runLocalAgent(executorCommand, executor.model, executionRoot, prompt, request.spec.execution.timeoutMs, request.signal, request.artifactRoot, iteration);
-      providerCalls.push({ command: openRouter ? "openrouter-coding-agent" : "local-coding-agent", cwd: executionRoot, executor: executor.id, runtime: "local-disposable", executorId: executor.id, provider: openRouter ? "openrouter" : "local", model: openRouter ? (call as any).model : executor.model, phase: phaseKey, providerCalls: true, networkAuthorized: true, usageAccounting: "provider", iteration, attempts: openRouter && "attempts" in call ? call.attempts : undefined, startedAt: call.startedAt, finishedAt: call.finishedAt, durationMs: call.durationMs, exitCode: call.exitCode, signal: call.signal, timedOut: call.timedOut, stdout: call.stdout, stderr: call.stderr, truncation: call.truncation, artifactPaths: [call.stdoutArtifact, call.stderrArtifact], failureReason: call.failureReason, classification: call.exitCode === 0 ? null : "provider", diagnosticGap: call.exitCode !== 0 && !call.stdout.trim() && !call.stderr.trim(), tokenUsage: call.tokenUsage, inputTokens: "inputTokens" in call ? call.inputTokens : null, outputTokens: "outputTokens" in call ? call.outputTokens : null, reasoningTokens: "reasoningTokens" in call ? call.reasoningTokens : null, costUsd: (call as any).costUsd ?? null, requestId: (call as any).requestId ?? null, tokenBudget: request.spec.providerRouting.tokenBudget.perPhase[phaseKey], stdoutArtifact: call.stdoutArtifact, stderrArtifact: call.stderrArtifact });
+        : await runLocalAgent(executorCommand, executor.model, executionRoot, prompt, request.spec.execution.timeoutMs, request.signal, request.artifactRoot, iteration, {
+          envelope: localEnvelope ?? undefined,
+          onUsefulProgress: async (signals) => { if(!signals.candidateDiff&&!signals.partialPatch)return; await git(workspace,["add","-N","."]); const exclusions=await preparedWorkspaceArtifactPaths(workspace,request.workingDirectory),streamPatch=await gitDiff(workspace,["--binary","--no-ext-diff",request.spec.target.expectedSha],exclusions),streamFiles=lines(await gitDiff(workspace,["--name-only",request.spec.target.expectedSha],exclusions)); const checkpoint=await persistDurableCheckpoint(request.artifactRoot,{
+              taskId: request.spec.taskId, executionAgreementId: request.executionAgreementId, sourceRunforgeSha,
+              checkpointId: `${localPhase}-${iteration}-stream-${streamCheckpointSequence++}`, iteration, attempt: request.attempt, generation: request.generation,
+              kind: localPhase, expectedBaseSha: request.spec.target.expectedSha, patch: streamPatch, changedFiles: streamFiles,
+              workspace: { identity: request.generation, workingDirectory: request.workingDirectory, sha: null, state: "dirty" },
+              ...durableCheckpointContext({ projectId: request.spec.target.repository, taskSpec: request.spec, executionAgreementId: request.executionAgreementId, executionAgreement: request.spec.executionAgreement, authoritySnapshot: request.authorityEnvelope, validationPlan, completedEvidence: validations, validationPassed: false, iteration, providerAccounting: "provider", providerCalls: providerCalls.length, providerTokens: priorTokens }),
+              executor: { id: executor.id, model: executor.model, runtime: "local-disposable", attempt: request.attempt, generation: request.generation },
+              safetyAssertions: { targetMainMutation: false, targetMainPush: false, forbiddenZonesRespected: true, secretScanPassed: true }, secretScanResult: scanSecrets(""), unresolvedFindings: [],
+            }); checkpoints.push({id:checkpoint.id,path:relative(request.artifactRoot,checkpoint.path),patchPath:relative(request.artifactRoot,checkpoint.patchPath),digest:checkpoint.digest,iteration,validationPassed:false}); },
+        });
+      providerCalls.push({ command: openRouter ? "openrouter-coding-agent" : "local-coding-agent", cwd: executionRoot, executor: executor.id, runtime: "local-disposable", executorId: executor.id, provider: openRouter ? "openrouter" : "local", model: openRouter ? (call as any).model : executor.model, phase: phaseKey, providerCalls: true, networkAuthorized: true, usageAccounting: "provider", iteration, attempts: openRouter && "attempts" in call ? call.attempts : undefined, executionEnvelope: localEnvelope, startedAt: call.startedAt, finishedAt: call.finishedAt, durationMs: call.durationMs, exitCode: call.exitCode, signal: call.signal, timedOut: call.timedOut, noProgress: !openRouter && "noProgress" in call ? call.noProgress : false, truncation: call.truncation, artifactPaths: [call.stdoutArtifact, call.stderrArtifact], failureReason: call.failureReason, classification: call.exitCode === 0 ? null : "provider", diagnosticGap: call.exitCode !== 0 && !call.stdout.trim() && !call.stderr.trim(), tokenUsage: call.tokenUsage, inputTokens: "inputTokens" in call ? call.inputTokens : null, outputTokens: "outputTokens" in call ? call.outputTokens : null, reasoningTokens: "reasoningTokens" in call ? call.reasoningTokens : null, costUsd: (call as any).costUsd ?? null, progressSignals: !openRouter && "progressSignals" in call ? call.progressSignals : undefined, requestId: (call as any).requestId ?? null, tokenBudget: request.spec.providerRouting.tokenBudget.perPhase[phaseKey], stdoutArtifact: call.stdoutArtifact, stderrArtifact: call.stderrArtifact });
       agentSummary = call.summary;
       if (call.cancelled) throw new Error("cancelled");
+      if (!openRouter && "noProgress" in call && call.noProgress) { noProgressSeen = true; unresolved = [call.failureReason ?? "no_progress: implementation attempt produced no useful streamed signal before the early deadline."]; status = "failed_with_diagnostics"; break; }
+      if (!openRouter&&call.timedOut&&checkpoints.length) {
+        await git(workspace,["add","-N","."]); const exclusions=await preparedWorkspaceArtifactPaths(workspace,request.workingDirectory),partialPatch=await gitDiff(workspace,["--binary","--no-ext-diff",request.spec.target.expectedSha],exclusions),partialFiles=lines(await gitDiff(workspace,["--name-only",request.spec.target.expectedSha],exclusions)),checkpoint=await persistDurableCheckpoint(request.artifactRoot,{
+          taskId: request.spec.taskId, executionAgreementId: request.executionAgreementId, sourceRunforgeSha, checkpointId: `${localPhase}-${iteration}-termination-${streamCheckpointSequence++}`, iteration, attempt: request.attempt, generation: request.generation, kind: localPhase, expectedBaseSha: request.spec.target.expectedSha, patch: partialPatch, changedFiles: partialFiles, workspace: { identity: request.generation, workingDirectory: request.workingDirectory, sha: null, state: "dirty" },
+          ...durableCheckpointContext({ projectId: request.spec.target.repository, taskSpec: request.spec, executionAgreementId: request.executionAgreementId, executionAgreement: request.spec.executionAgreement, authoritySnapshot: request.authorityEnvelope, validationPlan, completedEvidence: validations, validationPassed: false, iteration, providerAccounting: "provider", providerCalls: providerCalls.length, providerTokens: priorTokens }), executor: { id: executor.id, model: executor.model, runtime: "local-disposable", attempt: request.attempt, generation: request.generation }, safetyAssertions: { targetMainMutation: false, targetMainPush: false, forbiddenZonesRespected: true, secretScanPassed: true }, secretScanResult: scanSecrets(""), unresolvedFindings: [call.failureReason ?? "deadline_exceeded"],
+        }); checkpoints.push({id:checkpoint.id,path:relative(request.artifactRoot,checkpoint.path),patchPath:relative(request.artifactRoot,checkpoint.patchPath),digest:checkpoint.digest,iteration,validationPassed:false}); patch=partialPatch;changedFiles=partialFiles;unresolved=[`checkpoint_available: durable partial patch/checkpoint is available at ${checkpoint.patchPath}. ${call.failureReason??"deadline_exceeded"}`];status="blocked_with_owner_gate";break;
+      }
       if (call.exitCode !== 0) { unresolved = [`Coding agent failed with exit ${call.exitCode ?? "signal"}.`]; break; }
       await git(workspace, ["add", "-N", "."]);
       const excludedWorkspaceArtifacts = await preparedWorkspaceArtifactPaths(workspace, request.workingDirectory);
@@ -231,7 +228,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       }});
       if (logGate.blocked) { unresolved = ["raw_log_compression_required"]; status = "blocked_with_owner_gate"; break; }
       validationLogDigestRef = logGate.ref; validationLogDigest = logGate.digest;
-      const compressionOverrun = routingBudgetOverrun(providerCalls, request.spec.providerRouting, "logCompression");
+      const compressionOverrun = openRouter ? routingBudgetOverrun(providerCalls, request.spec.providerRouting, "logCompression") : null;
       const validationAggregate = aggregateValidationOutcomes(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole })));
       const validationPassed = !safetyErrors.length && validationSatisfiesImplementationCheckpoint(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole })));
       if (!validationPassed && !safetyErrors.length) unresolved = validations.filter((item) => item.outcome !== "passed").map((item) => `${item.command}: ${item.outcome}${item.infrastructureDefect ? ` (${item.infrastructureDefect})` : ""}`);
@@ -272,7 +269,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
           delegatedParty: budgetExceeded || reviewOwner === "owner" ? "owner" : "external_session",
           invoke: async (reviewPrompt) => {
             await progress(request, "review", "Invoking the independent semantic reviewer after structural validation.");
-            const call = openRouter ? await runOpenRouterAgent(request, executionRoot, reviewPrompt, "reviewer", providerCalls, "semantic-review") : await runLocalAgent(executorCommand, executor.model, executionRoot, reviewPrompt, reviewTimeoutMs, request.signal, request.artifactRoot, "semantic-review");
+            const call = openRouter ? await runOpenRouterAgent(request, executionRoot, reviewPrompt, "reviewer", providerCalls, "semantic-review") : await runLocalAgent(executorCommand, executor.model, executionRoot, reviewPrompt, reviewTimeoutMs, request.signal, request.artifactRoot, "semantic-review", { enforceEarlyProgress: false });
             const invocationId = `semantic-review-${iteration}`, actualModel: string | null = openRouter && "model" in call ? call.model as string | null : executor.model;
             providerCalls.push({ command: openRouter ? "openrouter-coding-agent" : "local-coding-agent", purpose: "semantic-review", phase: openRouter ? "reviewer" : undefined, requestId: "requestId" in call ? call.requestId : null, costUsd: "costUsd" in call ? call.costUsd : null, attempts: openRouter && "attempts" in call ? call.attempts : undefined, invocationId, cwd: executionRoot, executor: executor.id, runtime: "local-disposable", executorId: executor.id, provider: openRouter ? "openrouter" : executor.id, model: actualModel, providerCalls: true, networkAuthorized: true, success: call.exitCode === 0 && call.timedOut !== true && !call.signal, usageAccounting: "provider", iteration, startedAt: call.startedAt, finishedAt: call.finishedAt, durationMs: call.durationMs, exitCode: call.exitCode, signal: call.signal, timedOut: call.timedOut, stdout: call.stdout, stderr: call.stderr, truncation: call.truncation, artifactPaths: [call.stdoutArtifact, call.stderrArtifact], failureReason: call.failureReason, classification: call.exitCode === 0 ? null : "provider", tokenUsage: call.tokenUsage, inputTokens: "inputTokens" in call ? call.inputTokens : null, outputTokens: "outputTokens" in call ? call.outputTokens : null, reasoningTokens: "reasoningTokens" in call ? call.reasoningTokens : null, tokenBudget: openRouter ? request.spec.providerRouting.tokenBudget.perPhase.reviewer : request.spec.execution.phaseBudgets.review, timeoutMs: reviewTimeoutMs, deadlineAt: reviewDeadlineAt, validatedCheckpointId: checkpoint.id, stdoutArtifact: call.stdoutArtifact, stderrArtifact: call.stderrArtifact });
             if (call.exitCode !== 0) throw new Error(call.failureReason ?? `reviewer exited ${call.exitCode ?? "by signal"}`);
@@ -281,12 +278,14 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
         }); } catch (error) {
           if (!(error instanceof SemanticReviewRequiredError)) throw error;
           semanticReview = blockedRequiredSemanticReview(error, selectedReviewer);
-          unresolved = [error.code]; status = "blocked_with_owner_gate"; break;
+          const required = request.spec.executionAgreement.profile === "custom" && request.spec.executionAgreement.phaseOwnership?.independentReview === "runforge";
+          if (required) { unresolved = [error.code]; status = "blocked_with_owner_gate"; break; }
         }
-        if (reviewOwner === "runforge" && semanticReview.status !== "completed") { status = "blocked_with_owner_gate"; unresolved = ["semantic_review_required_but_unavailable"]; break; }
-        const reviewOverrun = openRouter ? routingBudgetOverrun(providerCalls, request.spec.providerRouting, "reviewer") : semanticReviewBudgetOverrun(providerCalls, request.spec.execution.phaseBudgets.review, request.spec.execution.maxProviderTokens);
+        const semanticReviewRequired = request.spec.executionAgreement.profile === "custom" && request.spec.executionAgreement.phaseOwnership?.independentReview === "runforge";
+        if (semanticReviewRequired && semanticReview.status !== "completed") { status = "blocked_with_owner_gate"; unresolved = ["semantic_review_required_but_unavailable"]; break; }
+        const reviewOverrun = semanticReview.status === "completed" ? (openRouter ? routingBudgetOverrun(providerCalls, request.spec.providerRouting, "reviewer") : semanticReviewBudgetOverrun(providerCalls, request.spec.execution.phaseBudgets.review, request.spec.execution.maxProviderTokens)) : null;
         if (reviewOverrun) { budgetExceeded = true; overrunPhase = "review"; overrunActual = reviewOverrun.actual; overrunLimit = reviewOverrun.limit; budgetReason = "reason" in reviewOverrun && typeof reviewOverrun.reason === "string" ? reviewOverrun.reason : `Provider review token budget exceeded: ${reviewOverrun.actual} > ${reviewOverrun.limit}.`; }
-        status = openRouter && budgetExceeded ? "blocked_with_owner_gate" : "implemented_and_validated";
+        status = budgetExceeded ? "blocked_with_owner_gate" : "implemented_and_validated";
         if (semanticReview.findings.some((finding) => finding.blocking)) { unresolved = semanticReview.findings.filter((finding) => finding.blocking).map((finding) => `${finding.severity} ${finding.file}:${finding.location} ${finding.category}: ${finding.recommendation}`); status = "blocked_with_owner_gate"; }
         break;
       }
@@ -297,7 +296,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       if (commitOwnedByRunForge) {
         await progress(request, "finalize", "Creating the RunForge-owned local commit and patch package; publication remains on hold.");
         await removePreparedWorkspaceArtifacts(workspace, request.workingDirectory);
-        await git(workspace, ["add", "-A"]);
+        await git(workspace, ["add", "-A", "--", ".", ":(exclude,glob).pnpm-store/**", ":(exclude,glob)**/node_modules/**"]);
         await git(workspace, ["-c", "user.name=RunForge Executor", "-c", "user.email=runforge@localhost", "commit", ...(status === "no_change_required" ? ["--allow-empty"] : []), "-m", `RunForge ${request.spec.taskId}`]);
         localCommit = (await git(workspace, ["rev-parse", "HEAD"])).trim();
         patch = await git(workspace, ["format-patch", "-1", "--stdout", localCommit]);
@@ -317,7 +316,7 @@ export async function runImplementationExecutor(request: ImplementationExecutorR
       unresolvedFindings: unresolved, status,
       ownerGate: { required: status === "blocked_with_owner_gate" || budgetExceeded || semanticReview.findings.some((finding) => finding.blocking), reason: budgetExceeded ? budgetReason ?? `Provider token budget exceeded after durable checkpoint in ${overrunPhase}: ${overrunActual} > ${overrunLimit}.` : unresolved.length ? unresolved.join(" ") : null },
       safetyAssertions: { sourceShaUnchanged: sourceAfter === sourceBefore.trim(), sourceWorktreeStateUnchanged: sourceStatusAfter === sourceStatusBefore, targetMainMutation: false, targetMainPush: false, merge: false, deploy: false, publicationPerformed: false, forbiddenZonesRespected: !unresolved.some((item) => item.includes("forbidden")), secretScanPassed: !unresolved.includes("Secret scan rejected the patch.") && dependencyReadiness?.ready !== false },
-      diagnostics: { agentSummary, plannerSummaryArtifact: openRouter ? "provider/planner-summary.txt" : null, providerUsageAvailability: providerAccounting.usageAvailability, providerCostAvailability: providerAccounting.costAvailability, sourceBefore: sourceBefore.trim(), sourceAfter, sourceWorktreeStatusBefore: sourceStatusBefore, sourceWorktreeStatusAfter: sourceStatusAfter, dirtyPolicy, contextPlan, selectionReason: selection.reason, rejectedAlternatives: selection.rejected, workspace: relative(request.targetRepository, workspace), ...(request.checkpointRepair ? { checkpointRepair: { sourceCheckpointId: request.checkpointRepair.checkpointId, sourceCheckpointDigest: request.checkpointRepair.checkpointDigest, sourcePatch: request.checkpointRepair.patchPath, restoredOnBaseSha: request.spec.target.expectedSha, disposableWorkspace: true } } : {}) },
+      diagnostics: { ...(agentSummary ? { agentSummary } : {}), plannerSummaryArtifact: openRouter ? "provider/planner-summary.txt" : null, providerUsageAvailability: providerAccounting.usageAvailability, providerCostAvailability: providerAccounting.costAvailability, sourceBefore: sourceBefore.trim(), sourceAfter, sourceWorktreeStatusBefore: sourceStatusBefore, sourceWorktreeStatusAfter: sourceStatusAfter, dirtyPolicy, contextPlan, selectionReason: selection.reason, rejectedAlternatives: selection.rejected, workspace: relative(request.targetRepository, workspace), ...(noProgressSeen ? { retryPlan: { automatic: false, sameModelProfileAllowed: false, options: ["smaller context", "faster model", "decompose task", "explicit scope"] } } : {}), ...(request.checkpointRepair ? { checkpointRepair: { sourceCheckpointId: request.checkpointRepair.checkpointId, sourceCheckpointDigest: request.checkpointRepair.checkpointDigest, sourcePatch: request.checkpointRepair.patchPath, restoredOnBaseSha: request.spec.target.expectedSha, disposableWorkspace: true } } : {}) },
       localBranch, localCommit, patchPackage, providerCalls, checkpoints,
       review: { structural: { kind: "structural", status: aggregateValidationOutcomes(validations.map((item) => ({ command: item.command, acceptance: item.acceptance, outcome: item.outcome, exitCode: item.exitCode, reason: item.failureReason, evidenceRole: item.evidenceRole }))), evidence: validations.flatMap((item) => item.artifactPaths) }, semantic: semanticReview },
       budget: { exceeded: budgetExceeded, overrunPhase, requestedTokens: request.spec.execution.maxProviderTokens, actualTokens: providerAccounting.tokens, accounting: providerCalls.some((item) => item.usageAccounting === "synthetic") ? "synthetic" : "provider", costUsd: providerAccounting.costUsd },
@@ -336,7 +335,7 @@ async function codexCredentialReady(argv: string[]): Promise<boolean> { const ke
 function splitCommand(value: string): string[] { return value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((part) => part.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2")) ?? []; }
 function safeRuntimeEnv(): NodeJS.ProcessEnv { const keys = ["HOME", "PATH", "SHELL", "TMPDIR", "TMP", "TEMP", "USER", "LOGNAME", "LANG", "LC_ALL", "CODEX_HOME", "SSL_CERT_FILE", "SSL_CERT_DIR"]; return Object.fromEntries(keys.flatMap((key) => process.env[key] === undefined ? [] : [[key, process.env[key]!]])); }
 async function git(cwd: string, args: string[]): Promise<string> { return (await execFileAsync("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 })).stdout; }
-async function gitDiff(cwd: string, args: string[], excludedPaths: string[]): Promise<string> { const pathspec = excludedPaths.length ? ["--", ".", ...excludedPaths.map((path) => `:(exclude)${path}`)] : []; return git(cwd, ["diff", ...args, ...pathspec]); }
+async function gitDiff(cwd: string, args: string[], excludedPaths: string[]): Promise<string> { const exclusions = [":(exclude,glob).pnpm-store/**", ":(exclude,glob)**/node_modules/**", ...excludedPaths.map((path) => `:(exclude)${path}`)]; return git(cwd, ["diff", ...args, "--", ".", ...exclusions]); }
 function addedPatchLines(patch: string): string { const added: string[] = []; let inHunk = false; for (const line of patch.split(/\r?\n/)) { if (line.startsWith("@@ ")) { inHunk = true; continue; } if (line.startsWith("diff --git ") || line.startsWith("GIT binary patch") || line.startsWith("Binary files ")) { inHunk = false; continue; } if (inHunk && line.startsWith("+")) added.push(line.slice(1)); } return added.join("\n"); }
 function lines(text: string): string[] { return text.split(/\r?\n/).map((item) => item.trim()).filter(Boolean); }
 function isInside(root: string, path: string): boolean { const rel = relative(root, path); return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/")); }

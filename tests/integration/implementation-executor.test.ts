@@ -370,11 +370,11 @@ describe("implementation executor", () => {
     const result = await execute(repo, "EXECUTOR-SEMANTIC-UNAVAILABLE-1", "SEMANTIC_UNAVAILABLE fix add", ["node test.js"]);
     expect(result).toMatchObject({
       status: "awaiting_owner",
-      implementation: { status: "blocked_with_owner_gate", performed: true },
+      implementation: { status: "implemented_and_validated", performed: true },
       review: { structural: { kind: "structural", status: "passed" }, semantic: { kind: "semantic", status: "unavailable", performed: false, selectedReviewer: { provider: "local-coding-agent", model: null }, confidence: "unknown", limitations: [expect.stringContaining("semantic_review_required")], findings: [], delegation: { party: "owner" } } },
       handoff: { semanticReview: { status: "unavailable", performed: false, delegation: { party: "owner" } } },
       handoffPackage: { semanticReview: { status: "unavailable" }, nextResponsibleParty: "owner" },
-      agreement: { runforgeCompletedPhases: [], awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
+      agreement: { runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage"]), awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
     });
   });
 
@@ -396,11 +396,11 @@ describe("implementation executor", () => {
     const result = await execute(repo, "EXECUTOR-SEMANTIC-TIMEOUT-1", "SEMANTIC_TIMEOUT fix add", ["node test.js"]);
     expect(result).toMatchObject({
       status: "awaiting_owner",
-      implementation: { status: "blocked_with_owner_gate", performed: true },
+      implementation: { status: "implemented_and_validated", performed: true },
       artifact: { status: "available", bestValidatedCheckpointId: "implementation-0", checkpoints: [expect.objectContaining({ id: "implementation-0", validationPassed: true })] },
       review: { structural: { status: "passed" }, semantic: { status: "unavailable", performed: false, limitations: [expect.stringContaining("timed out")], delegation: { party: "owner" } } },
       handoffPackage: { bestValidatedCheckpoint: "implementation-0", latestSafePatch: expect.stringContaining("implementation-0"), semanticReview: { status: "unavailable", performed: false }, nextResponsibleParty: "owner" },
-      agreement: { runforgeCompletedPhases: [], awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
+      agreement: { runforgeCompletedPhases: expect.arrayContaining(["implementation", "localValidation", "patchPackage"]), awaitingPhases: expect.arrayContaining([expect.objectContaining({ phaseId: "independentReview", responsibleParty: "owner" })]) },
       providerCalls: expect.arrayContaining([expect.objectContaining({ purpose: "semantic-review", provider: "local-coding-agent", model: null, success: false, timedOut: true, timeoutMs: expect.any(Number), validatedCheckpointId: "implementation-0" })]),
     });
     const reviewCall = result.providerCalls.find((call: Record<string, unknown>) => call.purpose === "semantic-review");

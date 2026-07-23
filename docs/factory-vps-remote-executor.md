@@ -1,6 +1,6 @@
 # Factory VPS remote executor
 
-RunForge selects the remote route with `execution.executor: "factory-vps"`.
+RunForge selects the remote route with `execution.executor: "runforge-factory-vps"`.
 The remote executor ID is `runforge-factory-vps`; it uses protocol
 `runforge-factory-vps/v1` over a deliberately opt-in SSH stdio bridge; the
 local control plane remains loopback-only and never receives provider keys.
@@ -10,42 +10,34 @@ local control plane remains loopback-only and never receives provider keys.
 The sanctioned path is the existing `factory-vps` SSH account to the VPS.  The
 VPS runs Factory Loop on loopback (`127.0.0.1:3300`) with an API, runner,
 repo-worker, heartbeat reaper and Factory-owned artifact storage. Its deployed
-repo-task contract is safe for allowlisted clone-and-validate workloads; the
-RunForge bridge is supplied by Factory PR #169 and is not deployed yet. Do not
-use its controller/executor tokens on a Mac.
+repo-task contract is safe for allowlisted clone-and-validate workloads; merged
+Factory PRs #169, #170 and #171 supply the RunForge bridge inside
+`runforge-bridge-worker`.
+Do not use its controller/executor tokens on a Mac.
 
 ## Roadmap status — `FACTORY-RUNFORGE-REMOTE-BRIDGE-1`
 
 The local RunForge contract and fail-closed routing integration are implemented.
-On 2026-07-24 00:52 +05, `tests/unit/factory-vps-contract.test.ts` (4 tests)
-and `pnpm typecheck` passed. A full `pnpm test` is currently blocked before
-Vitest by `check:structure`: the modified `src/product/task-spec-runner.ts` is
-839 lines, over the enforced 350-line limit. The bridge change therefore cannot
-yet claim a full-suite-green RunForge worktree; the earlier 16 integration-test
-failures must be rechecked once the structural gate passes.
+On 2026-07-24, the full `pnpm test` suite passed (72 files, 714 tests), as did
+typecheck and the structural gate. The local provider runner now has bounded
+preflight, streamed durable progress/checkpoints, an early-progress deadline,
+redacted provider artifacts, and separate implementation/review accounting.
 
-Factory PR [#169](https://github.com/deskbuilder/factory/pull/169) is open on
-`codex/runforge-factory-vps-bridge-1` at
-`3b500bb0a9e8e807ae460f29bd806ef1605bc1dc`; its Buildkite run is pending. The
-local Factory checkout has no PR #169 worktree and does not yet contain that
-commit, while the remote branch resolves to it. RunForge keeps `factory-vps`
-unavailable until a version-compatible bridge handshake succeeds and does not
-fall back to a local executor. The current read-only readiness probe reached the
-sanctioned SSH host and Factory health endpoint, then found no
-`runforge-factory-vps` command, confirming that the VPS bridge is not installed
-yet.
-
-Next step: restore the local structural gate and rerun the full RunForge suite;
-in parallel, continue monitoring Factory CI. After the Factory CI run is green,
-an owner must authorize deploying that external-project bridge to the Factory
-VPS. Only then may a real remote dogfood task be started; neither action is
-performed from this repository.
+Factory PR [#169](https://github.com/deskbuilder/factory/pull/169) merged at
+`41fdd27ba857eb77809060b94df87392bbc1a002`, #170 at
+`5ab272782ef86fb9dd7812bd0b043396691e44d5`, and #171 at
+`1c21460848e4f443090eac024b29a07c635c00c6`. The last SHA is deployed on the
+only Factory VPS. Its SSH-stdio handshake is `ready`, is SHA-bound to that
+revision, advertises the four configured VPS provider identities, and confirms
+cancellation, recovery, and usage telemetry. Factory Loop remains healthy and
+listens only on `127.0.0.1:3300`. The host-level command is absent by design:
+the transport invokes `/app/dist/scripts/runforge-factory-vps.js` in the private
+worker container. The remaining roadmap action is synthetic end-to-end dogfood.
 
 ## Bridge contract
 
-Install a VPS-local command named `runforge-factory-vps`. It accepts one
-versioned JSON request on stdin and writes one JSON response on stdout. Its
-allowed operations are:
+The private worker command accepts one versioned JSON request on stdin and
+writes one JSON response on stdout. Its allowed operations are:
 
 ```text
 `capabilities`, `dispatch`, `status`, `cancel`, `retry`, `result`,
@@ -88,6 +80,5 @@ corrupt or oversized artifact must each fail closed and surface a remote-only
 recovery action.
 
 The protocol module is covered by `tests/unit/factory-vps-contract.test.ts`.
-Factory PR #169 supplies the bridge and authenticated Factory API packet
-mapping; a real remote implementation or dogfood run remains blocked until that
-PR is deployed to the VPS.
+Merged Factory PRs #169–#171 supply the deployed bridge and SHA-bound runtime
+identity. Remote dogfood uses only the existing VPS provider credentials.
