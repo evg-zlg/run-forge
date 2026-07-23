@@ -19,7 +19,7 @@ import { buildTimeoutContract } from "./timeout-contract.js"; import { acceptVal
 import { openRouterReadiness, providerForExecutor, publicImplementationExecutors } from "./provider-routing-projection.js"; import { providerRoutingPhases, selectProviderModel } from "../product/provider-routing.js"; export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
 import { classifyPreProviderFailure, negotiateSemanticReviewer, requestedRuntimeCorrection, requestedSemanticValidationRuntimeCorrection, reviewerUnavailableReason } from "./http-task-preflight.js";
 import { negotiateCorrectedRetryValidation } from "./retry-validation-negotiation.js";
-import { WorkspaceSetupError } from "../run/task-run-workspace.js";
+import { WorkspaceSetupError } from "../run/task-run-workspace.js"; import { object, reconstructTerminalReceipt } from "./terminal-receipt.js";
 const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs, heartbeatIntervalMs = 1_000, staleHeartbeatMs = 15_000, cleanupGraceMs = 2_000; type ActiveWorker = { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController }; type ContinuationBinding = { taskId: string; projectId: string | null; repository: string; workingDirectory: string; sourceBranch: string; sourceSha: string };
 export class ControlPlaneManager {
   private readonly active = new Map<string, ActiveWorker>(); private readonly settledExecutions = new Set<string>();
@@ -316,7 +316,7 @@ export class ControlPlaneManager {
     const spec = await this.store.readSpec(task.id); const target = object(object(spec).target); const repository = typeof target.repository === "string" ? target.repository : null; const workingDirectory = typeof target.workingDirectory === "string" ? target.workingDirectory : null; const expectedSha = typeof target.expectedSha === "string" ? target.expectedSha : null;
     const inspection = repository && workingDirectory ? await inspectProject(repository, workingDirectory).catch(() => null) : null;
     const project = task.projectId ? await this.store.getProject(task.projectId) : null;
-    if (spec?.taskId === task.id && repository && workingDirectory && expectedSha && inspection?.repositoryRoot === repository && inspection.workingDirectory === workingDirectory && inspection.head === expectedSha && (!task.projectId || project?.repository === repository && project?.workingDirectory === workingDirectory)) return true;
+    if (spec?.taskId === task.id && repository && workingDirectory && expectedSha && inspection && inspection.repositoryRoot === repository && inspection.workingDirectory === workingDirectory && inspection.head === expectedSha && (!task.projectId || project?.repository === repository && project?.workingDirectory === workingDirectory)) return true;
     task.recovery = { reason: expectedSha ? "target_sha_changed" : "accepted_source_identity_missing", lastPhase: task.progress.phase, lastHeartbeatAt: task.progress.lastHeartbeatAt, originalExecutionId: task.progress.executionId, actions: ["cancel", "start_new_task"], retryAvailable: false, cleanupStatus: "completed", operation: "start_new_task", prerequisites: ["Submit a new TaskSpec against the intended current source."], newTaskRequired: true, previousArtifactsReusable: false, targetShaChanged: expectedSha ? true : null };
     await this.persist(task, "retry_blocked", task.recovery.reason); await this.writeInterruptedResult(task); return false;
   }
