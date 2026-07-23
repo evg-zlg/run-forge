@@ -9,6 +9,8 @@ import type { TaskSpecV2, TaskExecutionMode } from "../product/task-spec-v2.js";
 import { implementationExecutorContract, runtimeCompatibleWithImplementationExecutor } from "../product/task-spec-contract.js";
 import { persistDurableCheckpoint } from "./durable-checkpoint.js";
 import { executionPhaseOwner } from "../product/execution-agreement.js";
+import type { ProviderCapabilities, ExecutionEnvelope, ProgressSignals } from "./execution-guardrails.js";
+import { configuredProviderCapabilities, assertMandatoryProviderCaps, deriveExecutionEnvelope, optionalPositive, numeric, totalProviderTokens, exactFileLineDiagnosis, pathsFromChanges, commandInspectedPaths, usageFromEvent, extractTokenUsage as extractTokenUsageImpl, extractSummary } from "./execution-guardrails.js";
 
 const execFileAsync = promisify(execFile);
 const credentialCache = new Map<string, { at: number; ready: boolean }>();
@@ -25,21 +27,6 @@ export type ImplementationExecutorCapability = {
   maxLimits: Readonly<Record<keyof typeof implementationExecutorContract.maxLimits, number>>;
   limitations: string[]; command: string | null; model: string | null;
 };
-type ProviderCapabilities = {
-  maxInputContextTokens: number;
-  maxOutputTokens: number;
-  maxReasoningTokens: number;
-  maxWallClockMs: number;
-  maxCallsPerPhase: number;
-  maxCostUsd: number | null;
-  guarantees: { inputTokens: boolean; outputTokens: boolean; reasoningTokens: boolean; wallClock: boolean; calls: boolean; cost: boolean };
-};
-type ExecutionEnvelope = {
-  profile: string; classification: string; model: string | null; taskId: string; phase: "implementation" | "repair"; call: number;
-  limits: { maxInputContextTokens: number; maxOutputTokens: number; maxReasoningTokens: number; maxWallClockMs: number; earlyProgressDeadlineMs: number; maxCallsPerPhase: number; maxPhaseTokens: number; maxTaskTokens: number; maxCostUsd: number | null };
-  remaining: { phaseTokens: number; taskTokens: number; taskTimeMs: number; costUsd: number | null };
-};
-type ProgressSignals = { filesInspected: string[]; filesChanged: string[]; exactDiagnosis: string | null; redTest: string | null; candidateDiff: string | null; partialPatch: string | null; tests: string[]; lastMeaningfulOutput: string | null; usage: { tokens: number | null; inputTokens: number | null; outputTokens: number | null; reasoningTokens: number | null; costUsd: number | null } };
 export type CommandDiagnostic = {
   command: string; cwd: string; startedAt: string; finishedAt: string; durationMs: number;
   executor: string; runtime: string;
@@ -307,54 +294,7 @@ async function stageWorkspaceChanges(workspace: string, intentOnly: boolean): Pr
 async function filteredWorkspaceDiff(workspace: string, baseSha: string, options: string[]): Promise<string> { return git(workspace, ["diff", ...options, baseSha, "--", ".", ...RUNFORGE_DEPENDENCY_PATHS]); }
 function validateChangedPaths(files: string[], zones: string[], max: number): string[] { const errors: string[] = []; if (files.length > max) errors.push(`Changed files exceed limit ${max}.`); const pathZones = zones.filter((zone) => !/\s/.test(zone)).map((zone) => zone.replace(/^\.\//, "").replace(/\*\*|\*/g, "").replace(/\/$/, "")); for (const file of files) { if (file.startsWith("../") || file.startsWith("/")) errors.push(`Path escapes workspace: ${file}.`); const zone = pathZones.find((item) => item && (file === item || file.startsWith(`${item}/`))); if (zone) errors.push(`Changed path is forbidden: ${file} (${zone}).`); } return errors; }
 function unsafeDirtyLines(status: string): string[] { return lines(status).filter((line) => { const path = line.slice(3).replace(/^"|"$/g, ""); return !path.startsWith(".runforge/") && !path.startsWith(".runforge-") && !path.startsWith("artifacts/"); }); }
-function configuredProviderCapabilities(executor: ImplementationExecutorCapability): ProviderCapabilities {
-  let configured: Record<string, any> = {};
-  try { configured = JSON.parse(process.env.RUNFORGE_IMPLEMENTATION_PROVIDER_CAPABILITIES ?? "{}"); } catch { throw new Error("invalid_provider_capabilities_json"); }
-  const guarantees = configured.guarantees ?? {};
-  const command = splitCommand(executor.command ?? "")[0] ?? "";
-  const directCodex = /(?:^|\/)codex$/.test(command);
-  return {
-    maxInputContextTokens: optionalPositive(configured.maxInputContextTokens) ?? executor.maxLimits.providerTokens,
-    maxOutputTokens: optionalPositive(configured.maxOutputTokens) ?? executor.maxLimits.providerTokens,
-    maxReasoningTokens: optionalPositive(configured.maxReasoningTokens) ?? executor.maxLimits.providerTokens,
-    maxWallClockMs: optionalPositive(configured.maxWallClockMs) ?? executor.maxLimits.timeoutMs,
-    maxCallsPerPhase: optionalPositive(configured.maxCallsPerPhase) ?? Math.max(1, executor.maxLimits.repairIterations + 1),
-    maxCostUsd: optionalPositive(configured.maxCostUsd),
-    guarantees: {
-      inputTokens: !directCodex && guarantees.inputTokens === true,
-      outputTokens: !directCodex && guarantees.outputTokens === true,
-      reasoningTokens: !directCodex && guarantees.reasoningTokens === true,
-      wallClock: guarantees.wallClock === true,
-      calls: guarantees.calls === true,
-      cost: !directCodex && guarantees.cost === true,
-    },
-  };
-}
-function assertMandatoryProviderCaps(capability: ProviderCapabilities): void {
-  const mandatory: Array<[keyof ProviderCapabilities["guarantees"], string]> = [["inputTokens", "input"], ["outputTokens", "output"], ["reasoningTokens", "reasoning"], ["wallClock", "wall-clock"], ["calls", "call"], ["cost", "cost"]];
-  const missing = mandatory.filter(([key]) => !capability.guarantees[key]).map(([, name]) => name);
-  if (missing.length) throw new Error(`provider_capability_rejected: mandatory ${missing.join(", ")} limits are not guaranteed`);
-}
-function deriveExecutionEnvelope(request: ImplementationExecutorRequest, executor: ImplementationExecutorCapability, capability: ProviderCapabilities, phase: "implementation" | "repair", call: number, phaseTokens: number, taskTokens: number, taskTimeMs: number, remainingCostUsd: number | null): ExecutionEnvelope {
-  const execution = request.spec.execution as unknown as Record<string, unknown>;
-  const plan = execution.plan && typeof execution.plan === "object" ? execution.plan as Record<string, unknown> : {};
-  const profile = normalizedPlanValue(plan, "profile");
-  const classification = normalizedPlanValue(plan, "classification");
-  const output = Math.min(optionalPositive(execution.maxOutputTokens) ?? phaseTokens, capability.maxOutputTokens, phaseTokens, taskTokens);
-  const reasoning = Math.min(optionalPositive(execution.maxReasoningTokens) ?? output, capability.maxReasoningTokens, output);
-  const maxWallClockMs = Math.min(request.spec.execution.timeoutMs, capability.maxWallClockMs, taskTimeMs);
-  const taskSpecEarly = optionalPositive(execution.earlyProgressDeadlineMs) ?? maxWallClockMs;
-  const testOverride = process.env.NODE_ENV === "test" || process.env.VITEST
-    ? optionalPositive(process.env.RUNFORGE_EARLY_PROGRESS_DEADLINE_MS)
-    : null;
-  const earlyProgressDeadlineMs = Math.min(taskSpecEarly, testOverride ?? taskSpecEarly, maxWallClockMs);
-  return { profile, classification, model: executor.model, taskId: request.spec.taskId, phase, call, limits: { maxInputContextTokens: Math.min(optionalPositive(execution.maxInputContextTokens) ?? request.spec.discovery.maxTokens, request.spec.discovery.maxTokens, capability.maxInputContextTokens), maxOutputTokens: output, maxReasoningTokens: reasoning, maxWallClockMs, earlyProgressDeadlineMs, maxCallsPerPhase: Math.min(optionalPositive(execution.maxCallsPerPhase) ?? 1, capability.maxCallsPerPhase), maxPhaseTokens: request.spec.execution.phaseBudgets[phase], maxTaskTokens: request.spec.execution.maxProviderTokens, maxCostUsd: remainingCostUsd === null ? null : Math.min(remainingCostUsd, capability.maxCostUsd ?? remainingCostUsd) }, remaining: { phaseTokens, taskTokens, taskTimeMs, costUsd: remainingCostUsd } };
-}
-function normalizedPlanValue(plan: Record<string, unknown>, key: "profile" | "classification"): string { const value = plan[key]; if (typeof value !== "string" || !value.length) throw new Error(`normalized_execution_plan_missing_${key}`); return value; }
 function truncatePrompt(prompt: string, maxTokens: number): string { const maxChars = Math.max(1, Math.floor(maxTokens * 4)); if (prompt.length <= maxChars) return prompt; const marker = "\n[bounded context truncated]\n"; const head = Math.max(0, Math.floor((maxChars - marker.length) * 0.6)); const tail = Math.max(0, maxChars - marker.length - head); return prompt.slice(0, head) + marker + prompt.slice(-tail); }
-function optionalPositive(value: unknown): number | null { const number = Number(value); return Number.isFinite(number) && number > 0 ? number : null; }
-function numeric(value: unknown): number { return typeof value === "number" && Number.isFinite(value) ? value : 0; }
-function totalProviderTokens(calls: Array<Record<string, unknown>>): number { return calls.reduce((sum, item) => sum + numeric(item.tokenUsage), 0); }
 function buildPrompt(request: ImplementationExecutorRequest, iteration: number, validations: CommandDiagnostic[]): string { const context = request.spec.discovery.explicitFiles; return [`You are the RunForge bounded implementation executor. Work only in the current disposable Git worktree.`, `Task: ${request.spec.task.text}`, `Goal: ${request.spec.task.goal}`, `Acceptance criteria:\n${request.acceptanceCriteria.map((item) => `- ${item}`).join("\n")}`, `Bounded context profile: ${request.spec.discovery.profile}; max ${request.spec.discovery.maxFiles} files, ${request.spec.discovery.maxBytes} bytes, approximately ${request.spec.discovery.maxTokens} tokens. Start with only these explicit files:\n${context.length ? context.map((item) => `- ${item}`).join("\n") : "- Files named by the task and validation commands"}\nStop condition: ${request.spec.discovery.stopCondition}\nDo not enumerate or read the full repository/governance corpus. If context must expand, state the exact file and reason first.`, `Forbidden zones:\n${request.forbiddenZones.map((item) => `- ${item}`).join("\n")}`, `Validation commands:\n${request.validationProfile.commands.map((item) => `- ${item}`).join("\n")}`, `Provider token budget: at most ${request.spec.execution.maxProviderTokens} total and ${request.spec.execution.phaseBudgets[iteration === 0 ? "implementation" : "repair"]} for this phase.`, `Iteration: ${iteration}. ${iteration ? `Repair these failures:\n${validations.filter((item) => item.exitCode !== 0).map((item) => `${item.command}\nstdout: ${item.stdout}\nstderr: ${item.stderr}`).join("\n")}` : "Inspect, plan, implement, and add/update tests as required."}`, `Do not create a Git commit; leave changes uncommitted so RunForge can validate and create the final local commit.`, `Do not push, open a PR, merge, deploy, access secrets/DB/production, or modify forbidden paths. Do not merely propose a patch: edit files and validate. If no change is required, say exactly 'no change required' with evidence. If semantics are ambiguous, stop and say 'ambiguous product decision'.`].join("\n\n"); }
 
 async function buildContextPlan(request: ImplementationExecutorRequest, root: string): Promise<Record<string, unknown>> {
