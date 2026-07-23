@@ -17,7 +17,7 @@ import { acceptCompletedResult, discardCompletedResult } from "./completed-resul
 import { exposeCheckpointRepairDigests, startCheckpointRepair, type CheckpointRepairRequest } from "./checkpoint-repair.js";
 import { buildTimeoutContract } from "./timeout-contract.js"; import { acceptValidationCapabilities } from "./validation-negotiation.js";
 import { openRouterReadiness, providerForExecutor, publicImplementationExecutors } from "./provider-routing-projection.js"; import { providerRoutingPhases, selectProviderModel } from "../product/provider-routing.js"; export { boundPublicResult, projectAgreementLifecycle, redactPublicValue } from "./manager-results.js";
-import { classifyPreProviderFailure, negotiateSemanticReviewer, requestedRuntimeCorrection, requestedSemanticValidationRuntimeCorrection, reviewerUnavailableReason } from "./http-task-preflight.js";
+import { assertFactoryVpsExecutor, classifyPreProviderFailure, negotiateSemanticReviewer, requestedRuntimeCorrection, requestedSemanticValidationRuntimeCorrection, reviewerUnavailableReason } from "./http-task-preflight.js";
 import { negotiateCorrectedRetryValidation } from "./retry-validation-negotiation.js";
 import { WorkspaceSetupError } from "../run/task-run-workspace.js"; import { object, reconstructTerminalReceipt } from "./terminal-receipt.js";
 const executionTimeoutMs = implementationExecutorContract.maxLimits.timeoutMs, heartbeatIntervalMs = 1_000, staleHeartbeatMs = 15_000, cleanupGraceMs = 2_000; type ActiveWorker = { executionId: string; operation: "execution" | "continuation"; cancelled: boolean; controller: AbortController }; type ContinuationBinding = { taskId: string; projectId: string | null; repository: string; workingDirectory: string; sourceBranch: string; sourceSha: string };
@@ -89,7 +89,7 @@ export class ControlPlaneManager {
     const requestedInSpec = object(raw.git).publication; const publicationRequested = input.publicationRequested === "draft-pr" || requestedInSpec === "draft-pr" ? "draft-pr" : "none";
     raw.git = { publication: "none" }; raw.merge = { policy: "never" }; raw.deploy = { policy: "never" }; const artifactRoot = join(this.store.taskDir(taskId), "attempts", "1", "artifacts"); raw.artifacts = { ...object(raw.artifacts), root: artifactRoot, resultFormat: "normalized-v1" };
     let normalized: Awaited<ReturnType<typeof normalizeTaskSpecV2>>; try { normalized = await normalizeTaskSpecV2(raw); } catch (error) { throw new ControlPlaneError(422, "invalid_task_spec", safeMessage(error), { operation: "start_new_task", newTaskRequired: true }); }
-    raw.target = { ...object(raw.target), repository: normalized.target.repository, workingDirectory: normalized.target.workingDirectory, expectedSha: normalized.target.expectedSha };
+    raw.target = { ...object(raw.target), repository: normalized.target.repository, workingDirectory: normalized.target.workingDirectory, expectedSha: normalized.target.expectedSha }; await assertFactoryVpsExecutor(normalized, taskId);
     const implementation = ["implementation", "repair"].includes(normalized.execution.mode);
     const automaticContext = project ? await buildExecutionAgreementContext({ project, publicationTarget: { kind: "none" } }) : undefined;
     const preflightAgreement = negotiateTaskAgreement(normalized, input.authority, automaticContext);

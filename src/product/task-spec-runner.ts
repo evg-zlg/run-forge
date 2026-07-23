@@ -12,6 +12,7 @@ import {
 } from "./task-result-contract.js";
 import { inspectProject, type ProjectInspection } from "./project-inspection.js";
 import { runImplementationExecutor, type ImplementationExecutorResult } from "../implementation/executor.js";
+import { runFactoryVpsImplementationExecutor } from "../implementation/factory-vps-executor.js";
 import { runValidationOnlyExecutor, type ValidationOnlyExecutorResult } from "../validation/validation-only-executor.js";
 import { withDockerValidationTempVolume } from "../run/docker-validation-temp-volume.js";
 import { completeExecutionPhase, EXECUTION_PHASE_IDS, negotiateExecutionAgreement, type ExecutionAgreement } from "./execution-agreement.js";
@@ -42,13 +43,14 @@ export async function runTaskSpecFile(path: string, context: TaskSpecRunContext 
     return { kind: "implementation", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: true };
   }
   if (["implementation", "repair"].includes(spec.execution.mode) && spec.repair.mode === "none") {
-    const result = await preserveSpecOnFailure(spec, initialTarget, () => runImplementationExecutor({
+    const executorRequest = {
       spec, targetRepository: spec.target.repository, workingDirectory: spec.target.workingDirectory,
       projectProfile: { runtime: spec.runtime.preference }, acceptanceCriteria: spec.task.acceptanceCriteria,
       authorityEnvelope: spec.authority, forbiddenZones: spec.authority.forbiddenAreas,
       runtimePolicy: spec.runtime, validationProfile: spec.validation, artifactRoot: spec.artifacts.root,
       attempt: context.attempt ?? 1, generation: context.executionId ?? "standalone", executionAgreementId: context.executionAgreementId ?? `task-spec:${spec.executionAgreement.profile}`, signal: context.signal, checkpointRepair: context.checkpointRepair, logCompressionInvoker: context.logCompressionInvoker, onProgress: context.onProgress
-    }));
+    };
+    const result = await preserveSpecOnFailure(spec, initialTarget, () => spec.execution.executor === "runforge-factory-vps" ? runFactoryVpsImplementationExecutor(executorRequest) : runImplementationExecutor(executorRequest));
     clearRepairedFindings(result);
     const status = await finalizeImplementationArtifacts(spec, result, context.executionId !== undefined);
     return { kind: "implementation", spec, result, summary: `TaskSpec ${spec.taskId}: ${status}\nSummary: ${join(spec.artifacts.root, "summary.md")}\nResults: ${join(spec.artifacts.root, "results.json")}`, success: ["implemented_and_validated", "no_change_required"].includes(result.status) };

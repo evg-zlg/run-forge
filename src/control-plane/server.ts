@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { redactJson } from "../admin/redaction.js";
 import { getRunForgeVersionInfo } from "../core/version.js";
+import { discoverFactoryVpsCapability } from "../implementation/factory-vps-contract.js";
 import { implementationExecutorContract, multiLaneTaskSpecExample, publicTaskSpecContract, taskRuntimeIds, taskSpecSchemaPath, taskSpecV2Schema } from "../product/task-spec-contract.js";
 import { commandVersion } from "../product/project-inspection.js";
 import { ControlPlaneError, controlPlaneApiVersion, defaultControlPlaneHost, defaultControlPlanePort, defaultMaxRequestBytes, parseAcceptCompletedRequest, parseCampaignRequest, parseCheckpointRepairRequest, parseCheckpointResumeRequest, parseDecisionRequest, parseDiscardResultRequest, parseProjectRequest, parseTaskRequest } from "./contracts.js";
@@ -44,7 +45,10 @@ export async function handleControlPlaneRequest(request: IncomingMessage, respon
   const url = new URL(rawUrl, `http://${context.host}`); const path = url.pathname; const method = request.method ?? "GET";
   if (method === "OPTIONS") { response.writeHead(204, corsHeaders(context.host)); response.end(); return; }
   if (method === "GET" && path === "/healthz") return sendJson(response, 200, await context.manager.health());
-  if (method === "GET" && path === "/readyz") return sendJson(response, 200, await context.manager.health());
+  if (method === "GET" && path === "/readyz") {
+    const [health, factoryVps] = await Promise.all([context.manager.health(), discoverFactoryVpsCapability()]);
+    return sendJson(response, 200, { ...health, remoteExecutors: [{ id: factoryVps.executorId, health: factoryVps.health, protocolVersion: factoryVps.protocolVersion, credentialReady: factoryVps.providers.map((provider) => ({ provider: provider.id, ready: provider.credentialReady })), reason: factoryVps.reason }] });
+  }
   if (method === "GET" && path === "/.well-known/runforge") return sendJson(response, 200, await discoveryManifest(request, context.host));
   if (method === "GET" && path === "/v1/capabilities") return sendJson(response, 200, await capabilities(context.manager.store.root));
   if (method === "GET" && path === "/v1/capabilities/discovery") return sendJson(response, 200, await validationCapabilityDiscovery());
@@ -92,11 +96,11 @@ export function isLoopbackHost(host: string): boolean { return host === "127.0.0
 
 async function discoveryManifest(request: IncomingMessage, host: string): Promise<Record<string, unknown>> {
   const version = getRunForgeVersionInfo();
-  const [implementationExecutors, dockerVersion] = await Promise.all([discoverImplementationExecutors(), commandVersion("docker", ["--version"])]);
+  const [implementationExecutors, dockerVersion, factoryVps] = await Promise.all([discoverImplementationExecutors(), commandVersion("docker", ["--version"]), discoverFactoryVpsCapability()]);
   const authority = request.headers.host && isLocalHostHeader(request.headers.host) ? request.headers.host : `${host}:${defaultControlPlanePort}`;
   return {
     product: "RunForge", discoveryVersion: 5, apiVersion: controlPlaneApiVersion, version, localOnly: true, baseUrl: `http://${authority}`,
-    implementationExecutors: publicImplementationExecutors(implementationExecutors), providerRouting: publicProviderRouting(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
+    implementationExecutors: publicImplementationExecutors(implementationExecutors), remoteExecutors: [factoryVps], providerRouting: publicProviderRouting(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
     executionAgreements: dynamicAgreementCapabilities(implementationExecutors, dockerVersion),
     validation: await validationCapabilityDiscovery(),
     checkpointRepair: { endpoint: "/v1/tasks/{id}/checkpoint-repairs", choices: ["grant_additional_budget", "retry_from_checkpoint"], requiresCheckpointDigest: true, digestDiscovery: "GET /v1/tasks/{id}/result -> artifact.checkpoints[].digest", legacySchemaV1: "verified-on-read", immutableLegacyArtifactsRewritten: false, newExecutionGeneration: true, patchFallbackPreserved: true },
@@ -108,13 +112,13 @@ async function discoveryManifest(request: IncomingMessage, host: string): Promis
   };
 }
 async function capabilities(_stateRoot: string): Promise<Record<string, unknown>> {
-  const [implementationExecutors, dockerVersion] = await Promise.all([discoverImplementationExecutors(), commandVersion("docker", ["--version"])]);
+  const [implementationExecutors, dockerVersion, factoryVps] = await Promise.all([discoverImplementationExecutors(), commandVersion("docker", ["--version"]), discoverFactoryVpsCapability()]);
   const implementationReady = implementationExecutors.some((item) => item.status === "ready");
   return {
     schemaVersion: 5, apiVersion: controlPlaneApiVersion, transports: ["localhost-http"], projectLocators: ["absolute-path", "registration-id"], taskModes: ["inspection", "implementation", "validation", "repair"],
     checkpointRepair: { endpoint: "/v1/tasks/{id}/checkpoint-repairs", choices: ["grant_additional_budget", "retry_from_checkpoint"], requiresCheckpointDigest: true, digestDiscovery: "GET /v1/tasks/{id}/result -> artifact.checkpoints[].digest", legacySchemaV1: "verified-on-read", immutableLegacyArtifactsRewritten: false, newExecutionGeneration: true, patchFallbackPreserved: true },
     checkpointResume: { endpoint: "/v1/tasks/{id}/checkpoints/{checkpointId}/resume", checkpointSchemaVersion: 2, lifecycle: ["candidate_validation_required", "validated", "rejected"], reconstructionModes: ["git_worktree_base_plus_binary_patch"], providerCalls: 0, durableGenerationLease: true, idempotentReplay: true, compatibilityErrors: ["checkpoint_incompatible", "checkpoint_integrity_error", "wrong_identity", "conflict"], dependencyStrategies: ["verified_read_only_cache", "candidate_local_offline_install", "no_dependencies"], preparationClassifications: ["created", "reused", "repaired", "conflict_external", "unsafe", "cleanup_failed"] },
-    implementationExecutors: publicImplementationExecutors(implementationExecutors), providerRouting: publicProviderRouting(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
+    implementationExecutors: publicImplementationExecutors(implementationExecutors), remoteExecutors: [factoryVps], providerRouting: publicProviderRouting(implementationExecutors), taskSpecContract: publicTaskSpecContract(),
     executionAgreements: dynamicAgreementCapabilities(implementationExecutors, dockerVersion),
     validation: await validationCapabilityDiscovery(),
     execution: { engine: "TaskSpec v2", phases: ["planner", "implementer", "repair", "reviewer"], timeout: { globalCapMs: implementationExecutorContract.maxLimits.timeoutMs, capSource: "implementationExecutorContract.maxLimits.timeoutMs", requestedAndEffectivePublishedAtAcceptance: true, watchdogPolicy: "deadline and stale heartbeat" }, durableCheckpoints: true, acceptCompletedResult: true, runtimes: taskRuntimeIds, runtimeSupport: { "local-disposable": { available: implementationReady, implementation: implementationReady, reason: implementationReady ? "The implementation executor is ready for local disposable workspaces." : "No ready implementation executor is available." }, docker: { available: dockerVersion !== null, implementation: false, version: dockerVersion, reason: dockerVersion === null ? "Docker CLI is unavailable." : "Docker CLI is present for supported non-implementation lanes; the implementation executor does not support Docker." } }, dependencyPreparation: ["required", "if-needed", "disabled", "reuse-existing"], persistentState: true, restartRecovery: true, heartbeat: true, watchdog: true, cancellation: true, executionGenerations: true, boundedCleanup: true, interruptedResult: true, journalSchemaVersion: 1, continuationSchemaVersion: 1 },
