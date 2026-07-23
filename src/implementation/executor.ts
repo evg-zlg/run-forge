@@ -11,6 +11,7 @@ import { persistDurableCheckpoint } from "./durable-checkpoint.js";
 import { executionPhaseOwner } from "../product/execution-agreement.js";
 import type { ProviderCapabilities, ExecutionEnvelope, ProgressSignals } from "./execution-guardrails.js";
 import { configuredProviderCapabilities, assertMandatoryProviderCaps, deriveExecutionEnvelope, optionalPositive, numeric, totalProviderTokens, exactFileLineDiagnosis, pathsFromChanges, commandInspectedPaths, usageFromEvent, extractTokenUsage, extractSummary } from "./execution-guardrails.js";
+import { localRefExists, localBranchName, addedPatchLines } from "./workspace-helpers.js";
 
 const execFileAsync = promisify(execFile);
 const credentialCache = new Map<string, { at: number; ready: boolean }>();
@@ -263,30 +264,6 @@ async function executableAvailable(command: string): Promise<boolean> { if (comm
 async function codexCredentialReady(argv: string[]): Promise<boolean> { const key = argv.join("\0"), cached = credentialCache.get(key); if (cached && Date.now() - cached.at < 30_000) return cached.ready; const ready = await execFileAsync(argv[0]!, [...argv.slice(1), "login", "status"], { env: safeRuntimeEnv(), timeout: 10_000 }).then(() => true, () => false); credentialCache.set(key, { at: Date.now(), ready }); return ready; }
 function splitCommand(value: string): string[] { return value.match(/(?:[^\s"']+|"[^"]*"|'[^']*')+/g)?.map((part) => part.replace(/^(?:"([\s\S]*)"|'([\s\S]*)')$/, "$1$2")) ?? []; }
 async function git(cwd: string, args: string[]): Promise<string> { return (await execFileAsync("git", args, { cwd, maxBuffer: 10 * 1024 * 1024 })).stdout; }
-async function localRefExists(repository: string, branch: string): Promise<boolean> {
-  return execFileAsync("git", ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`], { cwd: repository })
-    .then(() => true, (error: unknown) => {
-      if (typeof error === "object" && error !== null && "code" in error && error.code === 1) return false;
-      throw error;
-    });
-}
-function localBranchName(taskId: string, generation: string, attempt: number): string {
-  const task = refSlug(taskId, "task");
-  const execution = refSlug(generation, "standalone");
-  const retry = Number.isSafeInteger(attempt) && attempt > 0 ? attempt : 1;
-  return `runforge/${task}/${execution}-attempt-${retry}`;
-}
-function refSlug(value: string, fallback: string): string { return value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || fallback; }
-function addedPatchLines(patch: string): string {
-  const added: string[] = [];
-  let inHunk = false;
-  for (const line of patch.split(/\r?\n/)) {
-    if (line.startsWith("@@ ")) { inHunk = true; continue; }
-    if (line.startsWith("diff --git ") || line.startsWith("GIT binary patch") || line.startsWith("Binary files ")) { inHunk = false; continue; }
-    if (inHunk && line.startsWith("+")) added.push(line.slice(1));
-  }
-  return added.join("\n");
-}
 function lines(text: string): string[] { return text.split(/\r?\n/).map((item) => item.trim()).filter(Boolean); }
 function isInside(root: string, path: string): boolean { const rel = relative(root, path); return rel === "" || (!rel.startsWith("..") && !rel.startsWith("/")); }
 async function progress(request: ImplementationExecutorRequest, phase: string, detail: string): Promise<void> { await request.onProgress?.(phase, detail); }
