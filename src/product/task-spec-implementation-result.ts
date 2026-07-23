@@ -17,6 +17,7 @@ import {
   type ResultNextAction,
   type RunForgeCompletionStatus,
 } from "./task-result-contract.js";
+import { implementationReceipt } from "./implementation-receipt.js";
 import type { TaskSpecV2 } from "./task-spec-v2.js";
 
 const IMPLEMENTATION_PHASES = new Set<ExecutionPhaseId>([
@@ -104,7 +105,6 @@ export async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: 
   const settlement = legacySettlement
     ? { schemaVersion: 1 as const, contract: "runforge-task-result" as const, taskId: spec.taskId, status: legacyStatus, workflow: agreementAware }
     : agreementAware;
-  const receipt = implementationReceipt(spec, result);
   const document = {
     ...settlement,
     requestedIntent: spec.execution.mode, actualExecutorMode: "implementation", selectedExecutor: result.selectedExecutor,
@@ -118,6 +118,7 @@ export async function finalizeImplementationArtifacts(spec: TaskSpecV2, result: 
     git: { branch: result.localBranch, commit: result.localCommit, patchPackage: result.patchPackage, pullRequest: null, merge: null },
     publication: { status: "on_hold", ownerGate: { required: false, status: "not_requested" }, performed: false },
     providerCalls: result.providerCalls,
+    receipt: implementationReceipt(spec, result),
     usage: phaseUsage(spec, result),
     ownerGate: { required: ownerRequired, status: ownerRequired ? "awaiting_owner_decision" : "not_required", subject: completed ? "Completed implementation checkpoint is available; only continuation/publication is blocked." : "Implementation needs an owner decision.", completed: { implementation: completed, validation: validationCompleted, artifacts: result.checkpoints.map((item) => item.id) }, blocked: result.budget.exceeded ? ["future_provider_calls", "repair_iterations", "publication", "workflow_completion"] : ["workflow_continuation"], options: [
       { id: "accept_completed_patch", endpoint: `/v1/tasks/${spec.taskId}/accept-completed-result`, providerRun: false, grantsAuthority: false }, { id: "grant_additional_budget", endpoint: `/v1/tasks/${spec.taskId}/checkpoint-repairs`, providerRun: true, grantsAuthority: false, requires: ["taskId", "decisionId", "checkpointId", "checkpointDigest", "additionalProviderTokens"] }, { id: "stop_with_handoff", providerRun: false, grantsAuthority: false }, { id: "discard_result", endpoint: `/v1/tasks/${spec.taskId}/discard-result`, providerRun: false, grantsAuthority: false, explicitConfirmationRequired: true }, { id: "retry_from_checkpoint", endpoint: `/v1/tasks/${spec.taskId}/checkpoint-repairs`, providerRun: true, grantsAuthority: false, requires: ["taskId", "decisionId", "checkpointId", "checkpointDigest", "repairIntent"] }

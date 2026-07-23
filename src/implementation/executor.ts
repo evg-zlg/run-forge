@@ -33,7 +33,6 @@ export type ExecutorStatus = "ready" | "degraded" | "unavailable"; export type I
   maxLimits: Readonly<Record<keyof typeof implementationExecutorContract.maxLimits, number>>;
   limitations: string[]; command: string | null; model: string | null;
 };
-export type { CommandDiagnostic } from "./validation-command-runner.js";
 export type ImplementationExecutorRequest = {
   spec: TaskSpecV2; targetRepository: string; workingDirectory: string; projectProfile: Record<string, unknown>;
   acceptanceCriteria: string[]; authorityEnvelope: TaskSpecV2["authority"]; forbiddenZones: string[];
